@@ -30,6 +30,12 @@ export type AgentDef = {
 		glob?: string;
 		statusField?: string;
 		readyValue?: string;
+		requiredLabels?: string[];
+		maxItems?: number;
+		maxAttempts?: number;
+		maxSize?: number;
+		maxAgeMs?: number;
+		checkout?: string;
 	}>;
 	id?: string;
 	profile: string;

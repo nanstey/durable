@@ -233,7 +233,7 @@ for (const storage of ["sqlite", "jsonl"] as const)
 				(await harness.root.agent(harness.context)).tools
 					.map((t) => t.name)
 					.sort(),
-				["list_queue", "pause", "status"],
+				["explain_item", "list_queue", "pause", "status"],
 			);
 		} finally {
 			await harness.close();

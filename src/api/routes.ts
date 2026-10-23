@@ -85,6 +85,7 @@ export function createApi(opts: {
 		c.json({ nodes: await harness.tree() }),
 	);
 	app.get("/v1/budget", async (c) => c.json((await harness.snapshot()).budget));
+	app.get("/v1/queue", async (c) => c.json({ items: await harness.queue() }));
 	app.get("/v1/inbox", async (c) => c.json((await harness.snapshot()).inbox));
 	app.post("/v1/inbox/:id/ack", async (c) => {
 		if (!(await harness.ack(c.req.param("id"))))
@@ -129,6 +130,7 @@ export function createApi(opts: {
 			heartbeat: state.heartbeat,
 			budget: state.budget,
 			inbox: state.inbox,
+			queue: await harness.queue(),
 			...(id ? { entries: await harness.transcript(id) } : {}),
 		};
 	}
