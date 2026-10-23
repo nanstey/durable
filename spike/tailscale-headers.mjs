@@ -5,7 +5,7 @@
 //   node tailscale-headers.mjs <bindAddr> <port>     e.g. the node's 100.x address, or 127.0.0.1
 import http from "node:http";
 const [addr, port] = process.argv.slice(2);
-const SHOW_VALUE = new Set(["accept", "accept-encoding", "connection", "content-length", "content-type", "x-forwarded-proto", "via"]);
+const SHOW_VALUE = new Set(["accept", "accept-encoding", "connection", "content-length", "content-type", "x-forwarded-proto"]);
 const addrClass = (a = "") => {
   const v4 = a.replace(/^::ffff:/, "");
   if (v4 === "127.0.0.1" || v4 === "::1") return "<loopback>";
