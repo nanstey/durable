@@ -113,13 +113,26 @@ export function createApi(opts: {
 	});
 	app.post("/v1/conversations", async (c) => {
 		let body: { kind?: unknown; item?: unknown; name?: unknown };
-		try { body = await c.req.json(); } catch { throw new ApiError("invalid", "JSON object required"); }
-		if (typeof body.kind !== "string" || !isStartableConversationKind(body.kind, opts.definition.chat?.startableKinds))
+		try {
+			body = await c.req.json();
+		} catch {
+			throw new ApiError("invalid", "JSON object required");
+		}
+		if (
+			typeof body.kind !== "string" ||
+			!isStartableConversationKind(
+				body.kind,
+				opts.definition.chat?.startableKinds,
+			)
+		)
 			throw new ApiError("invalid", "conversation kind is not startable");
-		if (body.item !== undefined && typeof body.item !== "string") throw new ApiError("invalid", "item must be a string");
-		if (body.name !== undefined && typeof body.name !== "string") throw new ApiError("invalid", "name must be a string");
+		if (body.item !== undefined && typeof body.item !== "string")
+			throw new ApiError("invalid", "item must be a string");
+		if (body.name !== undefined && typeof body.name !== "string")
+			throw new ApiError("invalid", "name must be a string");
 		const idempotency = c.req.header("idempotency-key");
-		if (!idempotency || idempotency.length > 200) throw new ApiError("invalid", "Idempotency-Key required");
+		if (!idempotency || idempotency.length > 200)
+			throw new ApiError("invalid", "Idempotency-Key required");
 		const kind = body.kind as "chat" | "scout";
 		const item = body.item as string | undefined;
 		if (kind === "scout" && !item)
@@ -210,7 +223,12 @@ export function createApi(opts: {
 	}
 	async function mainId() {
 		const steward = (await tree()).find((node) => node.kind === "steward");
-		if (!steward) throw new ApiError("unavailable", "steward conversation unavailable", 503);
+		if (!steward)
+			throw new ApiError(
+				"unavailable",
+				"steward conversation unavailable",
+				503,
+			);
 		return steward.id;
 	}
 	async function snapshot(id: string | undefined, hash: string) {
