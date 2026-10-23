@@ -6,6 +6,10 @@ set -u
 : "${REPO:?}" "${PR:?}"
 st() { echo "== $1"; shift; out=$("$@" 2>&1); rc=$?; echo "${out:0:1200}"; echo "   exit=$rc"; }
 gh auth status 2>&1 | grep -E "Token:|scopes" | sed -E 's/(gh[opsu]_|github_pat_)[A-Za-z0-9_*]+/\1<redacted>/'
+# Identity probe: login is redacted; token type is shown by prefix only; X-OAuth-Scopes is empty for fine-grained PATs.
+st "gh api user" sh -c 'gh api user --jq "{login: (.login|length|tostring|\"<redacted len=\"+.+\">\"), type}"'
+st "token scopes header" sh -c 'gh api -i user 2>/dev/null | grep -iE "^x-oauth-scopes:|^github-authentication-token-expiration:" || echo "(no scopes header)"'
+st "token type prefix" sh -c 'gh auth token 2>/dev/null | cut -c1-4 | sed -E "s/^(gh[opsu]_|gith).*/\1/"'
 HEAD=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
 BASE=$(gh api "repos/$REPO" --jq .default_branch)
 st "pr view" gh pr view "$PR" -R "$REPO" --json mergeStateStatus,reviewDecision,statusCheckRollup,files

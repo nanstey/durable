@@ -5,6 +5,7 @@
 //   node auth-symlink.ts setup <root>
 //   node auth-symlink.ts bump <authPath> <n>     # n serialized modify() increments of a counter
 //   node auth-symlink.ts report <root>
+// Concurrency driver with the exact commands used for the evidence: auth-symlink-concurrency.sh
 import { mkdirSync, writeFileSync, symlinkSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
