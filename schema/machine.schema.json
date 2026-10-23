@@ -112,7 +112,10 @@
       "type": "object",
       "properties": {
         "bind": {
-          "const": "loopback"
+          "enum": [
+            "loopback",
+            "tailnet"
+          ]
         },
         "peerCheck": {
           "enum": [

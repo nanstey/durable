@@ -27,6 +27,21 @@ test("console guard adds CSP and refuses cross-origin writes", async () => {
 	assert.equal(denied.status, 403);
 });
 
+test("Serve writes require the allowed Tailscale identity", async () => {
+	const { app } = createConsoleApp({ devices: [], csrf: "csrf" });
+	const denied = await app.request("http://127.0.0.1:4319/api/push/test", {
+		method: "POST",
+		headers: {
+			host: "not-a-proxy",
+			origin: "http://not-a-proxy",
+			"content-type": "application/json",
+			"x-durable-csrf": "csrf",
+		},
+		body: "{}",
+	});
+	assert.equal(denied.status, 421);
+});
+
 test("proxy allowlist excludes files, shells and arbitrary paths", () => {
 	assert.equal(allowedDaemonRoute("GET", "/v1/conversations"), true);
 	assert.equal(

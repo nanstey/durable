@@ -227,7 +227,7 @@ export async function run(
 		const viewerPath = viewerRepo
 			? checkoutFor(machine, viewerRepo)
 			: undefined;
-		const server = startApi({
+		const server = await startApi({
 			agent,
 			machine: machine.name,
 			profile: definition.profile,
@@ -243,6 +243,9 @@ export async function run(
 			nonces: new ApprovalNonces(agent),
 			deliverNonce: (item, code) => notifier.approvalNonce(item, code),
 			bind: definition.network?.bind ?? machine.network?.bind,
+			tailnetAddress: machine.network?.tailnetAddress,
+			peerCheckMode: machine.network?.peerCheck,
+			allowedPeers: machine.network?.allowedPeers,
 		});
 		let closing = false;
 		const onSignal = () => {
@@ -271,7 +274,14 @@ export async function run(
 		process.once("SIGINT", onSignal);
 		harness.start();
 		audit(agent, { event: "start", profile: definition.profile });
-		logger.info({ agent, port }, "steward listening on loopback");
+		logger.info(
+			{
+				agent,
+				port,
+				bind: definition.network?.bind ?? machine.network?.bind ?? "loopback",
+			},
+			"steward listening",
+		);
 		void harness.native.closed.then((end) => {
 			if (!closing && end.reason === "failed") {
 				logger.error({ agent }, "harness failed; restart required");

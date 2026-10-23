@@ -10,7 +10,11 @@ import { DurableClient } from "../client/client.ts";
 import { loadAgent, loadMachine } from "../config/load.ts";
 import { durableHome } from "../config/paths.ts";
 import { startConsole } from "../console/main.ts";
-import { ensureConsoleConfig } from "../console/registry.ts";
+import {
+	addDevice,
+	ensureConsoleConfig,
+	loadDevices,
+} from "../console/registry.ts";
 import { ConsoleServiceManager } from "../platform/service/console.ts";
 import { selectServiceManager } from "../platform/service/select.ts";
 import { resumeLocal } from "../steward/killswitch.ts";
@@ -483,9 +487,14 @@ subCommands.doctor = defineCommand({
 	args: {
 		id: { type: "positional", required: true },
 		json: { type: "boolean" },
+		acl: { type: "boolean", default: false },
 	},
 	async run({ args }) {
 		const report = doctorCommand(args.id);
+		if (args.acl)
+			console.log(
+				'ACL suggestion (apply in your tailnet policy; Durable never edits it):\n{ "tagOwners": { "tag:durable-daemon": ["autogroup:admin"], "tag:durable-console": ["autogroup:admin"] }, "acls": [{ "action": "accept", "src": ["tag:durable-console"], "dst": ["tag:durable-daemon:7330-7399"] }, { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:durable-console:443"] }] }',
+			);
 		try {
 			const { workers } = await clientFor(args.id).request<{
 				workers: Array<{ id: string; suspectedHumanSession?: boolean }>;
@@ -554,6 +563,73 @@ subCommands.console = defineCommand({
 			meta: { name: "status" },
 			async run() {
 				console.log(await new ConsoleServiceManager().status());
+			},
+		}),
+		"add-device": defineCommand({
+			meta: { name: "add-device" },
+			args: {
+				machine: { type: "string", required: true },
+				agent: { type: "string", required: true },
+				url: { type: "string", required: true },
+			},
+			async run({ args }) {
+				const token = (
+					await new Promise<string>((resolve) => {
+						let input = "";
+						process.stdin.setEncoding("utf8");
+						process.stdin.on("data", (chunk) => (input += chunk));
+						process.stdin.on("end", () => resolve(input.trim()));
+					})
+				).trim();
+				if (!token) throw Error("read the daemon token from stdin");
+				const url = new URL(args.url);
+				if (
+					!["http:", "https:"].includes(url.protocol) ||
+					url.username ||
+					url.password
+				)
+					throw Error(
+						"url must be an http or https tailnet URL without credentials",
+					);
+				const response = await fetch(new URL("/v1/device", url), {
+					headers: { authorization: `Bearer ${token}` },
+					signal: AbortSignal.timeout(15000),
+				});
+				if (!response.ok)
+					throw Error("daemon did not accept the supplied token");
+				const device = (await response.json()) as { uid?: string };
+				if (!device.uid) throw Error("daemon did not report a device uid");
+				addDevice({
+					id: `${args.machine}-${args.agent}`,
+					url: args.url.replace(/\/$/, ""),
+					token,
+					uid: device.uid,
+					agents: [args.agent],
+				});
+				console.log("device added");
+			},
+		}),
+		devices: defineCommand({
+			meta: { name: "devices" },
+			run() {
+				console.log(
+					JSON.stringify(
+						loadDevices().map(({ token: _token, ...device }) => device),
+						null,
+						2,
+					),
+				);
+			},
+		}),
+		serve: defineCommand({
+			meta: { name: "serve" },
+			args: { funnel: { type: "boolean", default: false } },
+			run({ args }) {
+				if (args.funnel) throw Error("Funnel is never supported");
+				const config = ensureConsoleConfig();
+				console.log(
+					`tailscale serve --bg https / http://127.0.0.1:${config.port}`,
+				);
 			},
 		}),
 	},

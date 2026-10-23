@@ -16,9 +16,12 @@ export type ConsoleDevice = {
 	uid?: string;
 	agents?: string[];
 };
+type StoredDevice = Omit<ConsoleDevice, "token">;
 type ConsoleConfig = {
 	version: 1;
 	port: number;
+	allowedUsers: string[];
+	serveHostname?: string;
 	push: { enabled: false; subject: string };
 };
 
@@ -26,6 +29,7 @@ export const consoleDir = () =>
 	process.env.DURABLE_CONSOLE_DIR ||
 	join(homedir(), ".config", "durable", "console");
 export const devicesPath = () => join(consoleDir(), "devices.yaml");
+const deviceTokenPath = (id: string) => join(consoleDir(), "tokens", id);
 export const consoleConfigPath = () => join(consoleDir(), "console.yaml");
 export const vapidPath = () => join(consoleDir(), "vapid.json");
 export const subscriptionsPath = () =>
@@ -36,15 +40,32 @@ function privateWrite(path: string, value: string) {
 	writeFileSync(path, value, { mode: 0o600 });
 	chmodSync(path, 0o600);
 }
-
+function validId(id: unknown): id is string {
+	return typeof id === "string" && /^[A-Za-z0-9._-]+$/.test(id);
+}
+function validUrl(url: unknown): url is string {
+	if (typeof url !== "string") return false;
+	try {
+		const parsed = new URL(url);
+		return (
+			["http:", "https:"].includes(parsed.protocol) &&
+			!parsed.username &&
+			!parsed.password &&
+			!parsed.search &&
+			!parsed.hash
+		);
+	} catch {
+		return false;
+	}
+}
 function defaultConsoleConfig(): ConsoleConfig {
 	return {
 		version: 1,
 		port: 4319,
+		allowedUsers: [],
 		push: { enabled: false, subject: "mailto:operator@example.invalid" },
 	};
 }
-
 export function loadConsoleConfig(path = consoleConfigPath()): ConsoleConfig {
 	if (!existsSync(path)) return defaultConsoleConfig();
 	const value = parse(readFileSync(path, "utf8")) as Partial<ConsoleConfig>;
@@ -54,17 +75,19 @@ export function loadConsoleConfig(path = consoleConfigPath()): ConsoleConfig {
 		(value.port ?? 0) < 1 ||
 		(value.port ?? 0) > 65535 ||
 		value.push?.enabled !== false ||
-		typeof value.push.subject !== "string"
+		typeof value.push.subject !== "string" ||
+		!Array.isArray(value.allowedUsers) ||
+		!value.allowedUsers.every((x) => typeof x === "string") ||
+		(value.serveHostname !== undefined &&
+			typeof value.serveHostname !== "string")
 	)
 		throw Error("invalid console.yaml");
 	return value as ConsoleConfig;
 }
-
 export function ensureConsoleConfig(path = consoleConfigPath()) {
 	if (!existsSync(path)) privateWrite(path, stringify(defaultConsoleConfig()));
 	return loadConsoleConfig(path);
 }
-
 export function loadDevices(path = devicesPath()): ConsoleDevice[] {
 	if (!existsSync(path)) return [];
 	const value = parse(readFileSync(path, "utf8")) as {
@@ -74,28 +97,43 @@ export function loadDevices(path = devicesPath()): ConsoleDevice[] {
 	if (value?.version !== 1 || !Array.isArray(value.devices))
 		throw Error("invalid devices.yaml");
 	return value.devices.map((device) => {
-		const entry = device as Partial<ConsoleDevice>;
+		const entry = device as Partial<StoredDevice>;
 		if (
-			!/^[A-Za-z0-9._-]+$/.test(entry.id ?? "") ||
-			typeof entry.url !== "string" ||
-			!/^http:\/\/127\.0\.0\.1(?::\d+)?$/.test(entry.url) ||
-			typeof entry.token !== "string"
+			!validId(entry.id) ||
+			!validUrl(entry.url) ||
+			(entry.uid !== undefined && typeof entry.uid !== "string") ||
+			(entry.agents !== undefined &&
+				(!Array.isArray(entry.agents) || !entry.agents.every(validId)))
 		)
 			throw Error("invalid console device");
+		const tokenPath = deviceTokenPath(entry.id);
+		if (!existsSync(tokenPath))
+			throw Error(`missing token for console device ${entry.id}`);
+		chmodSync(tokenPath, 0o600);
 		return {
-			id: entry.id as string,
+			...entry,
+			id: entry.id,
 			url: entry.url,
-			token: entry.token,
-			uid: entry.uid,
-			agents: entry.agents,
+			token: readFileSync(tokenPath, "utf8").trim(),
 		};
 	});
 }
-
 export function saveDevices(devices: ConsoleDevice[], path = devicesPath()) {
-	privateWrite(path, stringify({ version: 1, devices }));
+	const stored: StoredDevice[] = [];
+	for (const { token, ...device } of devices) {
+		if (!validId(device.id) || !validUrl(device.url) || !token)
+			throw Error("invalid console device");
+		privateWrite(deviceTokenPath(device.id), `${token}\n`);
+		stored.push(device);
+	}
+	privateWrite(path, stringify({ version: 1, devices: stored }));
 }
-
+export function addDevice(device: ConsoleDevice) {
+	const devices = loadDevices();
+	if (devices.some((entry) => entry.id === device.id))
+		throw Error("console device already exists");
+	saveDevices([...devices, device]);
+}
 export function initializePushStores() {
 	if (!existsSync(vapidPath()))
 		privateWrite(vapidPath(), `${JSON.stringify({ version: 1 })}\n`);

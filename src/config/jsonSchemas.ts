@@ -86,7 +86,7 @@ export const agentSchema = object(
 	{
 		version: { const: 1 },
 		description: text,
-		network: object({ bind: { const: "loopback" } }),
+		network: object({ bind: { enum: ["loopback", "tailnet"] } }),
 		schedule: object({
 			pollSeconds: positive,
 			leaseSeconds: positive,
@@ -235,7 +235,7 @@ export const machineSchema = object(
 			allowAutoMerge: { type: "boolean" },
 		}),
 		network: object({
-			bind: { const: "loopback" },
+			bind: { enum: ["loopback", "tailnet"] },
 			peerCheck: { enum: ["required", "optional", "off"] },
 			tailnetAddress: text,
 			allowedPeers: strings,

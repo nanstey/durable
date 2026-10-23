@@ -20,6 +20,7 @@ import { type GithubRunner, githubLogin } from "./github.ts";
 import { checkRoleSkills, effectiveKind } from "./skills.ts";
 import { tokenWarnings } from "./token.ts";
 import { pipelineDoctorErrors, pipelineFor } from "../pipeline/select.ts";
+import { listTokens } from "../api/tokens.ts";
 import { sourceFor } from "../gate/policySource.ts";
 
 export { effectiveKind } from "./skills.ts";
@@ -298,17 +299,32 @@ export function doctor(
 		detail: caps.tailscaleCli ? "available" : "unavailable (optional)",
 		fix: "install tailscale or declare optional peer checking",
 	});
-	if (
-		machine.network?.peerCheck ||
-		machine.network?.tailnetAddress ||
-		machine.approval
-	)
+	if (machine.network?.bind === "tailnet") {
 		checks.push({
-			name: "future configuration",
-			ok: false,
-			detail: "peer checking/approval: not-yet-supported",
-			fix: "remove these blocks until slices 11/12",
+			name: "tailnet allowlist",
+			ok: (machine.network.allowedPeers?.length ?? 0) > 0,
+			detail: machine.network.allowedPeers?.length ? "configured" : "missing",
+			fix: "set network.allowedPeers to the console tag or operator identity",
 		});
+		checks.push({
+			name: "tailnet listener",
+			ok: caps.tailscaleCli || Boolean(machine.network.tailnetAddress),
+			detail: machine.network.tailnetAddress
+				? "explicit address"
+				: caps.tailscaleCli
+					? "tailscale address discovery available"
+					: "unavailable",
+			fix: "install tailscale or set network.tailnetAddress",
+		});
+	}
+	for (const token of listTokens(id))
+		if (token.expiresAt - Date.now() <= 14 * 86400000)
+			checks.push({
+				name: `token ${token.client}`,
+				ok: true,
+				warning: true,
+				detail: "expires within 14 days; rotate console clients",
+			});
 	const ports = machine.agents.map((agent, index) =>
 		typeof agent === "object" && agent.port
 			? agent.port
