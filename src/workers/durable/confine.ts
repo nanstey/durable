@@ -1,7 +1,19 @@
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-/** File-tool containment is enforced; bash remains an advisory guardrail. */
+function assertInside(root: string, path: string): void {
+	const fromRoot = relative(root, path);
+	if (
+		fromRoot === ".." ||
+		fromRoot.startsWith(`..${sep}`) ||
+		isAbsolute(fromRoot)
+	)
+		throw Error("file path escapes the worktree");
+	if (fromRoot === ".git" || fromRoot.startsWith(`.git${sep}`))
+		throw Error("file path enters .git");
+}
+
+/** File-tool realpath checks are enforced; bash remains an advisory guardrail. */
 export async function confinedPath(
 	worktree: string,
 	path: string,
@@ -10,28 +22,14 @@ export async function confinedPath(
 		throw Error("file path must be relative to the worktree");
 	const root = await realpath(worktree);
 	const candidate = resolve(root, path);
-	if (candidate === root || !candidate.startsWith(`${root}${sep}`))
-		throw Error("file path escapes the worktree");
-	const parent = await realpath(resolve(candidate, ".."));
-	if (
-		relative(root, parent).startsWith("..") ||
-		parent === resolve(root, ".git")
-	)
-		throw Error("file path escapes the worktree or enters .git");
+	if (candidate === root) throw Error("file path must name a worktree file");
+	assertInside(root, candidate);
+	assertInside(root, await realpath(resolve(candidate, "..")));
 	try {
-		const stat = await lstat(candidate);
-		if (stat.isSymbolicLink()) {
-			const target = await realpath(candidate);
-			if (target === root || !target.startsWith(`${root}${sep}`))
-				throw Error("symlink escapes the worktree");
-		}
+		if ((await lstat(candidate)).isSymbolicLink())
+			assertInside(root, await realpath(candidate));
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
-	if (
-		candidate === resolve(root, ".git") ||
-		candidate.startsWith(`${resolve(root, ".git")}${sep}`)
-	)
-		throw Error("file path enters .git");
 	return candidate;
 }

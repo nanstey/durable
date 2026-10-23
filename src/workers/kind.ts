@@ -5,6 +5,9 @@ export type JobSpec = {
 	id: string;
 	agent: string;
 	item: string;
+	repo?: string;
+	baseRef?: string;
+	baseSha?: string;
 	role: "worker" | "reviewer";
 	briefText: string;
 	workspace: Workspace;
@@ -39,8 +42,15 @@ export interface WorkerKind {
 	readonly name: "pi-session" | "durable-conversation";
 	start(job: JobSpec): Promise<WorkerHandle>;
 	status(handle: WorkerHandle): Promise<"running" | "exited" | "unknown">;
-	result(handle: WorkerHandle): Promise<{ status: string }>;
-	interrupt(handle: WorkerHandle, mode: "soft" | "hard"): Promise<void>;
+	result(handle: WorkerHandle): Promise<{
+		status: string;
+		outcome?: import("./durable/anchor.ts").WorkerStop;
+	}>;
+	interrupt(
+		handle: WorkerHandle,
+		mode: "soft" | "hard",
+		reason?: import("./durable/anchor.ts").WorkerStop,
+	): Promise<void>;
 	steer?(handle: WorkerHandle, text: string): Promise<void>;
 	transcript(handle: WorkerHandle): AsyncIterable<string>;
 	resume(handle: WorkerHandle): Promise<WorkerHandle>;

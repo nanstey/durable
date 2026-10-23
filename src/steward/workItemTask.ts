@@ -110,6 +110,10 @@ async function dispatchItem(
 		id: attempt.id,
 		agent: deps.agent,
 		item: item.id,
+		repo: item.repo,
+		baseRef: deps.definition.scope?.repos?.find(
+			(repo) => repo.slug === item.repo,
+		)?.base,
 		role: "worker",
 		briefText: task.briefText ?? (await deps.brief()),
 		workspace: {

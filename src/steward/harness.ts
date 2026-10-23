@@ -18,6 +18,7 @@ import {
 	Harness,
 	hook,
 	type JsonObject,
+	ProviderDoc,
 	type SetTimer,
 	section,
 	type TaskId,
@@ -40,6 +41,8 @@ import { LocalFilesSource } from "../sources/localFiles.ts";
 import type { Candidate, Source } from "../sources/types.ts";
 import { buildTree } from "../tree/build.ts";
 import type { IndexedConversation, NodeKind } from "../tree/nodes.ts";
+import { NativeDurableAnchor } from "../workers/durable/anchor.ts";
+import { DurableConversationKind } from "../workers/durableConversation.ts";
 import { audit } from "./audit.ts";
 import { agentDir } from "./files.ts";
 import {
@@ -229,6 +232,7 @@ export async function openHarness(options: HarnessConfig) {
 	const isDisabled = () => disabled(agent, undefined, now());
 	let harness: Harness;
 	let workRuntime: WorkRuntime | undefined;
+	let durableWorkers: NativeDurableAnchor | undefined;
 	async function queue() {
 		return ranked(
 			projectQueue(
@@ -377,15 +381,23 @@ export async function openHarness(options: HarnessConfig) {
 			hook(GenerationTask, {
 				beforeRequest: async (_request, api, ctx) => {
 					const state = (await api.snapshot(StateDoc, ctx))!;
-					budgetBlocked =
+					const budgetBlocked =
 						exhausted((await api.snapshot(BudgetDoc, ctx))!, limits) ||
 						Boolean(
 							processes?.fenced(
 								state.conversations[String(api.conversationId)]?.item,
 							),
 						);
-					if (isDisabled() || budgetBlocked)
+					const sessionId = await harness.commit(
+						async (tx) =>
+							(await tx.doc(ProviderDoc, api.conversationId)).sessionId,
+						context,
+					);
+					if (isDisabled() || budgetBlocked) {
+						blockedModelSessions.add(sessionId);
 						throw Error("model request refused by safety fence");
+					}
+					blockedModelSessions.delete(sessionId);
 				},
 				afterResponse: async (message) => {
 					await harness.commit(async (tx) => {
@@ -404,6 +416,19 @@ export async function openHarness(options: HarnessConfig) {
 		phases: {
 			advance: async (task, runtime, ctx) => {
 				if (!workRuntime) throw Error("worker runtime unavailable");
+				const owner = (await harness.snapshot(WorkOwnersDoc, context))?.owners[
+					task.input.item
+				];
+				if (owner !== task.id) {
+					await runtime.commit(
+						() => ({
+							status: "terminal",
+							outcome: { status: "completed", result: null },
+						}),
+						ctx,
+					);
+					return;
+				}
 				const state = await snapshot();
 				const budgetStopped = exhausted(state.budget, limits);
 				const outcome = await workRuntime.tickItem(
@@ -434,7 +459,7 @@ export async function openHarness(options: HarnessConfig) {
 		version: 1,
 		initial: () => ({ phase: "tick" }),
 		phases: {
-			tick: async (loopTask, runtime, ctx) => {
+			tick: async (_loopTask, runtime, ctx) => {
 				const request = resumeRequest(agent);
 				if (
 					workRuntime &&
@@ -536,11 +561,20 @@ export async function openHarness(options: HarnessConfig) {
 							const existing = owners[item.id]
 								? await tx.task(owners[item.id] as TaskId)
 								: undefined;
-							if (!existing || existing.state.status === "terminal")
+							if (
+								!existing ||
+								!existing.background ||
+								existing.state.status === "terminal"
+							)
 								owners[item.id] = await tx.createTask(
 									Work,
 									{ item: item.id },
-									{ ownership: { kind: "task", taskId: loopTask.id } },
+									{
+										// pi-durable 1.4 permits background only on conversation-owned tasks.
+										// The item is the background boundary; run-worker is its owned child.
+										ownership: { kind: "conversation" },
+										background: true,
+									},
 								);
 						}
 					}
@@ -577,6 +611,48 @@ export async function openHarness(options: HarnessConfig) {
 	});
 	const registry = createRegistry();
 	registry.install(Safety);
+	if (options.work?.durable) {
+		const work = options.work;
+		const anchor = new NativeDurableAnchor({
+			...work.durable!,
+			harness: () => harness,
+			owner: async (tx, item) => {
+				const owner = (await tx.doc(WorkOwnersDoc)).owners[item];
+				if (!owner) throw Error("worker requires native work-item owner");
+				if (!(await tx.task(owner as TaskId))?.background)
+					throw Error(
+						"legacy work-item owner must be rehomed before durable launch",
+					);
+				return owner as TaskId;
+			},
+			mark: async (tx, id, job) => {
+				const meta = (await tx.doc(StateDoc)).conversations[String(id)];
+				meta.kind = "worker-durable";
+				meta.item = job.item;
+			},
+			turn: async (tx, id, waiting) => {
+				(await tx.doc(StateDoc)).conversations[String(id)].turnAborted =
+					waiting;
+			},
+			processes: work.processes,
+			login: work.login,
+			disabled: isDisabled,
+			now,
+			check: work.check,
+			budgetStopped: async () =>
+				exhausted((await harness.snapshot(BudgetDoc, context))!, limits),
+			account: async (usage) => {
+				await harness.commit(async (tx) => {
+					const budget = await tx.doc(BudgetDoc);
+					budget.spent += usage.cost.total;
+					budget.tokens += usage.totalTokens;
+				}, context);
+			},
+		});
+		durableWorkers = anchor;
+		registry.install(anchor.extension);
+		work.kinds.register(new DurableConversationKind(anchor));
+	}
 	const Anchor = defineTask<null, { phase: "wait" }, null>({
 		name: "steward.conversation-anchor",
 		version: 1,
@@ -617,7 +693,7 @@ export async function openHarness(options: HarnessConfig) {
 					context,
 				);
 	// Upstream treats beforeRequest exceptions as advisory; enforce safety at dispatch too.
-	let budgetBlocked = false;
+	const blockedModelSessions = new Set<string>();
 	const models = new Proxy(baseModels, {
 		get(target, property) {
 			const value = Reflect.get(target, property, target);
@@ -633,7 +709,13 @@ export async function openHarness(options: HarnessConfig) {
 				].includes(String(property))
 			)
 				return (...args: unknown[]) => {
-					if (isDisabled() || budgetBlocked)
+					const sessionId = (args[2] as { sessionId?: string } | undefined)
+						?.sessionId;
+					if (
+						isDisabled() ||
+						blockedModelSessions.has(sessionId ?? "") ||
+						durableWorkers?.allowsRequest(sessionId) === false
+					)
 						throw Error("model request disabled by safety policy");
 					return value.apply(target, args);
 				};
@@ -970,6 +1052,10 @@ export async function openHarness(options: HarnessConfig) {
 					Error("agent unavailable: paused, budget exhausted, or fenced"),
 					{ code: "unavailable" },
 				);
+			if (
+				state.conversations[String(conversationId)]?.kind === "worker-durable"
+			)
+				await durableWorkers?.assertSubmission(conversationId);
 			const key = `${id}:${requestId}`;
 			await harness.commit(async (tx) => {
 				const document = await tx.doc(StateDoc);
