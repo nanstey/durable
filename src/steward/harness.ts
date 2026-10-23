@@ -244,9 +244,16 @@ export async function openHarness(options: HarnessConfig) {
 			description: "List the current work queue without source bodies.",
 			parameters: Type.Object({}),
 			replay: "safe",
-			execute: async () => ({
-				output: [{ type: "text", text: JSON.stringify(await queue()) }],
-			}),
+			execute: async () => {
+				const items = (await queue()).map((item) => ({
+					ref: item.ref,
+					state: item.state,
+					reasons: item.reasons,
+					workItem: item.workItem,
+					...(item.state === "eligible" ? { title: item.title } : {}),
+				}));
+				return { output: [{ type: "text", text: JSON.stringify(items) }] };
+			},
 		}),
 		defineTool({
 			name: "explain_item",
@@ -325,6 +332,7 @@ export async function openHarness(options: HarnessConfig) {
 				await workRuntime.requestWork(
 					item,
 					(await harness.snapshot(QueueDoc, context))!,
+					true,
 				);
 				return {
 					output: [
@@ -406,10 +414,13 @@ export async function openHarness(options: HarnessConfig) {
 				if (!workRuntime) throw Error("worker runtime unavailable");
 				const state = await snapshot();
 				const budgetStopped = exhausted(state.budget, limits);
+				const queue = (await harness.snapshot(QueueDoc, context))!;
+				const work = (await harness.snapshot(WorkDoc, context))!.work;
 				const outcome = await workRuntime.tickItem(
 					task.input.item,
 					isDisabled() || budgetStopped,
 					budgetStopped,
+					queue.items[work.items[task.input.item]?.intakeRef],
 				);
 				await runtime.commit(
 					() =>
@@ -722,6 +733,8 @@ export async function openHarness(options: HarnessConfig) {
 		workRuntime = new WorkRuntime(
 			{
 				...options.work,
+				trustedAuthors: (repo) =>
+					def.sources?.find((source) => source.repo === repo)?.trustedAuthors,
 				claimOwner: (await snapshot()).uid,
 				check: async () => {
 					await options.work!.check();

@@ -11,7 +11,8 @@ import { intakeNumber, prMarker, type WorkGithub } from "./github.ts";
 import { quietHours } from "./killswitch.ts";
 import { canDispatch, itemTimedOut } from "./limits.ts";
 import type { ProcessManager } from "./procs.ts";
-import type { Queue } from "./queue.ts";
+import type { Queue, QueueItem } from "./queue.ts";
+import { eligibility } from "../sources/eligibility.ts";
 import {
 	emptyWorkItems,
 	reconcilePrs,
@@ -47,6 +48,7 @@ export type WorkRuntimeOptions = {
 	piDir?: string;
 	skillsRoot?: string;
 	checkoutFor: (repo: string) => string | undefined;
+	trustedAuthors?: (repo: string) => string[] | undefined;
 	scout: (item: WorkItem, body: string) => Promise<string>;
 	notify: (event: "escalation" | "budget-stop", item: string) => Promise<void>;
 	check: () => Promise<void>;
@@ -77,13 +79,18 @@ export class WorkRuntime {
 		);
 		return result;
 	}
-	async tickItem(id: string, paused: boolean, budgetStopped: boolean) {
+	async tickItem(
+		id: string,
+		paused: boolean,
+		budgetStopped: boolean,
+		queueItem?: QueueItem,
+	) {
 		return this.enqueue(async () => {
 			const state = await this.store.load();
 			const item = state.work.items[id];
 			if (!item) throw Error("work item missing");
 			try {
-				await this.progress(state, item, paused, budgetStopped);
+				await this.progress(state, item, paused, budgetStopped, queueItem);
 			} catch {
 				// Keep the committed intent. The next invocation re-reads the external world.
 				audit(this.options.agent, {
@@ -99,6 +106,7 @@ export class WorkRuntime {
 		item: WorkItem,
 		paused: boolean,
 		budgetStopped: boolean,
+		queueItem?: QueueItem,
 	) {
 		const o = this.options;
 		for (const pr of item.prs)
@@ -121,6 +129,12 @@ export class WorkRuntime {
 			return;
 		}
 		if (o.processes.fenced(item.id)) return;
+		if (queueItem && queueItem.state !== "eligible") {
+			item.outcome = "needs-human";
+			await this.store.save(state);
+			return;
+		}
+		if (queueItem) item.candidate = queueItem;
 		if (await this.stopIfLimited(state, item, paused, budgetStopped)) return;
 		if (this.inactive(item, task, paused)) return;
 		await this.renew(state, item);
@@ -231,7 +245,13 @@ export class WorkRuntime {
 						item.candidate.kind,
 					);
 		return assembleWorkerBrief({
-			brief: createScoutBrief(item.candidate, true, await o.scout(item, body)),
+			brief: createScoutBrief(
+				item.candidate,
+				!eligibility(item.candidate, {
+					trustedAuthors: o.trustedAuthors?.(item.repo),
+				}).reasons.includes("untrusted-author"),
+				await o.scout(item, body),
+			),
 			branch: this.branch(item),
 			agent: o.agent,
 			login: o.login,
@@ -246,6 +266,7 @@ export class WorkRuntime {
 			agent: o.agent,
 			lease: new Date(this.now() + 2 * 3600000).toISOString(),
 			claimOwner: o.claimOwner,
+			login: o.login,
 			github: o.github,
 			brief: () => this.brief(item),
 			dispatcher: o.dispatcher,
@@ -286,6 +307,7 @@ export class WorkRuntime {
 					lease,
 					item: item.id,
 					owner: o.claimOwner,
+					login: o.login,
 				},
 				this.now(),
 			);
@@ -313,7 +335,9 @@ export class WorkRuntime {
 			if (
 				item.claim.commentId &&
 				(await this.options.github.listComments(item.repo, issue)).some(
-					(comment) => comment.id === item.claim?.commentId,
+					(comment) =>
+						comment.id === item.claim?.commentId &&
+						comment.login?.toLowerCase() === this.options.login.toLowerCase(),
 				)
 			)
 				await this.options.github.deleteComment?.(
@@ -411,7 +435,7 @@ export class WorkRuntime {
 			await this.options.processes.terminate({ item: item.id });
 		if (reason === "limit") await this.options.notify("budget-stop", item.id);
 	}
-	async requestWork(id: string, queue: Queue) {
+	async requestWork(id: string, queue: Queue, modelRequested = false) {
 		return this.enqueue(async () => {
 			await this.options.check();
 			const state = await this.store.load();
@@ -425,6 +449,12 @@ export class WorkRuntime {
 			)
 				throw Error("work request refused by lifecycle fence");
 			const previous = item.attempts.at(-1);
+			if (
+				modelRequested &&
+				(previous?.cancelledBy ||
+					["needs-human", "limit"].includes(item.outcome ?? ""))
+			)
+				throw Error("work request refused for intentionally stopped work");
 			if (previous && !previous.endedAt && !previous.cancelledBy) return;
 			if (previous) previous.endedAt = this.now();
 			delete item.outcome;

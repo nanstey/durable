@@ -30,6 +30,7 @@ export type TaskDependencies = {
 	agent: string;
 	lease: string;
 	claimOwner?: string;
+	login?: string;
 	github: ClaimGithub;
 	brief: () => Promise<string>;
 	dispatcher: WorkerDispatcher;
@@ -64,6 +65,7 @@ async function claimItem(
 				lease: deps.lease,
 				item: item.id,
 				owner: deps.claimOwner,
+				login: deps.login,
 			},
 			(deps.now ?? Date.now)(),
 		);
