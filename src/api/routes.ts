@@ -38,7 +38,7 @@ export function createApi(opts: {
 	const app = new Hono<ApiEnv>();
 	const { harness } = opts;
 	const startedAt = opts.startedAt ?? Date.now();
-	if (opts.peerCheck?.mode !== "off")
+	if (opts.peerCheck && opts.peerCheck.mode !== "off")
 		app.use("*", async (c, next) => {
 			if (c.req.path === "/healthz") return next();
 			const address = getConnInfo(c).remote.address ?? "";

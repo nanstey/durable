@@ -201,9 +201,9 @@ test("device identity contains names and granted scopes, never credentials", asy
 	assert.match(device.uid, /^[a-f0-9-]{36}$/);
 	assert.equal(JSON.stringify(device).includes(tokens.read), false);
 });
-for (const bind of ["tailnet", "0.0.0.0", "192.0.2.1", "localhost"])
+for (const bind of ["0.0.0.0", "192.0.2.1", "localhost"])
 	test(`listener refuses ${bind}`, () =>
-		assert.throws(() => loopbackBind(bind), /slice 11/));
+		assert.throws(() => loopbackBind(bind), /loopback or tailnet/));
 test("loopback binds only literal loopback interfaces", () => {
 	assert.equal(loopbackBind(), "127.0.0.1");
 	assert.equal(loopbackBind("::1"), "::1");
