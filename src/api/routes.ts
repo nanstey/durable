@@ -4,6 +4,13 @@ import { bodyLimit } from "hono/body-limit";
 import type { ApprovalNonces } from "../approval/nonce.ts";
 import { verifyNonce } from "../gate/approval.ts";
 import type { AgentDef } from "../config/schema.ts";
+import {
+	bundleFor,
+	materializeOrganization,
+	organizationVersionState,
+	receiveOrganizationBundle,
+	type OrganizationBundle,
+} from "../config/organizations.ts";
 import type { WorkerDispatcher, Workspace } from "../dispatch/types.ts";
 import { audit, readAudit } from "../steward/audit.ts";
 import {
@@ -142,9 +149,11 @@ export function createApi(opts: {
 			machine: opts.machine,
 			agent: opts.agent,
 			profile: opts.profile,
-			organization: opts.organization ?? {
-				id: "default",
-				bundleHash: "default",
+			organization: {
+				...(opts.organization ?? { id: "default", bundleHash: "default" }),
+				versionState: organizationVersionState(
+					opts.organization?.id ?? "default",
+				),
 			},
 			scopeSummary: c.get("actor").scopes,
 			capabilities: {
@@ -156,6 +165,41 @@ export function createApi(opts: {
 			startedAt,
 		};
 		return c.json(device);
+	});
+	app.get("/v1/organizations/:name/bundle", (c) => {
+		const name = c.req.param("name");
+		if ((opts.organization?.id ?? "default") !== name)
+			throw new ApiError("not_found", "organization not found", 404);
+		return c.json(bundleFor(name));
+	});
+	app.post("/v1/organizations/:name/bundle", async (c) => {
+		const name = c.req.param("name");
+		if ((opts.organization?.id ?? "default") !== name)
+			throw new ApiError("not_found", "organization not found", 404);
+		let bundle: OrganizationBundle;
+		try {
+			bundle = (await c.req.json()) as OrganizationBundle;
+			if (bundle.approval?.organization !== name)
+				throw Error("organization name mismatch");
+			receiveOrganizationBundle(bundle);
+			materializeOrganization(opts.agent, opts.definition);
+		} catch {
+			throw new ApiError(
+				"invalid",
+				"invalid approved organization bundle",
+				400,
+			);
+		}
+		audit(opts.agent, {
+			event: "organization-bundle-received",
+			organization: name,
+			bundleHash: bundle.contentHash,
+		});
+		return c.json({
+			organization: name,
+			bundleHash: bundle.contentHash,
+			versionState: organizationVersionState(name),
+		});
 	});
 	app.get("/v1/sessions", async (c) => c.json(await tree()));
 	app.get("/v1/conversations", async (c) => {
