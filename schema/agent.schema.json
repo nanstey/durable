@@ -103,6 +103,17 @@
             },
             "uniqueItems": true
           },
+          "blockedAuthors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "updatedBefore": {
+            "type": "number",
+            "minimum": 0
+          },
           "own": {
             "type": "boolean"
           },

@@ -514,7 +514,7 @@ export async function openHarness(options: HarnessConfig) {
 										excludedLabels: source?.exclude,
 										blockedAuthors: source?.blockedAuthors,
 										claimed:
-											Boolean(existing?.claim) ||
+											false ||
 											candidate.labels.some(
 												(label) => label === "durable/claimed",
 											),
