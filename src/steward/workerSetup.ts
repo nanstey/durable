@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import { ApprovalNonces } from "../approval/nonce.ts";
+import { issueNonce } from "../gate/approval.ts";
 import { loadManifest } from "../config/manifest.ts";
 import { piAgentDir } from "../config/paths.ts";
 import type { AgentDef, MachineCfg } from "../config/schema.ts";
@@ -172,6 +174,23 @@ export function setupWorkers(options: SetupOptions) {
 				notify: async (event, target) => {
 					await notifier.notify({ agent, event, target });
 				},
+				notifyApproval: async (item, sha) => {
+					await notifier.notify({
+						agent,
+						event: "approval-needed",
+						target: item,
+						sha,
+					});
+				},
+				issueApproval: async (item, sha) =>
+					notifier.approvalNonce(
+						item,
+						issueNonce(new ApprovalNonces(agent), {
+							action: "approve",
+							item,
+							sha,
+						}),
+					),
 			}
 		: undefined;
 	return { dispatcher, workers, notifier, work };

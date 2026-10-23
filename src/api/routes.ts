@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ApprovalNonces } from "../approval/nonce.ts";
+import { verifyNonce } from "../gate/approval.ts";
 import type { AgentDef } from "../config/schema.ts";
 import type { WorkerDispatcher, Workspace } from "../dispatch/types.ts";
 import { audit, readAudit } from "../steward/audit.ts";
@@ -84,7 +85,9 @@ export function createApi(opts: {
 						? 409
 						: code === "unavailable"
 							? 503
-							: 500;
+							: code === "not-enrolled" || code === "not_supported"
+								? 501
+								: 500;
 		if (status === 500) audit(opts.agent, { event: "api-error" });
 		return c.json(
 			{
@@ -227,6 +230,66 @@ export function createApi(opts: {
 		return c.json({ queued: true }, 202);
 	});
 	app.get("/v1/items", async (c) => c.json(await harness.workItems()));
+	app.get("/v1/gate/:item", async (c) => {
+		const item = (await harness.workItems()).items[c.req.param("item")];
+		if (!item?.gate) throw new ApiError("not_found", "gate not found", 404);
+		return c.json(item.gate);
+	});
+	app.post("/v1/approvals/nonce", async (c) => {
+		let value: { item?: unknown; code?: unknown } = {};
+		try {
+			value = (await c.req.json()) as { item?: unknown; code?: unknown };
+		} catch {
+			/* Treated as an invalid credential below. */
+		}
+		const item =
+			typeof value.item === "string"
+				? (await harness.workItems()).items[value.item]
+				: undefined;
+		if (
+			!item?.gate ||
+			typeof value.code !== "string" ||
+			value.code.length > 256 ||
+			!opts.nonces ||
+			!verifyNonce(
+				opts.nonces,
+				{
+					action: "approve",
+					item: item.id,
+					sha: item.gate.sha,
+				},
+				value.code,
+			)
+		)
+			throw new ApiError(
+				"forbidden",
+				"invalid or expired approval credential",
+				403,
+			);
+		if (!harness.workRuntime)
+			throw new ApiError("unavailable", "work runtime unavailable", 503);
+		await harness.workRuntime.approveGate(item.id, item.gate.sha);
+		audit(opts.agent, {
+			event: "approval-nonce",
+			item: item.id,
+			sha: item.gate.sha,
+		});
+		return c.json({ approved: true });
+	});
+	app.post("/v1/approvals/challenge", () => {
+		throw new ApiError(
+			"not-enrolled",
+			"passkey approvals are not enrolled",
+			501,
+		);
+	});
+	app.post("/v1/approvals/assert", () => {
+		throw new ApiError(
+			"not-enrolled",
+			"passkey approvals are not enrolled",
+			501,
+		);
+	});
 	app.post("/v1/workers/stop", async (c) => {
 		await harness.workRuntime?.stop("stopped");
 		return c.json({ stopped: true });

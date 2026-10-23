@@ -32,9 +32,19 @@ export type WorkItem = {
 	prs: Array<{
 		number: number;
 		url?: string;
+		headSha?: string;
 		primary: boolean;
 		state?: "open" | "merged" | "closed";
 	}>;
+	/** Persisted gate state deliberately contains no approval secret. */
+	gate?: {
+		pr: number;
+		sha: string;
+		state: "review" | "waiting-approval" | "approved" | "wait-human";
+		reasons: string[];
+		approvedAt?: number;
+		notified?: boolean;
+	};
 	outcome?: WorkItemOutcome;
 	createdAt: number;
 	updatedAt: number;
@@ -96,7 +106,12 @@ export function projectQueue(queue: Queue, workItems: WorkItems): Queue {
 
 export function recordPrimaryPr(
 	item: WorkItem,
-	pr: { number: number; url?: string; state?: "open" | "merged" | "closed" },
+	pr: {
+		number: number;
+		url?: string;
+		headSha?: string;
+		state?: "open" | "merged" | "closed";
+	},
 	now: number,
 ): void {
 	const existing = item.prs.find((entry) => entry.number === pr.number);
@@ -109,12 +124,18 @@ export function recordPrimaryPr(
 /** Only GitHub-confirmed terminal states complete work. A handoff is deliberately not an outcome. */
 export function reconcilePrs(
 	item: WorkItem,
-	prs: Array<{ number: number; state: "open" | "merged" | "closed" }>,
+	prs: Array<{
+		number: number;
+		state: "open" | "merged" | "closed";
+		headSha?: string;
+	}>,
 	now: number,
 ): void {
 	for (const observed of prs) {
 		const known = item.prs.find((entry) => entry.number === observed.number);
-		if (known) known.state = observed.state;
+		if (known) Object.assign(known, observed);
+		if (item.gate && known?.primary && known.headSha !== item.gate.sha)
+			delete item.gate;
 	}
 	const primary = item.prs.find((entry) => entry.primary);
 	if (primary?.state === "merged") item.outcome = "merged";

@@ -64,7 +64,7 @@ function readCommand(
 		},
 	});
 }
-readCommand("queue", "/v1/conversations?tree=true");
+readCommand("queue", "/v1/queue");
 readCommand("inbox", "/v1/inbox");
 readCommand("audit", "/v1/audit");
 readCommand("status", "/v1/device");
@@ -115,6 +115,44 @@ subCommands.retry = defineCommand({
 				{ method: "POST" },
 			),
 			args.json,
+		);
+	},
+});
+subCommands.approve = defineCommand({
+	meta: { name: "approve" },
+	args: {
+		agent: { type: "positional", required: true },
+		pr: { type: "positional", required: true },
+		code: { type: "string", required: true },
+	},
+	async run({ args }) {
+		if (
+			(!process.stdin.isTTY || !process.stdout.isTTY) &&
+			process.env.DURABLE_NONINTERACTIVE_OK !== "1"
+		)
+			throw Error("approve requires a local TTY");
+		const work = await clientFor(args.agent).request<{
+			items: Record<string, { id: string; gate?: { pr: number } }>;
+		}>("/v1/items");
+		const item = Object.values(work.items).find(
+			(candidate) => candidate.gate?.pr === Number(args.pr),
+		);
+		if (!item) throw Error("no approval task exists for that pull request");
+		const response = await fetch(
+			`http://127.0.0.1:${assignedPort(args.agent)}/v1/approvals/nonce`,
+			{
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ item: item.id, code: args.code }),
+				signal: AbortSignal.timeout(15000),
+			},
+		);
+		if (!response.ok)
+			throw Error(
+				"approval refused; credential is invalid, expired or for a different PR",
+			);
+		console.log(
+			"approved; Durable will re-check GitHub rules before any action",
 		);
 	},
 });

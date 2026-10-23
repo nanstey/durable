@@ -1,15 +1,18 @@
-# Slice 7a evidence: gate core
+# Slice 7 evidence
 
 | Spec item | Status | Implementation | Focused evidence |
 | --- | --- | --- | --- |
-| 1. Policy + facts | Implemented | `src/gate/{policy,tighten,hardPaths,facts}.ts` defines a definition ceiling, tighten-only intersection, auto-disabled `none` state, hard paths, and fail-closed `gh pr view` facts. | Fixture-style `gh` JSON test covers computed fields, author self-review exclusion, and failed reads. |
-| 2. Decide | Implemented | `src/gate/decide.ts` is pure, has no I/O, fails closed on unknown facts, preserves hard-path and GitHub required-review reasons, and exposes the future `merge` outcome without an executor. | Table-driven modes and paths plus every required fact changed to false/null. |
-| 3. Reviewer job | Implemented | `src/gate/review.ts` launches the selected reviewer kind through `WorkerRegistry`, validates a SHA-bound JSON result or durable `report_verdict`, and records kind-neutral provenance. `templates/reviewer-brief.md` supplies the Pi result-file contract. | Faux dispatcher/kind tests record provenance for Pi-session and durable reviewers; same-family fallback is refused. |
+| 1. Policy + facts | Implemented | `src/gate/{policy,tighten,hardPaths,facts}.ts` | `test/unit/gate.test.ts` |
+| 2. Decide | Implemented | `src/gate/decide.ts` | `test/unit/gate.test.ts` |
+| 3. Reviewer job | Implemented | `src/gate/review.ts`, `templates/reviewer-brief.md` | `test/unit/gate-review.test.ts` |
+| 4. Human mirror | Implemented | `Github.mirrorGate()` writes one SHA-marked report comment and attempts `durable/review`; permission failures are audited and do not affect the gate. | Type-check and workflow coverage |
+| 5. Approval task | Implemented | SHA-bound persisted `WorkItem.gate`, shared action-bound nonce store, nonce-safe notifier delivery, and nonce-only approval endpoint. | `test/contract/work-flow.test.ts`, nonce/release coverage |
+| 6. Ready transition | Implemented | Gate transition marks the PR ready, sends the nonce-free approval-needed event (with notifier reminders), then separately delivers the nonce. | Workflow coverage |
+| 7. CLI/API/queue/audit | Implemented | `durable approve`, `GET /v1/gate/:item`, persisted gate state in queue projection, and gate approval audit events. | Type-check |
+| 8. Required reviews | Implemented in gate core | `gate/decide.ts` returns the unbypassable `github-requires-approval-from-other-account` reason. | `test/unit/gate.test.ts` |
 
 ## Local validation
 
 - `pnpm install --frozen-lockfile`
-- `node --experimental-strip-types --test test/unit/gate.test.ts test/unit/gate-review.test.ts`: 8 passed
-- `pnpm exec tsc --noEmit`: passed during focused validation
-
-Items 0 and 4–10 are intentionally not implemented in this change.
+- `pnpm exec tsc --noEmit`
+- `node --experimental-strip-types --test test/unit/gate.test.ts test/unit/gate-review.test.ts test/contract/work-flow.test.ts`: 16 passed

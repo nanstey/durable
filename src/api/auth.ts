@@ -34,14 +34,17 @@ export function auth(agent: string): MiddlewareHandler<ApiEnv> {
 		// Approval routes accept only an action-bound nonce, never a bearer credential.
 		if (
 			c.req.method === "POST" &&
-			/^\/v1\/items\/[^/]+\/release$/.test(c.req.path)
+			(/^\/v1\/items\/[^/]+\/release$/.test(c.req.path) ||
+				c.req.path === "/v1/approvals/nonce" ||
+				c.req.path === "/v1/approvals/challenge" ||
+				c.req.path === "/v1/approvals/assert")
 		) {
 			if (c.req.header("authorization") || c.req.header("x-durable-token"))
 				return c.json(
 					{
 						error: {
 							code: "forbidden",
-							message: "bearer credentials cannot release holds",
+							message: "bearer credentials cannot authorize approvals",
 						},
 					},
 					403,
