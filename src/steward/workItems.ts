@@ -56,6 +56,12 @@ export type WorkItem = {
 				failed?: false;
 		  }
 		| { sha: string; failed: true; reason: string };
+	spec?: {
+		pr: number;
+		sha: string;
+		state: "opened" | "waiting-spec-approval" | "approved" | "needs-human";
+		notified?: boolean;
+	};
 	gate?: {
 		pr: number;
 		sha: string;

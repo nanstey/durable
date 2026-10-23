@@ -48,7 +48,8 @@ export function eligibility(
 	)
 		reasons.push("attempts-exhausted");
 	if (
-		(options.size ?? candidate.size ?? 0) >
+		(options.size ??
+			(typeof candidate.size === "number" ? candidate.size : 0)) >
 		(options.maxSize ?? Number.POSITIVE_INFINITY)
 	)
 		reasons.push("too-big");

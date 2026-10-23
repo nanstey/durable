@@ -157,44 +157,52 @@ subCommands.retry = defineCommand({
 		);
 	},
 });
-subCommands.approve = defineCommand({
-	meta: { name: "approve" },
-	args: {
-		agent: { type: "positional", required: true },
-		pr: { type: "positional", required: true },
-		code: { type: "string", required: true },
-	},
-	async run({ args }) {
-		if (
-			(!process.stdin.isTTY || !process.stdout.isTTY) &&
-			process.env.DURABLE_NONINTERACTIVE_OK !== "1"
-		)
-			throw Error("approve requires a local TTY");
-		const work = await clientFor(args.agent).request<{
-			items: Record<string, { id: string; gate?: { pr: number } }>;
-		}>("/v1/items");
-		const item = Object.values(work.items).find(
-			(candidate) => candidate.gate?.pr === Number(args.pr),
-		);
-		if (!item) throw Error("no approval task exists for that pull request");
-		const response = await fetch(
-			`http://127.0.0.1:${assignedPort(args.agent)}/v1/approvals/nonce`,
-			{
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ item: item.id, code: args.code }),
-				signal: AbortSignal.timeout(15000),
-			},
-		);
-		if (!response.ok)
-			throw Error(
-				"approval refused; credential is invalid, expired or for a different PR",
+for (const action of ["approve", "approve-spec"] as const)
+	subCommands[action] = defineCommand({
+		meta: { name: action },
+		args: {
+			agent: { type: "positional", required: true },
+			pr: { type: "positional", required: true },
+			code: { type: "string", required: true },
+		},
+		async run({ args }) {
+			if (
+				(!process.stdin.isTTY || !process.stdout.isTTY) &&
+				process.env.DURABLE_NONINTERACTIVE_OK !== "1"
+			)
+				throw Error("approve requires a local TTY");
+			const work = await clientFor(args.agent).request<{
+				items: Record<
+					string,
+					{ id: string; gate?: { pr: number }; spec?: { pr: number } }
+				>;
+			}>("/v1/items");
+			const item = Object.values(work.items).find((candidate) =>
+				action === "approve-spec"
+					? candidate.spec?.pr === Number(args.pr)
+					: candidate.gate?.pr === Number(args.pr),
 			);
-		console.log(
-			"approved; Durable will re-check GitHub rules before any action",
-		);
-	},
-});
+			if (!item) throw Error("no approval task exists for that pull request");
+			const response = await fetch(
+				`http://127.0.0.1:${assignedPort(args.agent)}/v1/approvals/nonce`,
+				{
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ item: item.id, code: args.code, action }),
+					signal: AbortSignal.timeout(15000),
+				},
+			);
+			if (!response.ok)
+				throw Error(
+					"approval refused; credential is invalid, expired or for a different PR",
+				);
+			console.log(
+				action === "approve-spec"
+					? "spec approved; Durable may now dispatch the worker"
+					: "approved; Durable will re-check GitHub rules before any action",
+			);
+		},
+	});
 subCommands.open = defineCommand({
 	meta: { name: "open" },
 	args: { target: { type: "positional", required: true } },

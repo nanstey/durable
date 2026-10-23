@@ -17,6 +17,14 @@ async function setup(
 		count?: number;
 		maxAttempts?: number;
 		itemMinutes?: number;
+		pipeline?: {
+			stages: ["scout", "spec", "build", "review", "gate", "handoff"];
+			gates: {
+				specApproval?: boolean;
+				complexityThreshold?: "medium" | "large";
+			};
+		};
+		size?: "small" | "medium" | "large";
 	} = {},
 ) {
 	const home = isolate();
@@ -27,7 +35,13 @@ async function setup(
 	const notifications: string[] = [];
 	const definition = {
 		profile: "fixture",
-		scope: { repos: [{ slug: "acme/repo" }] },
+		scope: {
+			repos: [
+				options.pipeline
+					? { slug: "acme/repo", pipeline: options.pipeline }
+					: { slug: "acme/repo" },
+			],
+		},
 		sources: [{ kind: "github-issues" as const, repo: "acme/repo" }],
 		schedule: { pollSeconds: 1 },
 		limits: {
@@ -53,7 +67,9 @@ async function setup(
 		},
 		pollCandidates: async () =>
 			Array.from({ length: options.count ?? 1 }, (_, index) =>
-				candidate(index + 1),
+				options.size
+					? { ...candidate(index + 1), size: options.size }
+					: candidate(index + 1),
 			),
 		work: {
 			...deps,
@@ -159,6 +175,108 @@ test("steward queue -> claim -> read-only scout child -> fake Pi worker -> attri
 		rig.deps.github.pulls[0].state = "merged";
 		await rig.step();
 		await eventually(async () => (await rig.items())[0].outcome === "merged");
+	} finally {
+		await rig.harness.close();
+	}
+});
+
+test("spec gate opens one idempotent draft PR and a PR/SHA-bound nonce permits dispatch", async () => {
+	const rig = await setup({
+		size: "medium",
+		pipeline: {
+			stages: ["scout", "spec", "build", "review", "gate", "handoff"],
+			gates: { complexityThreshold: "medium", specApproval: true },
+		},
+	});
+	try {
+		rig.harness.start();
+		await eventually(
+			async () =>
+				(await rig.items())[0]?.spec?.state === "waiting-spec-approval",
+		);
+		const item = (await rig.items())[0];
+		assert.equal(rig.deps.dispatcher.launches.length, 0);
+		assert.equal(
+			rig.deps.github.writes.filter((write) => write === "create-spec-pr")
+				.length,
+			1,
+		);
+		await rig.restart();
+		await rig.step();
+		assert.equal(
+			rig.deps.github.writes.filter((write) => write === "create-spec-pr")
+				.length,
+			1,
+		);
+		const nonces = new ApprovalNonces("agent", rig.now);
+		const stale = nonces.issue(
+			"approve-spec",
+			item.id,
+			`${item.spec!.pr}:${item.spec!.sha}`,
+		);
+		rig.deps.github.pulls.find((pr) => pr.number === item.spec!.pr)!.headSha =
+			"changed-spec-sha";
+		await rig.step();
+		const current = (await rig.items())[0];
+		const code = nonces.issue(
+			"approve-spec",
+			current.id,
+			`${current.spec!.pr}:${current.spec!.sha}`,
+		);
+		const app = createApi({
+			agent: "agent",
+			machine: "fixture",
+			profile: "fixture",
+			harness: rig.harness,
+			definition: rig.config.definition,
+			workers: rig.deps.workers,
+			nonces,
+		});
+		assert.equal(
+			(
+				await app.request("/v1/approvals/nonce", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						item: current.id,
+						action: "approve-spec",
+						code: stale,
+					}),
+				})
+			).status,
+			403,
+		);
+		assert.equal(
+			(
+				await app.request("/v1/approvals/nonce", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						item: current.id,
+						action: "approve-spec",
+						code,
+					}),
+				})
+			).status,
+			200,
+		);
+		assert.equal(
+			(
+				await app.request("/v1/approvals/nonce", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						item: current.id,
+						action: "approve-spec",
+						code,
+					}),
+				})
+			).status,
+			403,
+		);
+		await rig.step();
+		await rig.step();
+		await eventually(() => rig.deps.dispatcher.launches.length === 1);
 	} finally {
 		await rig.harness.close();
 	}

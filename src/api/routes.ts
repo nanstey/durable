@@ -236,9 +236,13 @@ export function createApi(opts: {
 		return c.json(item.gate);
 	});
 	app.post("/v1/approvals/nonce", async (c) => {
-		let value: { item?: unknown; code?: unknown } = {};
+		let value: { item?: unknown; code?: unknown; action?: unknown } = {};
 		try {
-			value = (await c.req.json()) as { item?: unknown; code?: unknown };
+			value = (await c.req.json()) as {
+				item?: unknown;
+				code?: unknown;
+				action?: unknown;
+			};
 		} catch {
 			/* Treated as an invalid credential below. */
 		}
@@ -246,20 +250,24 @@ export function createApi(opts: {
 			typeof value.item === "string"
 				? (await harness.workItems()).items[value.item]
 				: undefined;
+		const spec = value.action === "approve-spec";
+		const binding =
+			spec && item?.spec
+				? {
+						action: "approve-spec" as const,
+						item: item.id,
+						pr: item.spec.pr,
+						sha: item.spec.sha,
+					}
+				: item?.gate
+					? { action: "approve" as const, item: item.id, sha: item.gate.sha }
+					: undefined;
 		if (
-			!item?.gate ||
+			!binding ||
 			typeof value.code !== "string" ||
 			value.code.length > 256 ||
 			!opts.nonces ||
-			!verifyNonce(
-				opts.nonces,
-				{
-					action: "approve",
-					item: item.id,
-					sha: item.gate.sha,
-				},
-				value.code,
-			)
+			!verifyNonce(opts.nonces, binding, value.code)
 		)
 			throw new ApiError(
 				"forbidden",
@@ -268,11 +276,25 @@ export function createApi(opts: {
 			);
 		if (!harness.workRuntime)
 			throw new ApiError("unavailable", "work runtime unavailable", 503);
-		await harness.workRuntime.approveGate(item.id, item.gate.sha);
+		if (!item)
+			throw new ApiError("forbidden", "invalid approval credential", 403);
+		if (spec) {
+			if (!item.spec)
+				throw new ApiError("forbidden", "invalid approval credential", 403);
+			await harness.workRuntime.approveSpec(
+				item.id,
+				item.spec.pr,
+				item.spec.sha,
+			);
+		} else {
+			if (!item.gate)
+				throw new ApiError("forbidden", "invalid approval credential", 403);
+			await harness.workRuntime.approveGate(item.id, item.gate.sha);
+		}
 		audit(opts.agent, {
-			event: "approval-nonce",
+			event: spec ? "spec-approval-nonce" : "approval-nonce",
 			item: item.id,
-			sha: item.gate.sha,
+			sha: binding.sha,
 		});
 		return c.json({ approved: true });
 	});

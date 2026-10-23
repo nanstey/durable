@@ -30,8 +30,8 @@ export async function applyJudgment(
 				state: "needs-human",
 				reasons: [...reasons, "judge:not-actionable"],
 			};
-		if (result.size === "large")
-			return { state: "too-big", reasons: [...reasons, "judge:too-big"] };
+		candidate.size = result.size;
+
 		if (result.risk === "high")
 			return { state: "needs-human", reasons: [...reasons, "judge:high-risk"] };
 	} catch {

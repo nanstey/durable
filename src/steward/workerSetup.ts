@@ -196,6 +196,16 @@ export function setupWorkers(options: SetupOptions) {
 							sha,
 						}),
 					),
+				issueSpecApproval: async (item, pr, sha) =>
+					notifier.approvalNonce(
+						item,
+						issueNonce(new ApprovalNonces(agent), {
+							action: "approve-spec",
+							item,
+							pr,
+							sha,
+						}),
+					),
 			}
 		: undefined;
 	return { dispatcher, workers, notifier, work };

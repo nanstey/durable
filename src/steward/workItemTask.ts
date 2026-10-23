@@ -15,6 +15,7 @@ import type { WorkItem } from "./workItems.ts";
 export type WorkItemPhase =
 	| "claim"
 	| "brief"
+	| "spec"
 	| "dispatch"
 	| "await-pr"
 	| "finish";
@@ -178,6 +179,7 @@ export async function advanceWorkItem(
 	item.stage = pipeline.stages.includes("scout")
 		? nextStage(pipeline, "scout")
 		: nextStage(pipeline);
+	if (item.stage === "spec") return { ...task, phase: "spec", briefText };
 	if (item.stage !== "build") throw Error("pipeline refuses build transition");
 	return { ...task, phase: "dispatch", briefText };
 }

@@ -55,14 +55,11 @@ export function pipelineFor(
 	);
 }
 
-/** Slice 7 owns the optional spec stage and approval gate. */
+/** The optional spec stage is valid only when its code-owned threshold is declared. */
 export function pipelineDoctorErrors(pipeline: ProjectPipeline): string[] {
-	const errors: string[] = [];
-	if (pipeline.stages.includes("spec"))
-		errors.push("pipeline spec stage is not supported until slice 7");
-	if (pipeline.gates.specApproval)
-		errors.push("pipeline specApproval gate is not supported until slice 7");
-	return errors;
+	return pipeline.gates.specApproval && !pipeline.stages.includes("spec")
+		? ["pipeline specApproval requires the spec stage"]
+		: [];
 }
 
 export function nextStage(

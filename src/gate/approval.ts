@@ -3,6 +3,7 @@ import type { ApprovalNonces } from "../approval/nonce.ts";
 export type ApprovalBinding = {
 	item: string;
 	sha: string;
+	pr?: number;
 	action: "approve" | "approve-spec" | "resume" | "verify-policy";
 };
 
@@ -11,7 +12,11 @@ export type ApprovalBinding = {
  * store so every privileged action has identical action/item/binding rules.
  */
 export function issueNonce(nonces: ApprovalNonces, binding: ApprovalBinding) {
-	return nonces.issue(binding.action, binding.item, binding.sha);
+	return nonces.issue(
+		binding.action,
+		binding.item,
+		binding.pr === undefined ? binding.sha : `${binding.pr}:${binding.sha}`,
+	);
 }
 
 export function verifyNonce(
@@ -19,5 +24,10 @@ export function verifyNonce(
 	binding: ApprovalBinding,
 	code: string,
 ) {
-	return nonces.verify(binding.action, binding.item, binding.sha, code);
+	return nonces.verify(
+		binding.action,
+		binding.item,
+		binding.pr === undefined ? binding.sha : `${binding.pr}:${binding.sha}`,
+		code,
+	);
 }
