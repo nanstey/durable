@@ -114,3 +114,29 @@ Counts: **High 2, Medium 9, Low 8.**
 - `startApi` binds the loopback listener plus the explicit Tailscale address only. It refuses to start `peerCheck: required` without `allowedPeers`, and each request returns 503 when `whois` fails in `required` mode. Approval routes still reject bearer credentials. Tokens are stored as hashes with expiry, and device tokens are in 0600 files outside `devices.yaml`.
 - The proxy allowlist is anchored, one-segment routes. I found no `..` traversal that reaches an approval route.
 
+## Follow-up audit (2026-10-23)
+
+Status reflects the current mainline plus the follow-up hardening in this branch. `partial` means the cited defect has a fail-closed mitigation but not the complete behavior requested by the review.
+
+| Finding | Status | Evidence |
+| --- | --- | --- |
+| H1 | fixed | `src/console/guard.ts`; `test/unit/console.test.ts` spoofed-loopback-host test |
+| H2 | partial | `src/steward/workRuntime.ts` enforces risk and fails closed for nonzero cooling-off; daily cap, kill-switch fact, required checks and cross-family provenance remain open |
+| M1 | partial | `src/gate/facts.ts` rejects an empty rollup; merge-time complete fact refresh remains open |
+| M2 | fixed | `src/gate/auto.ts` requires `pathAllow`; gate test covers fail-closed facts |
+| M3 | open | lease expiry still compares wall clocks; no bounded foreign lease or server-clock test exists |
+| M4 | open | takeover uses the same branch and external writes lack a write-time claim fence |
+| M5 | fixed | `src/api/tokens.ts` lists short ids and refuses ambiguous client revocation |
+| M6 | fixed | `src/api/net.ts` has a five-second `whois` timeout and production TTL cache |
+| M7 | fixed | `src/console/guard.ts` requires allowed Serve identity for all methods |
+| M8 | partial | policy-source filename is corrected by existing `test/contract/policySource.test.ts`; runtime fixture matrix and evidence acceptance gaps remain |
+| M9 | fixed | `src/console/registry.ts` limits device URLs; `src/console/routes.ts` and `src/console/mux.ts` verify online identity before sending a token; console URL test added |
+| L1 | fixed | `src/api/net.ts`; `test/unit/net.test.ts` rejects malformed/public `100/8` addresses |
+| L2 | fixed | `src/console/mux.ts` generation fencing and write-error containment |
+| L3 | fixed | `src/gate/tighten.ts` defaults auto mode to shadow and runtime deep-merges `tighten` |
+| L4 | open | merge failures are not persisted with retry/backoff state |
+| L5 | partial | `src/steward/workRuntime.ts` only removes the label while holding the winning claim; loser comment-delete retry remains open |
+| L6 | fixed | `src/gate/policySource.ts` requires the explicit fixture environment opt-in |
+| L7 | fixed | `src/console/registry.ts` migrates old inline tokens to 0600 token files |
+| L8 | open | approval-nonce requests do not yet have a per-item rate limit |
+

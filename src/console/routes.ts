@@ -51,7 +51,9 @@ export function createConsoleApp(
 	const csrf = options.csrf ?? randomBytes(32).toString("base64url");
 	const deviceMap = new Map(devices.map((device) => [device.id, device]));
 	const monitor = new DeviceMonitor(devices);
-	const mux = new StreamMux(deviceMap);
+	const online = async (device: ConsoleDevice) =>
+		(await monitor.check(device)).status === "online";
+	const mux = new StreamMux(deviceMap, fetch, online);
 	const app = new Hono();
 	app.use("*", consoleGuard(csrf, config));
 	async function fleet(c: {
@@ -99,6 +101,16 @@ export function createConsoleApp(
 			return c.json(
 				{ error: { code: "not_found", message: "device not found" } },
 				404,
+			);
+		if (!(await online(device)))
+			return c.json(
+				{
+					error: {
+						code: "unavailable",
+						message: "device identity unavailable",
+					},
+				},
+				503,
 			);
 		const suffix =
 			c.req.path.replace(`/api/devices/${encodeURIComponent(device.id)}`, "") ||

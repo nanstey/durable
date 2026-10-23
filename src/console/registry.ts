@@ -43,16 +43,29 @@ function privateWrite(path: string, value: string) {
 function validId(id: unknown): id is string {
 	return typeof id === "string" && /^[A-Za-z0-9._-]+$/.test(id);
 }
-function validUrl(url: unknown): url is string {
+export function validConsoleUrl(url: unknown): url is string {
 	if (typeof url !== "string") return false;
 	try {
 		const parsed = new URL(url);
+		const host = parsed.hostname.toLowerCase();
+		const octets = host.split(".").map(Number);
+		const tailnetIp =
+			octets.length === 4 &&
+			octets.every(
+				(octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255,
+			) &&
+			octets[0] === 100 &&
+			octets[1] >= 64 &&
+			octets[1] <= 127;
+		const local =
+			host === "localhost" || host === "127.0.0.1" || host === "::1";
 		return (
 			["http:", "https:"].includes(parsed.protocol) &&
 			!parsed.username &&
 			!parsed.password &&
 			!parsed.search &&
-			!parsed.hash
+			!parsed.hash &&
+			(local || tailnetIp || host.endsWith(".ts.net"))
 		);
 	} catch {
 		return false;
@@ -101,7 +114,7 @@ export function loadDevices(path = devicesPath()): ConsoleDevice[] {
 		const entry = device as Partial<StoredDevice>;
 		if (
 			!validId(entry.id) ||
-			!validUrl(entry.url) ||
+			!validConsoleUrl(entry.url) ||
 			(entry.uid !== undefined && typeof entry.uid !== "string") ||
 			(entry.agents !== undefined &&
 				(!Array.isArray(entry.agents) || !entry.agents.every(validId)))
@@ -136,7 +149,7 @@ export function loadDevices(path = devicesPath()): ConsoleDevice[] {
 export function saveDevices(devices: ConsoleDevice[], path = devicesPath()) {
 	const stored: StoredDevice[] = [];
 	for (const { token, ...device } of devices) {
-		if (!validId(device.id) || !validUrl(device.url) || !token)
+		if (!validId(device.id) || !validConsoleUrl(device.url) || !token)
 			throw Error("invalid console device");
 		privateWrite(deviceTokenPath(device.id), `${token}\n`);
 		stored.push(device);

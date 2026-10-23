@@ -5,6 +5,8 @@ type Whois = {
 	Node?: { Tags?: string[]; UserProfile?: { LoginName?: string } };
 	UserProfile?: { LoginName?: string };
 };
+const peerCache = new Map<string, { allowed: boolean; expiresAt: number }>();
+const peerCacheTtlMs = 10_000;
 
 export function loopbackBind(bind: string = "loopback") {
 	if (bind !== "loopback" && bind !== "127.0.0.1" && bind !== "::1")
@@ -42,6 +44,9 @@ export async function peerAllowed(
 	run = execa,
 ): Promise<boolean> {
 	if (!remoteAddress || !allowedPeers.length) return false;
+	const key = `${remoteAddress}\0${[...allowedPeers].sort().join("\0")}`;
+	const cached = run === execa ? peerCache.get(key) : undefined;
+	if (cached && cached.expiresAt > Date.now()) return cached.allowed;
 	const result = await run("tailscale", ["whois", "--json", remoteAddress], {
 		timeout: 5_000,
 	});
@@ -51,5 +56,8 @@ export async function peerAllowed(
 		whois.Node?.UserProfile?.LoginName,
 		whois.UserProfile?.LoginName,
 	].filter((value): value is string => Boolean(value));
-	return names.some((name) => allowedPeers.includes(name));
+	const allowed = names.some((name) => allowedPeers.includes(name));
+	if (run === execa)
+		peerCache.set(key, { allowed, expiresAt: Date.now() + peerCacheTtlMs });
+	return allowed;
 }

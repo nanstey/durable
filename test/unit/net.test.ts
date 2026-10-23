@@ -9,6 +9,15 @@ test("tailnet address accepts an explicit address and rejects non-tailnet binds"
 	await assert.rejects(() => tailnetAddress("0.0.0.0"));
 });
 
+test("tailnet address rejects malformed and public 100/8 addresses", async () => {
+	for (const value of [
+		[100, 63, 1, 1].join("."),
+		[100, 128, 1, 1].join("."),
+		[100, 64, 256, 1].join("."),
+	])
+		await assert.rejects(() => tailnetAddress(value));
+});
+
 test("whois allows only configured tags and fails closed for unknown peers", async () => {
 	const run = async () => ({
 		stdout: JSON.stringify({ Node: { Tags: ["tag:durable-console"] } }),
