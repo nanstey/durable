@@ -198,6 +198,10 @@ test("device identity contains names and granted scopes, never credentials", asy
 	assert.equal(device.apiVersion, "v1");
 	assert.deepEqual(device.scopeSummary, ["read"]);
 	assert.equal(device.profile, "fixture");
+	assert.deepEqual(device.organization, {
+		id: "default",
+		bundleHash: "default",
+	});
 	assert.match(device.uid, /^[a-f0-9-]{36}$/);
 	assert.equal(JSON.stringify(device).includes(tokens.read), false);
 });

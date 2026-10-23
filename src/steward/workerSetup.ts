@@ -97,8 +97,12 @@ export function setupWorkers(options: SetupOptions) {
 		agent,
 		(item) => processes.fenced(item),
 	);
+	const organization = definition.organization;
 	const workers = new WorkerRegistry((item) => {
-		if (processes.fenced(item) || disabled(agent))
+		if (
+			processes.fenced(item) ||
+			disabled(agent, undefined, Date.now(), process.env, organization)
+		)
 			throw Error("worker fenced or paused");
 	});
 	const notifier = new Notifier({
@@ -108,7 +112,15 @@ export function setupWorkers(options: SetupOptions) {
 		profileLogin: identity?.manifest.github.login,
 	});
 	const check = async () => {
-		if (disabled(agent, definition.schedule?.quietHours))
+		if (
+			disabled(
+				agent,
+				definition.schedule?.quietHours,
+				Date.now(),
+				process.env,
+				organization,
+			)
+		)
 			throw Error("dispatch paused");
 	};
 	const kinds = new WorkerKindRegistry();

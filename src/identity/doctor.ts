@@ -9,8 +9,12 @@ import {
 } from "../config/agent.ts";
 import { durableHome } from "../config/paths.ts";
 import {
+	contentHash,
+	organizationPath,
 	listOrganizations,
 	loadOrganization,
+	materializeOrganization,
+	releaseFor,
 } from "../config/organizations.ts";
 import {
 	type AgentDef,
@@ -79,6 +83,11 @@ export function doctor(
 			const memberships = listOrganizations().filter((name) =>
 				loadOrganization(name).memberAgents.includes(id),
 			);
+			const release = releaseFor(organizationName);
+			const bytes = readFileSync(organizationPath(organizationName), "utf8");
+			const approved = Boolean(
+				release && release.contentHash === contentHash(bytes),
+			);
 			checks.push({
 				name: "organization membership",
 				ok: organization.memberAgents.includes(id) && memberships.length === 1,
@@ -88,12 +97,28 @@ export function doctor(
 						: "missing or duplicate organization membership",
 				fix: "assign this agent to exactly one named organization",
 			});
+			checks.push({
+				name: "organization approval",
+				ok: approved,
+				detail: approved
+					? `approved ${release?.contentHash}`
+					: "local bytes do not match an approved release",
+				fix: "apply the local organization file with a fresh organization approval nonce",
+			});
+			if (approved) {
+				const effective = materializeOrganization(id, def);
+				checks.push({
+					name: "organization materialization",
+					ok: true,
+					detail: `${effective.bundleHash}/${effective.effectivePolicyHash}`,
+				});
+			}
 		} catch {
 			checks.push({
 				name: "organization membership",
 				ok: false,
-				detail: "organization document missing or invalid",
-				fix: "create a valid local organizations/<name>.yaml document",
+				detail: "organization document missing, invalid, or not materializable",
+				fix: "create and approve a valid local organizations/<name>.yaml document",
 			});
 		}
 	}

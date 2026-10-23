@@ -62,6 +62,44 @@ test("organization approvals bind candidate bytes and cannot replay", () => {
 		else process.env.DURABLE_HOME = oldHome;
 	}
 });
+test("named organizations require an approved release and materialize policy ceilings", () => {
+	const root = mkdtempSync(join(tmpdir(), "durable-org-"));
+	mkdirSync(join(root, "agents"));
+	mkdirSync(join(root, "organizations"));
+	const bytes =
+		"name: work\nmemberAgents: [agent]\nscope:\n  repos: [acme/safe]\nlimits:\n  maxConcurrentWorkers: 1\n";
+	writeFileSync(join(root, "organizations", "work.yaml"), bytes);
+	const oldAgents = process.env.DURABLE_AGENTS_DIR;
+	const oldHome = process.env.DURABLE_HOME;
+	process.env.DURABLE_AGENTS_DIR = join(root, "agents");
+	process.env.DURABLE_HOME = join(root, "state");
+	try {
+		const def = validateAgent({
+			profile: "fixture",
+			organization: "work",
+			scope: { repos: [{ slug: "acme/safe" }] },
+			limits: { maxConcurrentWorkers: 1 },
+		});
+		assert.throws(() => materializeOrganization("agent", def), /approved/);
+		const code = issueOrganizationNonce("work", null, contentHash(bytes));
+		applyOrganization("work", code);
+		const materialized = materializeOrganization("agent", def);
+		assert.equal(materialized.definition.limits?.maxConcurrentWorkers, 1);
+		assert.equal(materialized.policy?.name, "work");
+		const hostile = validateAgent({
+			profile: "fixture",
+			organization: "work",
+			scope: { repos: [{ slug: "acme/safe" }] },
+			sources: [{ kind: "github-issues", repo: "acme/other" }],
+		});
+		assert.throws(() => materializeOrganization("agent", hostile), /source/);
+	} finally {
+		if (oldAgents === undefined) delete process.env.DURABLE_AGENTS_DIR;
+		else process.env.DURABLE_AGENTS_DIR = oldAgents;
+		if (oldHome === undefined) delete process.env.DURABLE_HOME;
+		else process.env.DURABLE_HOME = oldHome;
+	}
+});
 test("organization documents use the sibling of DURABLE_AGENTS_DIR", () => {
 	const root = mkdtempSync(join(tmpdir(), "durable-org-"));
 	mkdirSync(join(root, "agents"));

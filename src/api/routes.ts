@@ -24,6 +24,7 @@ export function createApi(opts: {
 	agent: string;
 	machine: string;
 	profile: string;
+	organization?: { id: string; bundleHash: string };
 	harness: StewardHarness;
 	definition: AgentDef;
 	startedAt?: number;
@@ -141,6 +142,10 @@ export function createApi(opts: {
 			machine: opts.machine,
 			agent: opts.agent,
 			profile: opts.profile,
+			organization: opts.organization ?? {
+				id: "default",
+				bundleHash: "default",
+			},
 			scopeSummary: c.get("actor").scopes,
 			capabilities: {
 				tree: true,

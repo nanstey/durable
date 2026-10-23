@@ -19,6 +19,7 @@ export type Device = {
 	machine: string;
 	agent: string;
 	profile: string;
+	organization: { id: string; bundleHash: string };
 	scopeSummary: Scope[];
 	capabilities: { tree: boolean; startableKinds: string[] };
 	startedAt: number;

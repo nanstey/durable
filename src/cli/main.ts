@@ -23,7 +23,11 @@ import {
 } from "../console/registry.ts";
 import { ConsoleServiceManager } from "../platform/service/console.ts";
 import { selectServiceManager } from "../platform/service/select.ts";
-import { resumeLocal } from "../steward/killswitch.ts";
+import {
+	pauseOrganization,
+	resumeLocal,
+	resumeOrganization,
+} from "../steward/killswitch.ts";
 import { assignedPort, run } from "../steward/main.ts";
 import { attachTui } from "../tui/main.ts";
 import { doctorCommand, formatDoctor } from "./doctor.ts";
@@ -177,6 +181,24 @@ subCommands.org = defineCommand({
 					},
 					args.json,
 				);
+			},
+		}),
+		pause: defineCommand({
+			meta: { name: "pause" },
+			args: { name: { type: "positional", required: true } },
+			run({ args }) {
+				loadOrganization(args.name);
+				pauseOrganization(args.name);
+				console.log(`organization ${args.name} paused`);
+			},
+		}),
+		resume: defineCommand({
+			meta: { name: "resume" },
+			args: { name: { type: "positional", required: true } },
+			run({ args }) {
+				loadOrganization(args.name);
+				resumeOrganization(args.name);
+				console.log(`organization ${args.name} resumed`);
 			},
 		}),
 	},

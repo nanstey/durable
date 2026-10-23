@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { durableHome } from "../config/paths.ts";
 import { audit } from "./audit.ts";
@@ -32,16 +32,36 @@ function insideWindow(start: number, end: number, current: number) {
 		? current >= start && current < end
 		: current >= start || current < end;
 }
+function organizationPausePath(organization: string) {
+	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(organization))
+		throw Error("organization must be a simple name");
+	return join(durableHome(), "organizations", organization, "paused");
+}
+export function pauseOrganization(organization: string) {
+	const path = organizationPausePath(organization);
+	mkdirSync(join(durableHome(), "organizations", organization), {
+		recursive: true,
+		mode: 0o700,
+	});
+	writeFileSync(path, "paused\n", { mode: 0o600 });
+}
+export function resumeOrganization(organization: string) {
+	const path = organizationPausePath(organization);
+	if (existsSync(path)) unlinkSync(path);
+}
 export function disabled(
 	agent: string,
 	quiet?: string,
 	now = Date.now(),
 	env = process.env,
+	organization?: string,
 ) {
 	return (
 		env.DURABLE_DISABLED === "1" ||
 		existsSync(join(durableHome(), "disabled")) ||
 		existsSync(join(agentDir(agent), "disabled")) ||
+		(Boolean(organization) &&
+			existsSync(organizationPausePath(organization ?? "default"))) ||
 		quietHours(quiet, now)
 	);
 }
