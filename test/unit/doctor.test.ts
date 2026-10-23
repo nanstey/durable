@@ -135,12 +135,6 @@ const cases: Array<
 		},
 	],
 	[
-		"future configuration",
-		(_d, m) => {
-			m.approval = { rpId: "localhost" };
-		},
-	],
-	[
 		"ports",
 		(_d, m) => {
 			m.agents = [

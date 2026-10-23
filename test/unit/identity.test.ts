@@ -74,7 +74,7 @@ for (const [label, value] of Object.entries({
 	unknown: { name: "m", agents: [], surprise: true },
 	missing: { name: "m" },
 	peers: { name: "m", agents: [], peers: ["remote"] },
-	bind: { name: "m", agents: [], network: { bind: "tailnet" } },
+	bind: { name: "m", agents: [], network: { bind: "public" } },
 	channel: { name: "m", agents: [], channels: { alert: { kind: "ntfy" } } },
 	port: { name: "m", agents: [{ id: "a", port: 65536 }] },
 	nested: { name: "m", agents: [], profiles: { fallback: true } },
