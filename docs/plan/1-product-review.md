@@ -1,7 +1,7 @@
 # Product review: durable, proactive agents as the base of the harness
 
 Planning only. No source, tests, config or dependencies are changed by this plan.
-Revision 9 (O1: per-agent external worker connectors; Composio candidate, code-owned tool wrappers, profile binding, audit and an open hosted-custody decision). Revision 8 (Warp Factories research: named work items, configurable code-enforced pipeline, optional spec gate, metrics and PR-only improvement loop; personal pi-durable-only framing). Revision 1 (user comments C1-C7 applied). Revision 2 (U1: no ntfy; U2: multi-machine web console on one chosen machine). Revision 7 (U6: durable-conversation workers as a second, opt-in worker kind; a durable conversation tree and `durable attach` TUI shown in Orca terminals; a human-held rule). Revision 6 (U5: the engine and this plan move to the public `nanstey/durable` repo; the skills repo keeps only a thin integration; public-repo hygiene rules and a CI scan). Revision 5 (Q18-Q23: policy mechanism deferred behind a `RepoPolicySource` seam; the phone is just another browser client; no default chat rate limits; Android defaults accepted). Revision 4 (U3: dpi-* projects are inspiration only; U4: an Android/Termux daemon as an additional platform target). Revision 3 (Q5-Q17 answers: repo-committed human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet; see README Decision log).
+Revision 10 (organizations: optional context policy boundaries; implicit-default compatibility, named profile sharing and per-organization controls). Revision 9 (O1: per-agent external worker connectors; Composio candidate, code-owned tool wrappers, profile binding, audit and an open hosted-custody decision). Revision 8 (Warp Factories research: named work items, configurable code-enforced pipeline, optional spec gate, metrics and PR-only improvement loop; personal pi-durable-only framing). Revision 1 (user comments C1-C7 applied). Revision 2 (U1: no ntfy; U2: multi-machine web console on one chosen machine). Revision 7 (U6: durable-conversation workers as a second, opt-in worker kind; a durable conversation tree and `durable attach` TUI shown in Orca terminals; a human-held rule). Revision 6 (U5: the engine and this plan move to the public `nanstey/durable` repo; the skills repo keeps only a thin integration; public-repo hygiene rules and a CI scan). Revision 5 (Q18-Q23: policy mechanism deferred behind a `RepoPolicySource` seam; the phone is just another browser client; no default chat rate limits; Android defaults accepted). Revision 4 (U3: dpi-* projects are inspiration only; U4: an Android/Termux daemon as an additional platform target). Revision 3 (Q5-Q17 answers: repo-committed human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet; see README Decision log).
 
 ## Problem (user's terms)
 
@@ -83,6 +83,7 @@ Single operator, several machines, Orca for session management, Tailscale betwee
 | W10 | **View any durable conversation in Orca**: `durable attach` shows a live tree (steward, chat threads, scouts, workers, nested children) in an Orca terminal beside normal sessions, with steer, follow-up and abort where the node allows; take over a worker's worktree safely with `durable hold`.                                                                                                                                                                                                                                                    | Orca lists durable conversations; no two writers in one worktree                                                                                                                           |
 | W11 | **Measure and improve:** inspect PRs opened/merged, autonomy, cycle time and cost per PR; after repeated failures, review a proposed skills, prompt or pipeline-config PR. | Metrics are derived from GitHub and steward records; improvement is adopted only by merging its PR |
 | W12 | **Use an approved external connector:** a worker uses one explicitly allowlisted read or write tool under its agent profile; the operator can see every call and stop it. | No ambient account or credential crosses agents; connector output cannot merge or approve anything |
+| W13 | **Segment contexts:** group work, personal and client agents into organizations, each with its own repo, tool and connector ceiling; list/filter the fleet and pause one context. | Profiles remain machine-local; an unassigned agent is in the implicit default and behaves exactly as before; any sharing is named and explicit |
 
 ## Identity decision: the operator's own GitHub account (C2)
 
@@ -146,7 +147,7 @@ Channel management model:
 In scope: per-machine steward process, remote-ready daemon API, operator CLI/TUI, multi-machine web console served from one chosen machine, profile manifests, agent/machine definitions, `doctor`, read-only
 scout, a `WorkerDispatcher` adapter layer (Orca primary, git-process second), claims and worker dispatch,
 notifications and channels, named work items, per-project configurable code-enforced pipelines, code-owned review/merge gate with human approval, per-repo opt-in auto-merge
-with shadow mode, per-agent allowlisted external worker connectors (not intake sources), second machine without a shared DB, kill switch, budgets, audit log, `docs/operator.md`,
+with shadow mode, per-agent allowlisted external worker connectors (not intake sources), optional organization policy boundaries with explicit named sharing, second machine without a shared DB, kill switch, budgets, audit log, `docs/operator.md`,
 a thin skills-repo integration (pinned install, thin skill), retirement of interactive subagents (skills repo).
 
 ## Non-goals (v1)
@@ -159,7 +160,7 @@ a thin skills-repo integration (pinned install, thin skill), retirement of inter
 - Replacing Orca, `idea-to-pr`, `handoff` or `orchestration`.
 - Per-agent GitHub bot accounts or GitHub Apps.
 - An auto-merge canary repo. Auto-merge proof is shadow mode plus recorded-fixture tests.
-- Multi-user operation, multi-team features, hosted-style roles or a market-driven roadmap.
+- Multi-user operation, multi-team features, hosted-style roles or a market-driven roadmap; organization nesting, RBAC and organization-owned secrets.
 - Warp interoperation or compatibility, and worker harnesses other than pi-durable (including Claude Code and Codex).
 - Fixing unrelated Jev patch drift.
 
@@ -210,6 +211,8 @@ From revision 7:
 29. Per-project pipeline config selects Durable stages and gate conditions; code enforces every selected gate. The default pipeline remains the current flow. A complexity-triggered spec stage produces a draft PR and, when `specApproval` is true, requires human approval before dispatch.
 30. Metrics land in slice 15; slice 16 uses their outcomes to make PR-only self-improvement proposals. GitHub is the first intake adapter; future adapters share code-owned, fail-closed eligibility.
 31. External connectors are optional worker tools, not intake adapters: definition allowlists, profile-bound credentials, code-owned wrappers, read/write classification, audit, budgets and the kill switch apply. Connector responses are untrusted and cannot authorize gates. Composio is the candidate first provider; hosted-versus-local third-party credential custody remains open (O1).
+32. An **organization** is an optional, non-secret policy boundary around member agents: defaults for pipeline, limits, quiet hours and notifications plus ceilings for repos, tools and connectors. It cannot replace profiles or create ambient sharing; agent definitions only narrow security-relevant organization policy.
+33. An agent with no organization resolves to an implicit `default` whose policy is its existing definition. Cross-organization sharing of a GitHub identity, subscription or connector credential is bilateral and named; profile material stays machine-local. Organization id appears in audit/metrics, fleet filters and per-organization pause; global pause remains global.
 
 ## Assumptions (labelled; confirm or correct)
 
@@ -241,6 +244,7 @@ Resolved:
 - **Q19:** no phone-specific rules. The phone is just another browser client of the same console with identical capabilities and guardrails (the passkey step-up applies to any browser; a phone passkey is the natural step-up device, and if no device supports WebAuthn the same fallback applies to every browser). Any console client may start the kinds the daemon supports (chat, scout); workers and reviewers are started by dispatch.
 - **Q20:** the hard chat limits are removed; audit, screening, fixed tool set, per-agent budgets and the kill switch remain; a 1 MiB body ceiling protects the daemon process from a runaway client or loop; rate limiting is opt-in per agent, default off.
 - **Q28 (open, O1):** may hosted Composio hold the operator's third-party connector credentials and connected-account records, or must connectors remain locally hosted/profile-custodied? Until the user decides, no hosted connector is enabled; Composio remains a candidate provider and plain MCP remains an alternative.
+- **Q29-Q32 (open, revision 10):** organization topology, policy editors, organization-secret custody and nesting use the defaults below; no live sharing is enabled until the relevant choice is recorded.
 - **Q21-Q23:** accepted: the Android daemon runs steward + scout + chat + light `git-process` workers (no auto-merge by default); Termux directly; the phone is sometimes offline.
 
 Still open (each has a default):
@@ -252,6 +256,10 @@ Still open (each has a default):
 | Q25 | Which roles use the durable-conversation worker kind first?                                                                                                                                                    | Reviewers (read-only) and the Android agent's small workers; desktop code-writing workers stay on Pi sessions unless an agent opts in |
 | Q26 | Orca viewer terminal for durable workers: `on-start`, `on-demand` or `never`?                                                                                                                                  | `on-start` (capped by `maxConcurrent`), falling back to printing the `durable attach` command when Orca cannot create the terminal    |
 | Q27 | Does releasing a human hold need the guarded class (TTY + nonce, or passkey)?                                                                                                                                  | Yes, the same class as agent resume, so an agent cannot lift a human's hold                                                           |
+| Q29 | Is stewardship one process per organization or per existing agent/scope?                                                                                                                                        | Keep one steward per agent/scope; organization is a policy boundary, not a coordinator                                                |
+| Q30 | Who may edit organization policy?                                                                                                                                                                               | The local operator edits non-secret organization files; changes require doctor and normal repository review where versioned          |
+| Q31 | May an organization own or custody secrets?                                                                                                                                                                    | No: profiles remain machine-local custody; organization files hold named references only                                               |
+| Q32 | Are organizations nestable?                                                                                                                                                                                     | No nesting in v1; use flat names and explicit references, then add a separate spec if hierarchy becomes necessary                    |
 
 ## Review status
 

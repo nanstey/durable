@@ -1,6 +1,6 @@
 # System architecture
 
-Inputs: [1-product-review](./1-product-review.md). Revision 9 (O1: per-agent connectors are code-owned worker tools; Composio candidate; hosted credential custody open). Revision 8 (Warp Factories research: named work item, per-project code-enforced pipeline, optional spec gate, metrics and PR-only improvement loop; pi-durable-only personal-tool boundary). File placement, types and call stacks are in
+Inputs: [1-product-review](./1-product-review.md). Revision 10 (organizations: optional policy boundary, implicit-default compatibility, named sharing). Revision 9 (O1: per-agent connectors are code-owned worker tools; Composio candidate; hosted credential custody open). Revision 8 (Warp Factories research: named work item, per-project code-enforced pipeline, optional spec gate, metrics and PR-only improvement loop; pi-durable-only personal-tool boundary). File placement, types and call stacks are in
 [3-program-design](./3-program-design.md). Revision 1 (user comments C1-C7). Revision 2 (U1: no ntfy; U2: multi-machine web console; remote-ready daemon API; guarded console approvals). Revision 3 (repo-committed, human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet). Revision 4 (dpi-* are inspiration only, no code reuse; Android/Termux daemon as an additional platform target behind a platform abstraction). Revision 7 (U6: a second worker kind, `durable-conversation`, alongside Pi-session workers; a conversation tree and `durable attach` TUI viewable in Orca terminals; a human-held rule; D4, D19, D20; revised after a cross-family review: `ModelRuntime` model auth, named profiles only, minimal durable-shell environment, fenced hold, advisory-only confinement, replay-safe push/PR, guarded release, kind selection precedence, one lifecycle table). Revision 6 (the engine moves to its own public repo `nanstey/durable`; the skills repo keeps a thin integration; D18). Revision 5 (repo policy mechanism undecided: a pluggable `RepoPolicySource` seam with mechanism-independent invariants; the phone is just another browser client with identical capabilities; no default chat rate limits).
 
 Evidence base (read for this plan):
@@ -518,6 +518,14 @@ A connection belongs to the selected **agent profile**, not a process ambient va
 
 Both durable-conversation and Pi-session workers receive only code-owned wrappers. For Pi sessions, the thin extension or MCP bridge forwards an allowlisted request to the steward; it must not expose a general MCP URL. Connector responses are untrusted content: size-capped, inertly rendered and unable to change config, issue approvals, release holds, or contribute a positive gate fact. Unverifiable connector output can only lower an outcome or request human attention. The gate remains limited to GitHub-computed facts and steward records (D8).
 
+### D23. Organizations: context policy without credential custody (revision 10)
+
+An **organization** is a non-secret configuration boundary around agents, not a daemon, profile or shared database. `organizations/<name>.yaml` defines membership and defaults for pipeline, limits, quiet hours and notifications plus ceilings for `scope.repos`, code-owned tools and connector provider/tool/read-write access. `AgentDef.organization` is optional: omitted resolves to an in-memory `default` organization that permits exactly the existing agent definition, so current definitions, machine files, environment construction and shipped execution paths retain their semantics.
+
+Effective policy is `organization defaults < agent definition`. An agent may narrow a repo/tool/connector set, lower limits, extend quiet hours, reduce notification delivery or select an already-permitted pipeline subset. It cannot add a repo, tool or connector; turn a read access into write; raise limits; weaken quiet hours; add notification targets; or enable a disabled stage. Loosening is a doctor error. The effective policy is checked before source polling, checkout, claim, dispatch, connector invocation and GitHub effects.
+
+Profiles remain the sole machine-local credential unit. Organization `profileRefs` are named aliases only; use across organizations requires a bilateral named reference. A shared GitHub account, subscription or connector credential is consequently deliberate, visible to doctor as a warning, and never inferred from matching names. `buildAgentEnv` uses the selected agent profile plus effective organization policy only; it cannot resolve another organization's profile, repo, tool or connector. Audit, work-item, notification, connector and metric records carry `organization` (including `default`). Global pause remains global; organization pause fences only its member agents. CLI/API/console expose list/show, filters and fleet grouping. Flat, single-operator organizations only: nesting, RBAC and organization-owned secrets are deferred.
+
 ## 3. Contracts
 
 ### 3.1 Agent definition (`agents/<id>.yaml`; no secrets, no absolute paths, no hostnames)
@@ -525,6 +533,7 @@ Both durable-conversation and Pi-session workers receive only code-owned wrapper
 ```yaml
 version: 1
 id: acme-api # [a-z0-9-]{3,32}; unit name, branch prefix, label suffix
+organization: work # optional; omitted = implicit default
 description: Keep acme/api moving
 profile: work # name of a pi-auth-profiles profile; contents are per machine
 models:
@@ -609,6 +618,25 @@ chat: # all optional
 peers: [] # reserved; non-empty rejected in v1
 network: { bind: loopback } # loopback | tailnet (tailnet accepted from slice 11; never 0.0.0.0)
 ```
+
+### 3.1a Organization definition (`organizations/<name>.yaml`; no secrets)
+
+```yaml
+version: 1
+name: work
+memberAgents: [acme-api]
+profileRefs: [work] # named local profile aliases; sharing is explicit on both sides
+settings:
+  scope: { repos: [acme/api] }
+  pipeline: { stages: [scout, build, review, gate, handoff] }
+  limits: { dailyDollars: 10, dailyTokens: 1000000 }
+  quietHours: "22:00-07:00"
+  notify: { channels: [console, desktop] }
+  tools: { allow: [read, edit, bash, commit, push_branch, open_draft_pr], deny: [] }
+  connectors: { allow: [{ provider: composio, tool: SEARCH_ISSUES, access: read }], deny: [] }
+```
+
+These are policy ceilings, not credential/configuration values. `profileRefs` are names only, and no organization file can select a profile for an agent.
 
 ### 3.2 Machine file (`~/.config/durable/machine.yaml`, never committed)
 
@@ -698,7 +726,7 @@ No file name, path, format or trust-pin layout is specified. The invariants P1-P
 `steward.queue`, `steward.budget`, `steward.connectors` (profile-bound connection aliases and per-item counters, never credentials), `steward.gate` (decisions: facts, reasons, sha, action), `steward.reviews` (verdict, family, sha), `steward.notify` (dedup keys, reminder state, nonce hashes), `steward.inbox` (events, ack state; never secrets), `steward.approval` (enrolled public keys, challenge hashes and expiry; no secrets), `steward.policy` (per repo policy source summary and verification record), `steward.chat` (conversation index; rate-limit counters only if the opt-in is on).
 Startup containment and hold/recovery fences use an atomic fsynced `procs.json` journal readable before the harness opens. Failed cleanup keeps its records and refuses startup. The model budget document has UTC-day usage and configurable `limits.dailyDollars` / `limits.dailyTokens` ceilings (defaults 10 / 1000000); an in-flight response can overshoot, but the next request/tool is blocked.
 External state wins on conflict: on resume, code re-derives each non-terminal item from GitHub and the dispatcher before acting.
-Audit: `$DURABLE_HOME/agents/<id>/audit.jsonl`, append-only: `{ts, agent, profile, login, actor: "code"|"llm"|"human", action, target, decision, reasons, sha}`. Redacted. Separate from the DB. Merges also leave a PR comment with the gate report.
+Audit: `$DURABLE_HOME/agents/<id>/audit.jsonl`, append-only: `{ts, agent, organization, profile, login, actor: "code"|"llm"|"human", action, target, decision, reasons, sha}`. Redacted. Separate from the DB. Merges also leave a PR comment with the gate report.
 
 ## 4. Data flow (one item)
 
@@ -741,7 +769,7 @@ Audit: `$DURABLE_HOME/agents/<id>/audit.jsonl`, append-only: `{ts, agent, profil
 
 ## 7. Observability
 
-`durable status`, `durable queue <id>`, `durable metrics <id>`, `durable inbox <id>`, `durable audit <id> --since`, `durable attach <id>` (TUI), `durable logs <id>`, `durable doctor <id|--all>`, `durable profile show|check`, `durable token create|list|revoke`, `durable console ...`. Workers: Orca terminals (`openViewer`) and per-agent Pi sessions. Console: fleet and per-agent views, transcript attach, audit, inbox, gate report.
+`durable status`, `durable org list|show <name>`, `durable queue <id> [--organization <name>]`, `durable metrics <id> [--organization <name>]`, `durable inbox <id>`, `durable audit <id> --since [--organization <name>]`, `durable attach <id>` (TUI), `durable logs <id>`, `durable doctor <id|--all>`, `durable profile show|check`, `durable token create|list|revoke`, `durable console ...`. Workers: Orca terminals (`openViewer`) and per-agent Pi sessions. Console: fleet and per-agent views, transcript attach, audit, inbox, gate report.
 
 ## 8. Unresolved and deferred
 
