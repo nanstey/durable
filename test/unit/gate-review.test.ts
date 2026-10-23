@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -168,6 +168,12 @@ test("launches a reviewer with the PR SHA and opposite worker family", async () 
 	kinds.register(kind);
 	const registry = new WorkerRegistry();
 	const dispatcher = new FakeDispatcher();
+	const skillsRoot = mkdtempSync(join(tmpdir(), "durable-skills-"));
+	mkdirSync(join(skillsRoot, "skills", "review-code"), { recursive: true });
+	writeFileSync(
+		join(skillsRoot, "skills", "review-code", "SKILL.md"),
+		"# review",
+	);
 	await launchReviewer(
 		definition,
 		{ name: "fixture", agents: ["agent"] },
@@ -178,6 +184,7 @@ test("launches a reviewer with the PR SHA and opposite worker family", async () 
 			...running("pi-session", "result.json"),
 			id: "review-sha",
 		},
+		skillsRoot,
 	);
 	assert.equal(launched?.job.role, "reviewer");
 	assert.equal(launched?.job.reviewedHeadSha, "head");

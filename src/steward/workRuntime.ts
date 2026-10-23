@@ -311,6 +311,7 @@ export class WorkRuntime {
 						env: { ...this.options.env, DURABLE_ITEM: item.id },
 						limits: this.options.definition.limits ?? {},
 					},
+					this.options.skillsRoot,
 				);
 				task.review = {
 					id: launched.id,

@@ -53,9 +53,16 @@ export async function launchReviewer(
 	dispatcher: import("../dispatch/types.ts").WorkerDispatcher,
 	kinds: import("../workers/kind.ts").WorkerKindRegistry,
 	input: ReviewerLaunch,
+	skillsRoot?: string,
 ): Promise<RunningReview> {
 	const model = reviewerModel(definition);
-	const kind = selectWorkerKind(kinds, definition, machine, "reviewer");
+	const kind = selectWorkerKind(
+		kinds,
+		definition,
+		machine,
+		"reviewer",
+		skillsRoot,
+	);
 	await workers.launch(dispatcher, kind, {
 		id: input.id,
 		agent: input.agent,
