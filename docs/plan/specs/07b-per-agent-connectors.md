@@ -3,6 +3,7 @@
 Objective: add opt-in external **tool-use connectors** for workers, never intake sources. Each agent explicitly allowlists connector tools; every invocation is profile-bound, code-owned, budgeted, kill-switchable and audited. Composio is the first candidate provider, with a fake provider for tests and a plain-MCP provider possible later. Connector data is untrusted input. No connector result authorizes a gate decision.
 Design refs: [Composio research](../../research/composio-connectors.md); architecture D22, D3-D4, D8-D9, D16, §3.1 and §3.4; program design §2 (I1-I4, G1-G8), §3.3-3.4 and §5; product review W12 and decision 31.
 Revision 9 (O1): external connectors are worker tools, not sources. Hosted Composio credential custody is an OPEN DECISION; the existing machine-local profile model remains the default.
+Revision 10: slice 7c adds optional organization connector ceilings. Provider selection must enforce both the organization and agent allowlists; an omitted organization is the implicit default and leaves this spec's current agent-level behavior unchanged.
 Depends on: specs 02 (definition schema, profiles, doctor and environment), 03 (audit, limits and kill switch), 06 (Pi-session workers and guard), 06c (durable-conversation worker tools), and 07 (gate invariants). It may ship after 7 and does not block slices 8-16.
 
 ## Checklist
@@ -15,7 +16,8 @@ Depends on: specs 02 (definition schema, profiles, doctor and environment), 03 (
 6. **Limits, stop and audit:** check the global kill switch, per-agent budget, per-item limits and connector call/cost budget immediately before invocation; propagate cancellation/timeouts to the provider. Write a redacted Durable audit event before and after every call: agent/profile name, worker/item, provider, connection alias, tool, read/write class, input/output byte counts, outcome, timing, budget delta and vendor correlation ID if supplied. Do not log credentials or full connector content. Acceptance: kill/pause, timeout, budget exhaustion and restart/reconciliation tests make no duplicate write call; audit grep proves redaction.
 7. **Untrusted-content boundary:** label every connector result as untrusted before it reaches a model. Size-cap and render it as inert text; do not let returned instructions choose tools, change definitions, alter allowlists, release holds, approve, merge or authorize a gate fact. Gate decisions use only their existing GitHub-computed facts and steward records; unverifiable connector output can only lower/park/escalate, never enable a merge or approval. Acceptance: prompt-injection fixtures and a forged “approved/merged” connector response cannot change a gate outcome.
 8. **Custody and provider decision:** document the hosted-versus-local credential custody choice in `docs/connectors.md` and show it in `doctor`. Composio hosted OAuth/connected accounts are not enabled until the user explicitly accepts third-party credential custody; local/plain-MCP deployment remains an alternative. Record Composio's pricing/limit check date and configured connector ceiling in the audit/report surface. Acceptance: configuration without an explicit custody mode is refused for hosted providers.
-9. **Docs and pilot:** document tool classification, profile binding, audit fields, cancellation, data handling and the Pi-worker bridge limitation. Run a fake-provider end-to-end test for both worker kinds; run a real-provider pilot only after the custody decision and provider spike are accepted.
+9. **Organization policy integration (slice 7c):** take the effective organization allow/deny policy as a mandatory input to provider selection and both worker wrappers. A tool must be permitted by both policies; a write needs explicit write permission in both. An organization deny wins, and a connector/profile alias from another organization is refused. Acceptance: allow/deny/read/write/cross-organization matrices pass while the implicit-default fixture remains byte-for-byte behavior-compatible with the pre-organization path.
+10. **Docs and pilot:** document tool classification, profile binding, audit fields, cancellation, data handling and the Pi-worker bridge limitation. Run a fake-provider end-to-end test for both worker kinds; run a real-provider pilot only after the custody decision and provider spike are accepted.
 
 ## Risk controls
 
@@ -23,6 +25,7 @@ Depends on: specs 02 (definition schema, profiles, doctor and environment), 03 (
 - Durable owns allowlisting, write classification, cancellation, budgets and audit even when a provider supplies similar controls.
 - Connector output is untrusted and cannot authorize a gate, approval, hold release or policy verification.
 - Hosted Composio credentials are an explicit opt-in; provider audit/self-hosting claims are not relied on unless verified at implementation.
+- Organization policy can only further restrict a connector; a named shared profile reference never implies a shared connector allowlist.
 
 ## Out of scope
 
