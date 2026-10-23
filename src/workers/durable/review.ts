@@ -27,7 +27,7 @@ export type ModelProvenance = {
 	model: string;
 	family: string;
 	entries: number;
-	source: "durable-entries";
+	source: "durable-entries" | "pi-session-log";
 };
 
 export function parseReviewResult(value: unknown): ReviewResult {
