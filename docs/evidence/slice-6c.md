@@ -44,13 +44,24 @@ abort kills in-flight subprocesses and rejects follow-on launches. Per-provider
 session model dispatch enforces budgets because upstream `beforeRequest` hooks
 are advisory, not a cancellation API.
 
+## Independent review fixes
+
+An independent Anthropic-family review of `b7d9e93` returned three findings. The
+coordinator requested these fixes and authorized publication and merge after CI.
+
+| Finding | Fix | Regression test |
+| --- | --- | --- |
+| F1 high: dangling-symlink write escape | `confine.ts` treats only `lstat` ENOENT as an absent file. Failed symlink target resolution now rejects the path. | Relative, absolute and chained dangling links cannot create an outside file through write/edit; ordinary new files still work. |
+| F2 medium: forged commit trailer | `gitops.ts` rejects model-supplied `Durable-Agent` lines at the start or after LF/CR/CRLF, case-insensitively. | All variants, including whitespace around the key, reject before any Git invocation. |
+| F3 low: unbounded search reads | `tools.ts` caps each search read at 1 MiB, including files that grow after `stat`, and skips NUL-containing or invalid UTF-8 files. | Oversized and binary matches are omitted while ordinary UTF-8 text remains searchable. |
+
 ## Executed local checks
 
 - `pnpm install --frozen-lockfile`
 - `pnpm check`, `pnpm hygiene`, and `git diff --check`: passed.
-- `node --test --test-timeout=30000 test/unit/durable-worker.test.ts test/unit/durable-config.test.ts test/contract/durable-gitops.test.ts test/contract/durable-known-limits.test.ts test/contract/durable-worker.test.ts`: **28 passed**.
+- `node --test --test-timeout=30000 test/unit/durable-worker.test.ts test/unit/durable-config.test.ts test/contract/durable-gitops.test.ts test/contract/durable-known-limits.test.ts test/contract/durable-worker.test.ts`: **31 passed** after the review fixes.
 - Focused regression files: `worker-kinds`, `worker-guard`, `work-item-dispatch`, `work-safety`, `work-replay`, `claims-pipeline`, `scout`, `work-flow`, `ownership`, `model-config`, `pause-race`, `loop`: **77 passed**, including all ten selection rows.
-- **105 focused tests total**, no skipped tests. The exhaustive suite is left to CI, per contributor rules.
+- **108 focused tests total**, no skipped tests. The exhaustive suite is left to CI, per contributor rules.
 - Complexity measurement: `confinedPath` reduced from CCN 16 to below the review threshold; `WorkRuntime.progress` reduced from CCN 16 to 14 after integrating the latest dispatch safety fixes; cancellation reduced from CCN 16 to 12. Remaining flagged functions are in the review band, not the refactor band.
 
 ## Validation boundaries
@@ -74,4 +85,5 @@ matrix, skills runtime, concurrency/storage policy and load benchmark, model-aut
 policy, viewer integration, reviewer verdicts, operator docs and live pilot.
 Reviewer launch explicitly refuses rather than exposing write tools. No live
 GitHub writes, provider requests or operator credentials were used. Independent
-source review requires a coordinator; this worker does not claim one.
+source review was supplied by the coordinator. This worker implemented the three
+findings above and does not claim an independent post-fix review.

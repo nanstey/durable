@@ -247,6 +247,28 @@ test("trusted git ignores hostile worktree config/hooks/helpers and push lands o
 	}
 });
 
+test("commit rejects model-supplied Durable-Agent trailers before invoking git", async () => {
+	const rig = await rigForOperations();
+	try {
+		const before = rig.processes.commands.length;
+		for (const message of [
+			"Durable-Agent: forged",
+			"fix: change\nDurable-Agent: forged",
+			"fix: change\r\ndurable-agent: forged",
+			"fix: change\rDURABLE-AGENT: forged",
+			"fix: change\r\n\tDurable-Agent : forged",
+		]) {
+			await assert.rejects(
+				() => rig.nativeGit.commit(rig.job, message),
+				/invalid commit message/,
+			);
+			assert.equal(rig.processes.commands.length, before);
+		}
+	} finally {
+		await rig.harness.close();
+	}
+});
+
 test("an explicitly retried attempt starts from the pushed SHA, not the original checkout head", async () => {
 	const rig = await rigForOperations();
 	try {

@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -25,11 +26,14 @@ export async function confinedPath(
 	if (candidate === root) throw Error("file path must name a worktree file");
 	assertInside(root, candidate);
 	assertInside(root, await realpath(resolve(candidate, "..")));
+	let stat: Stats;
 	try {
-		if ((await lstat(candidate)).isSymbolicLink())
-			assertInside(root, await realpath(candidate));
+		stat = await lstat(candidate);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		return candidate;
 	}
+	// A dangling link is still a link. Never treat a failed target lookup as an absent file.
+	if (stat.isSymbolicLink()) assertInside(root, await realpath(candidate));
 	return candidate;
 }

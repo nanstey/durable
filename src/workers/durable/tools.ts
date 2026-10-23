@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { open, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type ConversationId, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
@@ -32,6 +32,8 @@ export function screenToolOutput(text: string): string {
 		);
 }
 
+const searchFileBytes = 1024 * 1024;
+
 export class DurableFileTools {
 	private readonly worktree: string;
 	constructor(worktree: string) {
@@ -53,8 +55,30 @@ export class DurableFileTools {
 			throw Error("edit text must match exactly once");
 		await writeFile(resolved, text.replace(before, after), "utf8");
 	}
-	// Called through the awaited fileTools factory below (Fallow cannot follow that receiver).
-	// fallow-ignore-next-line unused-class-member
+	private async searchText(path: string): Promise<string | undefined> {
+		const file = await open(await confinedPath(this.worktree, path), "r");
+		try {
+			if ((await file.stat()).size > searchFileBytes) return;
+			const chunks: Buffer[] = [];
+			// Read at most cap + 1 bytes, even if the file grows after stat().
+			for await (const chunk of file.createReadStream({
+				end: searchFileBytes,
+				autoClose: false,
+			}))
+				chunks.push(chunk as Buffer);
+			const bytes = Buffer.concat(chunks);
+			if (bytes.length > searchFileBytes || bytes.includes(0)) return;
+			try {
+				return screenToolOutput(
+					new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+				);
+			} catch {
+				return;
+			}
+		} finally {
+			await file.close();
+		}
+	}
 	async search(needle: string): Promise<string> {
 		const matches: string[] = [];
 		let visited = 0;
@@ -67,7 +91,9 @@ export class DurableFileTools {
 				const path = join(directory, entry.name);
 				if (entry.isDirectory()) await walk(path);
 				else if (entry.isFile()) {
-					const lines = (await this.read(path)).split("\n");
+					const text = await this.searchText(path);
+					if (text === undefined) continue;
+					const lines = text.split("\n");
 					for (const [i, line] of lines.entries()) {
 						if (line.includes(needle)) matches.push(`${path}:${i + 1}:${line}`);
 						if (matches.length >= 100) break;
@@ -138,7 +164,8 @@ export function fileTools(jobFor: (id: ConversationId) => Promise<JobSpec>) {
 		}),
 		defineTool({
 			name: "search",
-			description: "Search worktree text literally (bounded, no symlinks).",
+			description:
+				"Search worktree UTF-8 text literally. Skip symlinks, binary files and files over 1 MiB.",
 			parameters: Type.Object({ needle: Type.String() }),
 			replay: "safe",
 			execute: async ({ needle }, api) =>

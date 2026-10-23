@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	rmSync,
@@ -30,6 +31,52 @@ test("file tools refuse traversal, .git, and symlink escapes", async () => {
 	await assert.rejects(() => tools.read("outside"));
 	rmSync(worktree, { recursive: true, force: true });
 });
+test("dangling symlink targets cannot escape on file writes or edits", async () => {
+	const directory = root();
+	const worktree = join(directory, "worktree");
+	const outside = join(directory, "out");
+	mkdirSync(worktree);
+	mkdirSync(outside);
+	const target = join(outside, "new");
+	symlinkSync("../out/new", join(worktree, "relative-link"));
+	symlinkSync(target, join(worktree, "absolute-link"));
+	symlinkSync("relative-link", join(worktree, "chain"));
+	const tools = new DurableFileTools(worktree);
+	try {
+		for (const path of ["relative-link", "absolute-link", "chain"]) {
+			await assert.rejects(() => confinedPath(worktree, path));
+			await assert.rejects(() => tools.write(path, "pwned"));
+			await assert.rejects(() => tools.edit(path, "before", "after"));
+			assert.equal(existsSync(target), false);
+		}
+		await tools.write("plain.txt", "allowed");
+		assert.equal(await tools.read("plain.txt"), "allowed");
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("search skips oversized, NUL-containing and invalid UTF-8 files", async () => {
+	const worktree = root();
+	writeFileSync(join(worktree, "small.txt"), "first line\nneedle text\n");
+	const large = Buffer.alloc(2 * 1024 * 1024, "x");
+	large.write("needle");
+	writeFileSync(join(worktree, "large.txt"), large);
+	writeFileSync(join(worktree, "binary.bin"), Buffer.from("needle\0binary"));
+	writeFileSync(
+		join(worktree, "invalid.bin"),
+		Buffer.from([0xff, ...Buffer.from("needle")]),
+	);
+	try {
+		assert.equal(
+			await new DurableFileTools(worktree).search("needle"),
+			"small.txt:2:needle text",
+		);
+	} finally {
+		rmSync(worktree, { recursive: true, force: true });
+	}
+});
+
 test("durable limits give kill switch and holds precedence", () => {
 	const base = { startedAt: 0, now: 0, turns: 0, toolCalls: 0, tokens: 0 };
 	assert.equal(

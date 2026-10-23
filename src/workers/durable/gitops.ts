@@ -350,7 +350,10 @@ export class HardenedWorkerGit implements WorkerGit {
 		return job.baseSha;
 	}
 	async commit(job: JobSpec, message: string) {
-		if (!message.trim() || message.includes("\nDurable-Agent:"))
+		if (
+			!message.trim() ||
+			/(^|[\r\n])[ \t]*Durable-Agent[ \t]*:/i.test(message)
+		)
 			throw Error("invalid commit message");
 		const head = await this.head(job);
 		const dir = this.directory(job);
