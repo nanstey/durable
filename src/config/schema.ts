@@ -107,7 +107,11 @@ export type MachineCfg = {
 	};
 	channels?: Record<
 		string,
-		{ kind: "console" | "desktop" | "command" | "github"; targetLogin?: string }
+		{
+			kind: "inbox" | "console" | "desktop" | "command" | "github";
+			targetLogin?: string;
+			argv?: string[];
+		}
 	>;
 	workers?: {
 		roles?: Record<string, { kind?: WorkerKind; skills?: string[] }>;

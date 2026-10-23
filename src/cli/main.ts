@@ -12,6 +12,7 @@ import { SystemdUserServiceManager } from "../platform/service/systemdUser.ts";
 import { resumeLocal } from "../steward/killswitch.ts";
 import { assignedPort, run } from "../steward/main.ts";
 import { doctorCommand, formatDoctor } from "./doctor.ts";
+import { notifyCommand } from "./notify.ts";
 import { profileCommand } from "./profile.ts";
 
 const agentArg = {
@@ -139,6 +140,25 @@ for (const action of ["init", "bind-github", "show", "list", "check"])
 subCommands.profile = defineCommand({
 	meta: { name: "profile" },
 	subCommands: profileCommands,
+});
+subCommands.notify = defineCommand({
+	meta: { name: "notify" },
+	args: {
+		agent: { type: "string" },
+		event: { type: "string" },
+		test: { type: "string" },
+		status: { type: "boolean" },
+		json: { type: "boolean" },
+	},
+	async run({ args }) {
+		await notifyCommand({
+			agent: selected(args.agent),
+			event: args.event,
+			test: args.test,
+			status: args.status,
+			json: args.json,
+		});
+	},
 });
 subCommands.token = defineCommand({
 	meta: { name: "token" },

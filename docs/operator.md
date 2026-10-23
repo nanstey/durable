@@ -5,6 +5,52 @@ worker kinds and notification channel names. The machine file contains assignmen
 checkout paths and channel backends. Neither contains credentials. Schemas in
 `schema/` reject unknown keys, non-empty peers and non-loopback binds.
 
+## Control plane and notifications
+
+Durable has four control layers. **L0** is the repository and GitHub's own branch
+rules. **L1** is the local daemon API and `durable` terminal commands, protected
+by scoped local tokens. **L2** is notification delivery: the agent inbox/console,
+desktop, an operator-owned command hook, or GitHub. **L3**, planned in slices 8,
+11 and 12, is the optional web console. The console is a client, not a hub: it
+adds no authority and does not own queue, claim, gate, or approval state.
+
+Map events (`approval-needed`, `escalation`, `budget-stop`, `identity-failure`,
+`agent-down`, `merged`, or `digest`) to named machine channels in the agent
+`notify` block. `inbox` and `console` write the durable `steward.inbox` document.
+`desktop` uses Linux `notify-send`. `command` executes configured argv without a
+shell and receives JSON on standard input. `github` posts an @mention to its
+target login. It is intentionally skipped when that login is the agent profile's
+login: GitHub does not notify an account about its own activity.
+
+The notifier de-duplicates an event by agent, event, target and SHA, persists
+that state, honours priority, and holds notifications during configured quiet
+hours rather than dropping them. It sends only the configured capped reminders.
+If nobody resolves an item by `notify.staleDays`, Durable parks it as
+`needs-human`, releases its claim and workers, posts one GitHub comment, and
+sends one final escalation. It never approves, merges, or widens privileges to
+unblock work.
+
+Notification payloads contain only identifiers, titles and URLs. They never
+contain bodies, paths, tokens, or credentials. An approval nonce is the sole
+exception and is delivered only to `desktop` or `command`; it is never sent to
+the inbox, console, GitHub, logs, or durable state. This prevents API-readable
+and agent-readable surfaces from becoming approval-secret stores. A platform
+backend must explicitly report `nonceSafe`; Linux `notify-send` does, whereas
+future Android/Termux notifications do not.
+
+Use these daemon-independent controls after configuring the definition and
+machine file:
+
+```sh
+durable notify --test escalation --agent <id>
+durable notify --event agent-down --agent <id>
+durable notify status --agent <id> --json
+```
+
+`agent-down` is also invoked by the systemd `durable-agent-failure@.service`
+`OnFailure=` hook, so it can notify after the agent process is dead. Missing
+local desktop tooling is recorded in the audit log and skipped.
+
 ## Configure a profile
 
 1. Use Pi's profile extension to select a **named** profile and `/login` to its

@@ -179,6 +179,7 @@
         "properties": {
           "kind": {
             "enum": [
+              "inbox",
               "console",
               "desktop",
               "command",

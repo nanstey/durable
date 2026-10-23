@@ -1,3 +1,6 @@
+[Unit]
+Description=Durable agent failure notification for %i
+
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/true
+ExecStart=%h/.local/bin/durable notify --event agent-down --agent %i
