@@ -235,6 +235,29 @@ export function createApi(opts: {
 		if (!item?.gate) throw new ApiError("not_found", "gate not found", 404);
 		return c.json(item.gate);
 	});
+	app.post("/v1/gate/:item/approve/request", async (c) => {
+		const item = (await harness.workItems()).items[c.req.param("item")];
+		if (
+			!item?.gate ||
+			item.gate.state !== "waiting-approval" ||
+			!opts.nonces ||
+			!opts.deliverNonce
+		)
+			throw new ApiError("invalid", "item has no active approval task", 400);
+		const code = opts.nonces.issue("approve", item.id, item.gate.sha);
+		if (!(await opts.deliverNonce(item.id, code)))
+			throw new ApiError(
+				"unavailable",
+				"configure a nonce-safe desktop or command approval channel",
+				503,
+			);
+		audit(opts.agent, {
+			event: "approval-nonce-requested",
+			item: item.id,
+			sha: item.gate.sha,
+		});
+		return c.json({ requested: true }, 202);
+	});
 	app.post("/v1/approvals/nonce", async (c) => {
 		let value: { item?: unknown; code?: unknown; action?: unknown } = {};
 		try {

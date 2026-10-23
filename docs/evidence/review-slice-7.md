@@ -126,6 +126,17 @@ Counts: **High 3, Medium 8, Low 8.**
 | slice-7b item 3 "Profile-bound credentials" | Only the env scrub is real; no provider consumes credentials yet (fake only). Honest, but the two-profile test is absent. |
 | slice-7b items 4-5, 7 | Hold for durable workers with the fake provider; the Pi bridge is correctly marked pending. |
 
+## Resolution status
+
+| Finding | Status | Evidence |
+| --- | --- | --- |
+| H1 | fixed | `workRuntime.ts` collects GitHub facts before deciding. |
+| H2 | fixed | `POST /v1/gate/:item/approve/request` reissues an active gate nonce; `durable approve --request` invokes it. |
+| H3 | fixed | Missing observed assistant provenance now refuses the review; regression in `gate-review.test.ts`. |
+| M1 | fixed | Only `human-approval-required` creates a waiting approval gate or nonce. |
+| M6 | fixed | Approval requires an active gate and a matching live PR head SHA. |
+| M2-M5, M7-M8, L1-L8 | not fixed | Not addressed in this focused remediation. |
+
 ## Top fixes in order
 
 1. Wire `collectFacts` into the gate (H1).
