@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { Hono } from "hono";
+import { consoleGuard } from "../../src/console/guard.ts";
 import { DeviceMonitor } from "../../src/console/monitor.ts";
 import { StreamMux } from "../../src/console/mux.ts";
 import { allowedDaemonRoute, proxyDaemon } from "../../src/console/proxy.ts";
@@ -27,19 +29,24 @@ test("console guard adds CSP and refuses cross-origin writes", async () => {
 	assert.equal(denied.status, 403);
 });
 
-test("Serve writes require the allowed Tailscale identity", async () => {
-	const { app } = createConsoleApp({ devices: [], csrf: "csrf" });
-	const denied = await app.request("http://127.0.0.1:4319/api/push/test", {
-		method: "POST",
-		headers: {
-			host: "not-a-proxy",
-			origin: "http://not-a-proxy",
-			"content-type": "application/json",
-			"x-durable-csrf": "csrf",
-		},
-		body: "{}",
+test("Serve requires an allowed identity even with a spoofed loopback Host", async () => {
+	const app = new Hono();
+	app.use(
+		"*",
+		consoleGuard("csrf", {
+			serveHostname: "console.example",
+			allowedUsers: ["operator"],
+		}),
+	);
+	app.get("/api/bootstrap", (c) => c.text("ok"));
+	const denied = await app.request("http://localhost/api/bootstrap", {
+		headers: { host: "localhost:4319" },
 	});
-	assert.equal(denied.status, 421);
+	assert.equal(denied.status, 403);
+	const allowed = await app.request("http://console.example/api/bootstrap", {
+		headers: { host: "console.example", "tailscale-user-login": "operator" },
+	});
+	assert.equal(allowed.status, 200);
 });
 
 test("proxy allowlist excludes files, shells and arbitrary paths", () => {

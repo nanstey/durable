@@ -96,13 +96,30 @@ export function authorize(
 export function listTokens(agent: string) {
 	if (!existsSync(join(agentDir(agent), "tokens.json"))) return [];
 	return transaction(agent, (records) =>
-		records.map(({ hash: _hash, ...metadata }) => metadata),
+		records.map(({ hash, ...metadata }) => ({
+			id: hash.slice(0, 12),
+			...metadata,
+		})),
 	);
 }
-export function revokeToken(agent: string, client: string) {
+export function revokeToken(agent: string, id: string) {
 	transaction(agent, (records) => {
-		for (let i = records.length - 1; i >= 0; i--)
-			if (records[i].client === client) records.splice(i, 1);
+		let index = /^[a-f0-9]{12}$/.test(id)
+			? records.findIndex((record) => record.hash.startsWith(id))
+			: -1;
+		if (index < 0) {
+			const matches = records
+				.map((record, candidate) => ({ record, candidate }))
+				.filter(({ record }) => record.client === id);
+			if (matches.length !== 1)
+				throw Error(
+					matches.length
+						? "token client is ambiguous; use --id"
+						: "token id not found",
+				);
+			index = matches[0].candidate;
+		}
+		records.splice(index, 1);
 	});
 }
 export function localToken(agent: string) {

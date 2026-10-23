@@ -187,6 +187,12 @@ test("collectFacts uses only computed fields and ignores PR-author reviews", asy
 	assert.equal(result?.crossFamilyReview, null);
 	assert.equal(result?.checksPassed, true);
 	assert.equal(result?.hardPath, false);
+	const noChecks = await collectFacts(
+		{ repo: "acme/api", number: 8, profileLogin: "operator" },
+		"head",
+		async () => JSON.stringify({ statusCheckRollup: [] }),
+	);
+	assert.equal(noChecks?.checksPassed, false);
 	assert.equal(
 		await collectFacts(
 			{ repo: "acme/api", number: 7, profileLogin: "operator" },

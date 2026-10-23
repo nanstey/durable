@@ -172,7 +172,7 @@ The [API reference](api.md) lists routes, message bodies and SSE frames.
 ```sh
 durable token create <agent> --client <client-name> --scopes read,chat,pause --expires 90d
 durable token list <agent>
-durable token revoke <agent> --client <client-name>
+durable token revoke <agent> --id <token-id>
 ```
 
 Creation prints the token once. Save it outside the repository. Token storage
@@ -317,4 +317,4 @@ to GitHub rules, and never use a bypass or administrator mode.
 
 Follow [networking](network.md) for tailnet setup. Create a scoped daemon token with `durable token create <agent> --client console-<host> --scopes read,chat,pause`, then pipe it to `durable console add-device --machine <label> --agent <id> --url <tailnet-url>`. Do not put console tokens in profile secrets: those secrets are exported to agent environments. The registry stores each token in a private 0600 file.
 
-Rotate with no intended viewer downtime: create a new client token, switch the registry device to it, then revoke the old client token. Tokens expire after 90 days; doctor warns when fewer than 14 days remain.
+Rotate with no intended viewer downtime: create a new token, switch the registry device to it, then use the short id from `durable token list` to revoke the old token. Tokens expire after 90 days; doctor warns when fewer than 14 days remain.

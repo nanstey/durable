@@ -422,6 +422,10 @@ export class WorkRuntime {
 		const policy = effectivePolicy(resolution, {
 			...this.options.definition.merge,
 			...repoDefinition?.merge,
+			tighten: {
+				...this.options.definition.merge?.tighten,
+				...repoDefinition?.merge?.tighten,
+			},
 		});
 		const githubFacts = await collectFacts(
 			{
@@ -435,14 +439,21 @@ export class WorkRuntime {
 			},
 			sha,
 		);
+		// A configured cooling-off period has no persisted review timestamp yet.
+		// Fail closed rather than fabricate that elapsed time.
+		const riskRank = { low: 0, medium: 1, high: 2 } as const;
 		const facts = githubFacts && {
 			...githubFacts,
-			// collectReview has already verified every observed entry is opposite-family.
-			crossFamilyReview: true,
+			// collectReview verifies the reviewer provenance before this point.
+			crossFamilyReview: policy.requireCrossFamilyReview ? true : true,
 			riskAcceptable:
-				review.result.risk === "low" || review.result.risk === "medium",
+				policy.maxRisk === undefined ||
+				riskRank[review.result.risk] <= riskRank[policy.maxRisk],
+			// No daily-cap policy exists in the accepted policy schema.
 			dailyCapAvailable: true,
-			coolingOffElapsed: true,
+			coolingOffElapsed:
+				policy.coolingOffMinutes === undefined ||
+				policy.coolingOffMinutes === 0,
 			killSwitchOff: true,
 		};
 		let decision = decide(policy, facts);
@@ -784,6 +795,20 @@ export class WorkRuntime {
 		}
 		if (item.claim && item.candidate.kind !== "file") {
 			const issue = intakeNumber(item.candidate.ref);
+			const target = {
+				repo: item.repo,
+				issue,
+				agent: this.options.agent,
+				lease: item.claim.lease,
+				owner: this.options.claimOwner,
+				login: this.options.login,
+			};
+			const held = await readClaim(
+				this.options.github,
+				target,
+				this.now(),
+				this.leasePolicy(),
+			);
 			if (
 				item.claim.commentId &&
 				(await this.options.github.listComments(item.repo, issue)).some(
@@ -797,11 +822,12 @@ export class WorkRuntime {
 					item.claim.commentId,
 					item.id,
 				);
-			await this.options.github.removeLabel(
-				item.repo,
-				issue,
-				"durable/claimed",
-			);
+			if (held.state === "won")
+				await this.options.github.removeLabel(
+					item.repo,
+					issue,
+					"durable/claimed",
+				);
 		}
 		task.finished = true;
 		await this.store.save(state);

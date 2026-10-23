@@ -16,7 +16,7 @@ export type ConsoleDevice = {
 	uid?: string;
 	agents?: string[];
 };
-type StoredDevice = Omit<ConsoleDevice, "token">;
+type StoredDevice = Omit<ConsoleDevice, "token"> & { token?: string };
 type ConsoleConfig = {
 	version: 1;
 	port: number;
@@ -96,7 +96,8 @@ export function loadDevices(path = devicesPath()): ConsoleDevice[] {
 	};
 	if (value?.version !== 1 || !Array.isArray(value.devices))
 		throw Error("invalid devices.yaml");
-	return value.devices.map((device) => {
+	let migrated = false;
+	const devices = value.devices.map((device) => {
 		const entry = device as Partial<StoredDevice>;
 		if (
 			!validId(entry.id) ||
@@ -107,16 +108,30 @@ export function loadDevices(path = devicesPath()): ConsoleDevice[] {
 		)
 			throw Error("invalid console device");
 		const tokenPath = deviceTokenPath(entry.id);
-		if (!existsSync(tokenPath))
-			throw Error(`missing token for console device ${entry.id}`);
+		if (!existsSync(tokenPath)) {
+			if (!entry.token)
+				throw Error(`missing token for console device ${entry.id}`);
+			privateWrite(tokenPath, `${entry.token}\n`);
+			migrated = true;
+		}
 		chmodSync(tokenPath, 0o600);
 		return {
-			...entry,
 			id: entry.id,
 			url: entry.url,
+			...(entry.uid ? { uid: entry.uid } : {}),
+			...(entry.agents ? { agents: entry.agents } : {}),
 			token: readFileSync(tokenPath, "utf8").trim(),
 		};
 	});
+	if (migrated)
+		privateWrite(
+			path,
+			stringify({
+				version: 1,
+				devices: devices.map(({ token: _token, ...device }) => device),
+			}),
+		);
+	return devices;
 }
 export function saveDevices(devices: ConsoleDevice[], path = devicesPath()) {
 	const stored: StoredDevice[] = [];

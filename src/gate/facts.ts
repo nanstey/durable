@@ -74,7 +74,7 @@ type GhPr = {
 };
 
 function checksPassed(rollup: GhPr["statusCheckRollup"]): boolean | null {
-	if (!Array.isArray(rollup)) return null;
+	if (!Array.isArray(rollup) || rollup.length === 0) return false;
 	return rollup.every(
 		(check) => check.status === "COMPLETED" && check.conclusion === "SUCCESS",
 	);

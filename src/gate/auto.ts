@@ -24,14 +24,12 @@ export function autoConstraintReasons(
 	if (!policy.baseBranches?.includes(context.baseBranch ?? ""))
 		reasons.push("base-branch-not-allowed");
 	if (!facts.paths) reasons.push("unknown-changed-paths");
+	else if (!policy.pathAllow) reasons.push("path-allow-required");
 	else {
 		for (const path of facts.paths) {
 			if (policy.pathDeny?.some((entry) => pathMatches(entry, path)))
 				reasons.push("path-denied");
-			if (
-				policy.pathAllow &&
-				!policy.pathAllow.some((entry) => pathMatches(entry, path))
-			)
+			if (!policy.pathAllow.some((entry) => pathMatches(entry, path)))
 				reasons.push("path-not-allowed");
 		}
 	}

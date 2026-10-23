@@ -113,3 +113,4 @@ Counts: **High 2, Medium 9, Low 8.**
 - The runtime re-resolves the source just before the merge and compares fingerprints (`workRuntime.ts:489-500`). Shadow mode never reaches `runGh`.
 - `startApi` binds the loopback listener plus the explicit Tailscale address only. It refuses to start `peerCheck: required` without `allowedPeers`, and each request returns 503 when `whois` fails in `required` mode. Approval routes still reject bearer credentials. Tokens are stored as hashes with expiry, and device tokens are in 0600 files outside `devices.yaml`.
 - The proxy allowlist is anchored, one-segment routes. I found no `..` traversal that reaches an approval route.
+
