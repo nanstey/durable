@@ -32,6 +32,7 @@ export function screenToolOutput(text: string): string {
 		);
 }
 
+const readFileBytes = 100_000;
 const searchFileBytes = 1024 * 1024;
 
 export class DurableFileTools {
@@ -40,9 +41,15 @@ export class DurableFileTools {
 		this.worktree = worktree;
 	}
 	async read(path: string): Promise<string> {
-		return screenToolOutput(
-			await readFile(await confinedPath(this.worktree, path), "utf8"),
-		);
+		const file = await open(await confinedPath(this.worktree, path), "r");
+		try {
+			const stat = await file.stat();
+			if (!stat.isFile() || stat.size > readFileBytes)
+				throw Error("read requires a regular file no larger than 100 KB");
+			return screenToolOutput(await file.readFile({ encoding: "utf8" }));
+		} finally {
+			await file.close();
+		}
 	}
 	async write(path: string, text: string): Promise<void> {
 		await writeFile(await confinedPath(this.worktree, path), text, "utf8");

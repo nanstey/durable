@@ -115,6 +115,23 @@ export class GitOperations {
 		try {
 			await this.options.check(job);
 			let intent = await this.options.store.read(job.id, op);
+			const commitSha = await this.options.git.head(job);
+			if (intent?.state === "confirmed" && intent.commitSha !== commitSha) {
+				intent = {
+					...intent,
+					commitSha,
+					expectedRemoteHead:
+						op === "push_branch"
+							? intent.commitSha
+							: await this.options.github.remoteHead(
+									intent.repo,
+									intent.branch,
+								),
+					state: "intent",
+					pr: undefined,
+				};
+				await this.options.store.write(intent);
+			}
 			if (!intent) {
 				const repo = job.repo;
 				if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo))
@@ -125,7 +142,7 @@ export class GitOperations {
 					repo,
 					branch: `durable/${job.agent}/${job.item}`,
 					base: job.baseRef ?? "main",
-					commitSha: await this.options.git.head(job),
+					commitSha,
 					expectedRemoteHead: await this.options.github.remoteHead(
 						repo,
 						job.workspace.branch,
@@ -253,7 +270,11 @@ export class HardenedWorkerGit implements WorkerGit {
 			{ item: job.item, attemptId: job.id },
 		);
 		workerOperation();
-		if (result.exitCode !== 0) throw Error("code-owned git operation failed");
+		if (result.exitCode !== 0)
+			throw Error(
+				result.stderr.trim() ||
+					"code-owned git operation failed; no changes may be staged; inspect git status before retrying",
+			);
 		return result.stdout.trim();
 	}
 	private config() {
@@ -270,12 +291,6 @@ export class HardenedWorkerGit implements WorkerGit {
 		await this.execute(job, ["init", "--bare", dir]);
 		const config = this.config();
 		await writeFile(join(dir, "config"), config, { mode: 0o600 });
-		if (
-			createHash("sha256")
-				.update(await readFile(join(dir, "config")))
-				.digest("hex") !== createHash("sha256").update(config).digest("hex")
-		)
-			throw Error("trusted git config changed");
 		return dir;
 	}
 	async head(job: JobSpec) {
@@ -315,7 +330,13 @@ export class HardenedWorkerGit implements WorkerGit {
 	private remoteUrl(repo: string) {
 		return this.options.url?.(repo) ?? `https://github.com/${repo}.git`;
 	}
-	private network(job: JobSpec, args: string[]) {
+	private async network(job: JobSpec, args: string[]) {
+		const config = await readFile(join(this.directory(job), "config"));
+		if (
+			createHash("sha256").update(config).digest("hex") !==
+			createHash("sha256").update(this.config()).digest("hex")
+		)
+			throw Error("trusted git config changed");
 		return this.execute(
 			job,
 			[
