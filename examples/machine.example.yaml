@@ -1,4 +1,4 @@
-name: workstation
+name: <machine-label>
 agents: [api]
 profiles: { allowDefault: false }
 platform:

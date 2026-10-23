@@ -1,4 +1,11 @@
+version: 1
+id: api
+description: Keep acme/api moving toward human review
 profile: work
+models:
+  steward: { model: openai-codex/<model>, thinking: low }
+  worker: { model: openai-codex/<model>, thinking: medium }
+  reviewer: { model: anthropic/<model>, thinking: medium }
 scope:
   repos:
     - slug: acme/api

@@ -9,4 +9,6 @@ export const machinePath = () =>
 	process.env.DURABLE_MACHINE_FILE ||
 	join(homedir(), ".config", "durable", "machine.yaml");
 export const piAgentDir = () =>
-	process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+	process.env.PI_CODING_AGENT_DIR ||
+	process.env.PI_AGENT_DIR ||
+	join(homedir(), ".pi", "agent");

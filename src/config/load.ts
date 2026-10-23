@@ -4,6 +4,7 @@ import { parse } from "yaml";
 import { agentsDir, machinePath } from "./paths.ts";
 import {
 	type AgentDef,
+	assertProfileName,
 	type MachineCfg,
 	validateAgent,
 	validateMachine,
@@ -12,6 +13,7 @@ export function loadYaml(path: string): unknown {
 	return parse(readFileSync(path, "utf8"), { uniqueKeys: true });
 }
 export function loadAgent(id: string): AgentDef {
+	assertProfileName(id);
 	return validateAgent(loadYaml(join(agentsDir(), `${id}.yaml`)));
 }
 export function loadMachine(): MachineCfg {

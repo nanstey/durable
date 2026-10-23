@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "label": {
+      "type": "string"
+    },
+    "github": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "const": "github.com"
+        },
+        "login": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "login"
+      ],
+      "additionalProperties": false
+    },
+    "git": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string",
+          "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+        }
+      },
+      "required": [
+        "name",
+        "email"
+      ],
+      "additionalProperties": false
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "version",
+    "label",
+    "github",
+    "git",
+    "providers"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,244 @@
+{
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "checkouts": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "orca": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "daemon": {
+      "type": "object",
+      "properties": {
+        "portBase": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "profiles": {
+      "type": "object",
+      "properties": {
+        "allowDefault": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "platform": {
+      "type": "object",
+      "properties": {
+        "os": {
+          "enum": [
+            "linux",
+            "android"
+          ]
+        },
+        "service": {
+          "enum": [
+            "systemd-user",
+            "termux-runit"
+          ]
+        },
+        "tailscaleCli": {
+          "type": "boolean"
+        },
+        "allowAutoMerge": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "network": {
+      "type": "object",
+      "properties": {
+        "bind": {
+          "const": "loopback"
+        },
+        "peerCheck": {
+          "enum": [
+            "required",
+            "optional",
+            "off"
+          ]
+        },
+        "tailnetAddress": {
+          "type": "string"
+        },
+        "allowedPeers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "approval": {
+      "type": "object",
+      "properties": {
+        "rpId": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "webauthn": {
+          "type": "object",
+          "properties": {
+            "rpId": {
+              "type": "string"
+            },
+            "origins": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "rpId",
+            "origins"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "peers": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "channels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "console",
+              "desktop",
+              "command",
+              "github"
+            ]
+          },
+          "targetLogin": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workers": {
+      "type": "object",
+      "properties": {
+        "roles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "pi-session",
+                  "durable-conversation"
+                ]
+              },
+              "skills": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "name",
+    "agents"
+  ],
+  "additionalProperties": false
+}

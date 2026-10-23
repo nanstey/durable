@@ -36,6 +36,20 @@
 | 13  | **Skills repo:** retire `pi-interactive-subagents` and trim                                                                                                                                                                                                                                                                                                    | [13-retire-interactive-subagents](./specs/13-retire-interactive-subagents.md)       |     |                                                                                                      |
 | 14  | Android daemon in Termux (additional platform target)                                                                                                                                                                                                                                                                                                          | [14-android-daemon-termux](./specs/14-android-daemon-termux.md)                     |     |                                                                                                      |
 
+### Slice 2 replacement verification
+
+- Automated: `pnpm check`, `pnpm test` and `pnpm hygiene` pass; frozen-lockfile
+  installation with ignored lifecycle scripts passes. Regression tests use
+  temporary profiles, fabricated tokens and a loopback token endpoint.
+- Executed CLI smoke: `profile init`, `list`, `show`, dry-run and missing-definition
+  doctor; manifest/directory modes verified as 0600/0700.
+- Spec 02 item 15 is **pending operator**, not executed: the available Pi directory
+  contains zero named profile files. No live credentials were copied or modified.
+  Provision two named profiles, bind each GitHub login, run doctor on both, swap
+  the tokens to observe mismatches, and check a machine missing one profile.
+- See [the implementation/evidence matrix](../evidence/slice-2.md). A green offline
+  suite is not evidence of the two-real-profile manual checkpoint.
+
 Deferred, not specced: D-1 peer-to-peer agent messaging (the console does not replace it); (D-2 durable-conversation workers is no longer deferred: it is slice 6c); D-3 macOS/launchd (Linux is the first fleet; Android/Termux is slice 14).
 
 Repos: every slice is a durable-repo slice except **2b** and **13** (skills repo). Order and dependencies: 1 -> 2 -> 2b -> 3 -> 4 -> 5 -> 6 -> 6c -> 7 -> 8 -> 9 -> 10 -> 11 -> 12a -> 13; 12b follows 11 whenever convenient and blocks nothing. Slices 8 and 9 may swap; 10 may move before 8. Slice 11 needs slice 8 and is testable with two daemons on one machine (it does not wait for slice 10). 12a needs 11 and 7 (policy verification also needs 9). 13 follows real use of 6-9. 14 needs 3, 6, 10 and 11 (12a recommended: the CLI nonce is not available on Android) and may start any time after 11. Slice 2b needs slice 2's first durable commit to pin; later pin bumps are routine PRs. Slice 6 splits into 6a (dispatcher, kinds, Pi-session kind, contract suites) and 6b (claims, brief, Pi-session worker, hold, viewers); 6c (durable-conversation kind) follows 6, needs the slice 1 addendum, spec 03's tree API and spec 04's tree TUI, and does not block 7-13 (reviewers may use it once it exists). 14 now needs 6c for its default worker kind.
