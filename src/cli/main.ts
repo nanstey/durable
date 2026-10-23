@@ -10,8 +10,11 @@ import { DurableClient } from "../client/client.ts";
 import { loadAgent, loadMachine } from "../config/load.ts";
 import {
 	applyOrganization,
+	bundleFor,
 	listOrganizations,
 	loadOrganization,
+	materializeOrganization,
+	receiveOrganizationBundle,
 	releaseFor,
 } from "../config/organizations.ts";
 import { durableHome } from "../config/paths.ts";
@@ -62,6 +65,16 @@ function clientFor(agent?: string) {
 }
 function print(value: unknown, json = false) {
 	console.log(JSON.stringify(value, null, json ? 2 : 2));
+}
+async function tokenFromStdin() {
+	const token = await new Promise<string>((resolve) => {
+		let input = "";
+		process.stdin.setEncoding("utf8");
+		process.stdin.on("data", (chunk) => (input += chunk));
+		process.stdin.on("end", () => resolve(input.trim()));
+	});
+	if (!token) throw Error("read the fleet daemon token from stdin");
+	return token;
 }
 function readCommand(
 	name: "queue" | "inbox" | "audit" | "status",
@@ -170,17 +183,71 @@ subCommands.org = defineCommand({
 			meta: { name: "sync" },
 			args: {
 				name: { type: "positional", required: true },
+				from: { type: "string" },
+				to: { type: "string" },
 				json: { type: "boolean", default: false },
 			},
-			run({ args }) {
-				print(
+			async run({ args }) {
+				if (args.from && args.to)
+					throw Error(
+						"specify either --from (member pull) or --to (origin push)",
+					);
+				if (!args.from && !args.to) {
+					print(
+						{
+							name: args.name,
+							state: "operator-managed",
+							release: releaseFor(args.name) ?? null,
+						},
+						args.json,
+					);
+					return;
+				}
+				const token = await tokenFromStdin();
+				if (args.from) {
+					const response = await fetch(
+						new URL(
+							`/v1/organizations/${encodeURIComponent(args.name)}/bundle`,
+							args.from,
+						),
+						{
+							headers: { authorization: `Bearer ${token}` },
+							signal: AbortSignal.timeout(15000),
+						},
+					);
+					if (!response.ok)
+						throw Error("origin refused organization bundle request");
+					const bundle = await response.json();
+					receiveOrganizationBundle(bundle);
+					for (const agent of loadOrganization(args.name).memberAgents)
+						materializeOrganization(agent, loadAgent(agent));
+					print(
+						{
+							name: args.name,
+							state: "pulled",
+							bundleHash: bundle.contentHash,
+						},
+						args.json,
+					);
+					return;
+				}
+				const response = await fetch(
+					new URL(
+						`/v1/organizations/${encodeURIComponent(args.name)}/bundle`,
+						args.to,
+					),
 					{
-						name: args.name,
-						state: "operator-managed",
-						release: releaseFor(args.name) ?? null,
+						method: "POST",
+						headers: {
+							authorization: `Bearer ${token}`,
+							"content-type": "application/json",
+						},
+						body: JSON.stringify(bundleFor(args.name)),
+						signal: AbortSignal.timeout(15000),
 					},
-					args.json,
 				);
+				if (!response.ok) throw Error("member rejected organization bundle");
+				print(await response.json(), args.json);
 			},
 		}),
 		pause: defineCommand({
@@ -663,15 +730,7 @@ subCommands.console = defineCommand({
 				url: { type: "string", required: true },
 			},
 			async run({ args }) {
-				const token = (
-					await new Promise<string>((resolve) => {
-						let input = "";
-						process.stdin.setEncoding("utf8");
-						process.stdin.on("data", (chunk) => (input += chunk));
-						process.stdin.on("end", () => resolve(input.trim()));
-					})
-				).trim();
-				if (!token) throw Error("read the daemon token from stdin");
+				const token = await tokenFromStdin();
 				const url = new URL(args.url);
 				if (
 					!["http:", "https:"].includes(url.protocol) ||

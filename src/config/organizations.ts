@@ -31,6 +31,9 @@ export type OrganizationBundle = {
 	contentHash: string;
 	approval: OrganizationRelease;
 };
+export type ReceivedOrganizationBundle = OrganizationBundle & {
+	receivedAt: number;
+};
 export type EffectiveOrganization = {
 	name: string;
 	bundleHash: string;
@@ -82,6 +85,66 @@ function releasesPath(name: string) {
 }
 function bundlePath(name: string) {
 	return join(durableHome(), "organizations", name, "bundle.json");
+}
+function receivedBundlePath(name: string) {
+	return join(durableHome(), "organizations", name, "received.json");
+}
+export function bundleFor(name: string): OrganizationBundle {
+	const bundle = loadJson<OrganizationBundle | undefined>(
+		bundlePath(name),
+		() => undefined,
+	);
+	if (!bundle) throw Error("organization has no approved bundle");
+	verifyBundle(bundle);
+	return bundle;
+}
+export function receivedBundleFor(
+	name: string,
+): ReceivedOrganizationBundle | undefined {
+	const bundle = loadJson<ReceivedOrganizationBundle | undefined>(
+		receivedBundlePath(name),
+		() => undefined,
+	);
+	if (!bundle) return undefined;
+	verifyBundle(bundle);
+	return bundle;
+}
+export function organizationVersionState(
+	name: string,
+): "current" | "stale" | "invalid" {
+	if (name === "default") return "current";
+	try {
+		const local = organizationPath(name);
+		if (existsSync(local)) {
+			const release = releaseFor(name);
+			return release?.contentHash === contentHash(readFileSync(local, "utf8"))
+				? "current"
+				: "invalid";
+		}
+		const bundle = receivedBundleFor(name);
+		if (!bundle) return "invalid";
+		const org = verifyBundle(bundle);
+		return org.maxStaleAge !== undefined &&
+			Date.now() - bundle.receivedAt > org.maxStaleAge
+			? "stale"
+			: "current";
+	} catch {
+		return "invalid";
+	}
+}
+/** A received bundle never replaces the operator-managed organization file. */
+export function receiveOrganizationBundle(
+	bundle: OrganizationBundle,
+	now = Date.now(),
+) {
+	const organization = verifyBundle(bundle);
+	const received: ReceivedOrganizationBundle = { ...bundle, receivedAt: now };
+	mkdirSync(dirname(receivedBundlePath(organization.name)), {
+		recursive: true,
+		mode: 0o700,
+	});
+	saveJson(receivedBundlePath(organization.name), received);
+	return received;
 }
 export function releaseFor(name: string): OrganizationRelease | undefined {
 	assertOrganizationName(name);
@@ -175,15 +238,24 @@ export function materializeOrganization(
 			policy: undefined,
 			definition: def,
 		};
-	const bytes = bundle?.bytes ?? readFileSync(organizationPath(name), "utf8");
-	const approved = bundle?.approval ?? releaseFor(name);
+	const localPath = organizationPath(name);
+	const received = bundle ? undefined : receivedBundleFor(name);
+	const active = bundle ?? (existsSync(localPath) ? undefined : received);
+	const bytes = active?.bytes ?? readFileSync(localPath, "utf8");
+	const approved = active?.approval ?? releaseFor(name);
 	if (
 		!approved ||
 		approved.organization !== name ||
 		approved.contentHash !== contentHash(bytes)
 	)
 		throw Error("organization policy is not an approved hash-pinned release");
-	const org = bundle ? verifyBundle(bundle) : loadOrganization(name);
+	const org = active ? verifyBundle(active) : loadOrganization(name);
+	if (
+		received &&
+		org.maxStaleAge !== undefined &&
+		Date.now() - received.receivedAt > org.maxStaleAge
+	)
+		throw Error("organization bundle is stale; new work is blocked");
 	if (!org.memberAgents.includes(agent))
 		throw Error("agent is not an organization member");
 	const definition = effectiveOrganization(def, org);
@@ -202,7 +274,11 @@ export function materializeOrganization(
 	};
 	const path = join(agentDir(agent), "organization.json");
 	if (existsSync(path)) chmodSync(path, 0o600);
-	writeFileSync(path, `${JSON.stringify(persisted)}\n`, { mode: 0o400 });
+	writeFileSync(
+		path,
+		`${JSON.stringify({ ...persisted, receivedAt: received?.receivedAt ?? null })}\n`,
+		{ mode: 0o400 },
+	);
 	chmodSync(path, 0o400);
 	return result;
 }

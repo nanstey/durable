@@ -4,7 +4,7 @@ import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { agentDir, loadJson, saveJson } from "../steward/files.ts";
 
-export type Scope = "read" | "chat" | "pause";
+export type Scope = "read" | "chat" | "pause" | "sync";
 export type TokenRecord = {
 	hash: string;
 	client: string;
@@ -42,7 +42,7 @@ export function createToken(
 		client.length > 100 ||
 		!Array.isArray(scopes) ||
 		!scopes.length ||
-		scopes.some((s) => !["read", "chat", "pause"].includes(s)) ||
+		scopes.some((s) => !["read", "chat", "pause", "sync"].includes(s)) ||
 		!Number.isFinite(expiresDays) ||
 		expiresDays <= 0
 	)

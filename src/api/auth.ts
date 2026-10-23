@@ -21,6 +21,7 @@ const writeScopes: Array<[Scope, RegExp[]]> = [
 		],
 	],
 	["read", [/^\/v1\/conversations\/[^/]+\/open$/, /^\/v1\/inbox\/[^/]+\/ack$/]],
+	["sync", [/^\/v1\/organizations\/[^/]+\/bundle$/]],
 ];
 function requiredScope(method: string, path: string): Scope | undefined {
 	if (method === "GET") return "read";

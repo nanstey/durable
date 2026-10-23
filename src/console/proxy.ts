@@ -5,6 +5,7 @@ const readRoutes = [
 	/^\/v1\/(?:device|budget|queue|inbox|audit|conversations)(?:\/[^/?]+)?(?:\/(?:transcript|events))?$/,
 	/^\/v1\/workers(?:\/[^/?]+)?$/,
 	/^\/v1\/(?:events|sessions)(?:\/[^/?]+)?(?:\/(?:transcript|events))?$/,
+	/^\/v1\/organizations\/[^/?]+\/bundle$/,
 ];
 const writeRoutes = [
 	/^\/v1\/items\/[^/?]+\/hold(?:\/verify)?$/,
@@ -15,6 +16,7 @@ const writeRoutes = [
 	/^\/v1\/pause$/,
 	/^\/v1\/inbox\/[^/?]+\/ack$/,
 	/^\/v1\/workers\/[^/?]+\/(?:steer|interrupt)$/,
+	/^\/v1\/organizations\/[^/?]+\/bundle$/,
 ];
 
 export function allowedDaemonRoute(method: string, path: string) {

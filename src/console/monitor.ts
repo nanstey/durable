@@ -7,13 +7,33 @@ export type DeviceStatus =
 	| "unauthorized"
 	| "mismatch"
 	| "incompatible";
+export type FleetVersionState =
+	| "current"
+	| "updating"
+	| "stale"
+	| "invalid"
+	| "unreachable";
 export type DeviceState = {
 	id: string;
 	status: DeviceStatus;
 	retryMs: number;
 	checkedAt: number;
+	organization?: {
+		id: string;
+		bundleHash: string;
+		versionState: FleetVersionState;
+	};
 	detail?: string;
 };
+export function fleetByOrganization(states: DeviceState[]) {
+	return states.reduce<Record<string, DeviceState[]>>((groups, state) => {
+		const organization = state.organization?.id ?? "unknown";
+		const members = groups[organization] ?? [];
+		members.push(state);
+		groups[organization] = members;
+		return groups;
+	}, {});
+}
 
 export class DeviceMonitor {
 	readonly states = new Map<string, DeviceState>();
@@ -52,7 +72,9 @@ export class DeviceMonitor {
 				const info = (await response.json()) as {
 					uid?: string;
 					apiVersion?: string;
+					organization?: DeviceState["organization"];
 				};
+				state.organization = info.organization;
 				state.status =
 					device.uid && info.uid !== device.uid
 						? "mismatch"
@@ -62,6 +84,11 @@ export class DeviceMonitor {
 			}
 		} catch {
 			state.status = "offline";
+			state.organization = {
+				id: "unknown",
+				bundleHash: "unknown",
+				versionState: "unreachable",
+			};
 		}
 		state.retryMs =
 			state.status === "offline"

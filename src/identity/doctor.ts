@@ -14,6 +14,8 @@ import {
 	listOrganizations,
 	loadOrganization,
 	materializeOrganization,
+	organizationVersionState,
+	receivedBundleFor,
 	releaseFor,
 } from "../config/organizations.ts";
 import {
@@ -78,6 +80,20 @@ export function doctor(
 	}
 	const organizationName = def.organization;
 	if (organizationName) {
+		const versionState = organizationVersionState(organizationName);
+		let bundleHash = releaseFor(organizationName)?.contentHash ?? "unknown";
+		try {
+			bundleHash =
+				receivedBundleFor(organizationName)?.contentHash ?? bundleHash;
+		} catch {
+			/* Version state below reports a corrupt received bundle without exposing it. */
+		}
+		checks.push({
+			name: "organization version",
+			ok: versionState === "current",
+			detail: `${versionState} ${bundleHash}`,
+			fix: "sync a matching approved bundle or restore the approved local file",
+		});
 		try {
 			const organization = loadOrganization(organizationName);
 			const memberships = listOrganizations().filter((name) =>

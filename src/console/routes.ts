@@ -7,7 +7,7 @@ import { createToken } from "../api/tokens.ts";
 import { assignedPort } from "../steward/main.ts";
 import { loadMachine } from "../config/load.ts";
 import { consoleGuard } from "./guard.ts";
-import { DeviceMonitor } from "./monitor.ts";
+import { DeviceMonitor, fleetByOrganization } from "./monitor.ts";
 import { StreamMux } from "./mux.ts";
 import { proxyDaemon } from "./proxy.ts";
 import {
@@ -54,10 +54,28 @@ export function createConsoleApp(
 	const mux = new StreamMux(deviceMap);
 	const app = new Hono();
 	app.use("*", consoleGuard(csrf, config));
-	app.get("/api/bootstrap", async (c) =>
-		c.json({ csrf, devices: await monitor.checkAll() }),
-	);
-	app.get("/api/devices", async (c) => c.json(await monitor.checkAll()));
+	async function fleet(c: {
+		req: { query(name: string): string | undefined };
+	}) {
+		const organization = c.req.query("organization");
+		const devices = await monitor.checkAll();
+		return organization
+			? devices.filter((device) => device.organization?.id === organization)
+			: devices;
+	}
+	app.get("/api/bootstrap", async (c) => {
+		const devices = await fleet(c);
+		return c.json({
+			csrf,
+			devices,
+			organizations: fleetByOrganization(devices),
+		});
+	});
+	app.get("/api/devices", async (c) => c.json(await fleet(c)));
+	app.get("/api/fleet", async (c) => {
+		const devices = await fleet(c);
+		return c.json({ organizations: fleetByOrganization(devices) });
+	});
 	app.get("/api/stream", (c) => mux.open(c));
 	app.put("/api/stream/:id", async (c) => {
 		const body = await c.req.json<{ subs?: unknown }>();
