@@ -48,6 +48,17 @@ const policySource = {
 	...object({ kind: { enum: ["none", "fixture"], default: "none" } }, ["kind"]),
 	default: { kind: "none" },
 };
+const pipeline = object({
+	stages: {
+		type: "array",
+		items: { enum: ["scout", "spec", "build", "review", "gate", "handoff"] },
+		uniqueItems: true,
+	},
+	gates: object({
+		specApproval: { type: "boolean" },
+		complexityThreshold: { enum: ["medium", "large"] },
+	}),
+});
 export const agentSchema = object(
 	{
 		version: { const: 1 },
@@ -102,6 +113,7 @@ export const agentSchema = object(
 							pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
 						},
 						policySource,
+						pipeline,
 						base: text,
 						merge,
 					},

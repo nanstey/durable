@@ -52,6 +52,15 @@ export type AgentDef = {
 			base?: string;
 			merge?: AgentDef["merge"];
 			policySource?: { kind: "none" | "fixture" };
+			pipeline?: {
+				stages?: Array<
+					"scout" | "spec" | "build" | "review" | "gate" | "handoff"
+				>;
+				gates?: {
+					specApproval?: boolean;
+					complexityThreshold?: "medium" | "large";
+				};
+			};
 		}>;
 	};
 	merge?: {

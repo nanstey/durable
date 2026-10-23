@@ -157,3 +157,24 @@ Those actions have no bearer authorization path. Agent resume currently requires
 These controls protect against accidental or prompt-induced actions, not a
 compromised process running as your OS user. Such a process can read your local
 token files. Filesystem confinement is not an OS sandbox.
+
+## Work items and workers
+
+A work item is a durable record created only from an eligible queue entry. The
+queue remains a derived view: it retains its eligibility reasons after migration.
+A work item completes only when GitHub confirms its primary PR is merged, or when
+the steward records it cancelled or parked. Handoff alone is not completion.
+
+Workers are capped by `limits.maxConcurrentWorkers`, `limits.maxWorkersPerDay`,
+and `limits.itemMinutes`. Quiet hours and pause prevent new dispatch. A timed-out
+worker is interrupted and requires human attention; intentional cancellation is
+never silently resumed.
+
+For a Pi-session worker, view the terminal through Orca where available.
+`durable open` asks the configured dispatcher for a viewer and prints a fallback
+command if a terminal cannot be opened. Draft PRs use `durable/<agent>/<item>`, a
+`durable/agent:<agent>` label, and a Durable-Agent commit trailer.
+
+The two required low-risk pilot runs (Orca and git-process), terminal input check,
+viewer check, and steward crash drill require an operator and are listed in
+`docs/evidence/slice-6b.md`.
