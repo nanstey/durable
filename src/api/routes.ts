@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ApprovalNonces } from "../approval/nonce.ts";
+import { verifyNonce } from "../gate/approval.ts";
 import type { AgentDef } from "../config/schema.ts";
 import type { WorkerDispatcher, Workspace } from "../dispatch/types.ts";
 import { audit, readAudit } from "../steward/audit.ts";
@@ -249,7 +250,16 @@ export function createApi(opts: {
 			!item?.gate ||
 			typeof value.code !== "string" ||
 			value.code.length > 256 ||
-			!opts.nonces?.verify("approve", item.id, item.gate.sha, value.code)
+			!opts.nonces ||
+			!verifyNonce(
+				opts.nonces,
+				{
+					action: "approve",
+					item: item.id,
+					sha: item.gate.sha,
+				},
+				value.code,
+			)
 		)
 			throw new ApiError(
 				"forbidden",

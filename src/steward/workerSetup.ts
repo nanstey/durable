@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { ApprovalNonces } from "../approval/nonce.ts";
+import { issueNonce } from "../gate/approval.ts";
 import { loadManifest } from "../config/manifest.ts";
 import { piAgentDir } from "../config/paths.ts";
 import type { AgentDef, MachineCfg } from "../config/schema.ts";
@@ -184,7 +185,11 @@ export function setupWorkers(options: SetupOptions) {
 				issueApproval: async (item, sha) =>
 					notifier.approvalNonce(
 						item,
-						new ApprovalNonces(agent).issue("approve", item, sha),
+						issueNonce(new ApprovalNonces(agent), {
+							action: "approve",
+							item,
+							sha,
+						}),
 					),
 			}
 		: undefined;

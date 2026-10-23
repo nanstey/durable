@@ -547,6 +547,7 @@ export class WorkRuntime {
 		return reason;
 	}
 	/** Records a SHA-bound human approval; the gate re-runs before any future merge executor. */
+	// fallow-ignore-next-line unused-class-member -- invoked by the HTTP approval route.
 	async approveGate(id: string, sha: string) {
 		return this.enqueue(async () => {
 			const state = await this.store.load();
