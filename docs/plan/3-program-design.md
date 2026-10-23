@@ -7,7 +7,7 @@ Evidence for conventions (in the skills repo, mirrored by the thin integration):
 
 ## 1. Repository layout
 
-### 1.1 The durable repo (public, MIT, package `@nanstey/durable`, Node >= 22, `main` protected: PRs required, squash-only)
+### 1.1 The durable repo (public, MIT, package `@nanstey/durable`, Node >= 22.19.0, `main` protected: PRs required, squash-only)
 
 Layout, stated once. Everything of the engine lives at the repo root of `nanstey/durable`:
 

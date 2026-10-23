@@ -1,0 +1,10 @@
+profile: work
+scope:
+  repos:
+    - slug: acme/api
+      policySource: { kind: none }
+workers:
+  dispatcher: git-process
+  kind: pi-session
+  durable: { enabledRoles: [], maxConcurrent: 2, skills: [], viewer: on-demand }
+merge: { mode: human-approval }
