@@ -95,11 +95,11 @@ test("citty preserves doctor help and rejects unknown commands", async () => {
 	assert.notEqual(bad.exitCode, 0);
 	const workerOnly = await execa(
 		process.execPath,
-		["bin/durable.ts", "stop", "fixture", "--workers"],
+		["bin/durable.ts", "stop", "fixture", "--workers", "--dry-run"],
 		{ reject: false },
 	);
-	assert.notEqual(workerOnly.exitCode, 0);
-	assert.match(workerOnly.stderr, /service was not stopped/);
+	assert.equal(workerOnly.exitCode, 0);
+	assert.match(workerOnly.stdout, /POST \/v1\/workers\/stop/);
 });
 test("SSE hello then snapshot; fake-clock ping, tree delta, disconnect and reconnect snapshot", async (t) => {
 	isolate();

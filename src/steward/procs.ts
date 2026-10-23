@@ -15,6 +15,7 @@ import type {
 	Invocation,
 	Launch,
 } from "../platform/containment.ts";
+import { unconfirmedHoldReason } from "../platform/holdAdvice.ts";
 import { workspaceWriters } from "../platform/workspaceWriters.ts";
 import { audit } from "./audit.ts";
 import { agentDir, loadJson, saveJson } from "./files.ts";
@@ -90,7 +91,7 @@ export class ProcessManager {
 		const records = this.journal.invocations.filter(
 			(record) => record.item === item,
 		);
-		const units = records.map((record) => record.slice).join(", ");
+		const units = records.map((record) => record.slice);
 		let empty = false;
 		try {
 			empty = await this.terminate({ item });
@@ -102,9 +103,7 @@ export class ProcessManager {
 			delete hold.reason;
 		} else {
 			hold.state = "holding";
-			hold.reason = this.backend.confirmed
-				? `Stop ${units} with systemctl --user stop <slice> and confirm cgroup.events populated 0 before editing; run durable hold --verify.`
-				: "Containment unconfirmed. Force-stop Termux in Android Settings or reboot the device (cgroup v1 Linux: reboot) before editing. Stopping the steward and /proc inspection cannot establish ownership; writers with cwd / may be invisible.";
+			hold.reason = unconfirmedHoldReason(this.backend.confirmed, units);
 		}
 		saveJson(this.path, this.journal);
 		return structuredClone(hold);
