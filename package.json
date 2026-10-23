@@ -1,24 +1,3 @@
 {
-  "name": "@nanstey/durable",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Durable, proactive agents that push project work to human review, built on pi-durable.",
-  "license": "MIT",
-  "type": "module",
-  "files": [
-    "bin/",
-    "src/",
-    "web/",
-    "schema/",
-    "examples/",
-    "units/",
-    "termux/",
-    "templates/",
-    "pi-extension/",
-    "README.md",
-    "LICENSE"
-  ],
-  "engines": {
-    "node": ">=22"
-  }
+  "name":"@nanstey/durable","version":"0.0.0","private":true,"description":"Durable proactive agents built on pi-durable.","license":"MIT","type":"module","engines":{"node":">=22.19.0"},"files":["bin/","src/","schema/","examples/","README.md","LICENSE"],"bin":{"durable":"bin/durable.ts"},"scripts":{"test":"node --experimental-strip-types --test test/unit","check":"tsc --noEmit","hygiene":"bash scripts/hygiene-scan.sh"},"dependencies":{"@earendil-works/chord":"1.4.0","@earendil-works/pi-ai":"1.4.0","@earendil-works/pi-coding-agent":"1.4.0","@earendil-works/pi-durable":"1.4.0","proper-lockfile":"4.1.2","typebox":"1.4.3","yaml":"2.9.1"},"devDependencies":{"@types/node":"26.6.5","@types/proper-lockfile":"4.1.4","typescript":"7.0.2"}
 }
