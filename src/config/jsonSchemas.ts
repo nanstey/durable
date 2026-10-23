@@ -197,7 +197,7 @@ export const machineSchema = object(
 			type: "object",
 			additionalProperties: object(
 				{
-					kind: { enum: ["console", "desktop", "command", "github"] },
+					kind: { enum: ["inbox", "console", "desktop", "command", "github"] },
 					targetLogin: text,
 					command: text,
 					argv: strings,
