@@ -224,17 +224,6 @@ export async function openHarness(options: HarnessConfig) {
 			}),
 		}),
 		defineTool({
-			name: "explain_item",
-			description: "Explain a queue item without changing it.",
-			parameters: Type.Object({ item: Type.String() }),
-			replay: "safe",
-			execute: async ({ item }) => ({
-				output: [
-					{ type: "text", text: JSON.stringify({ item, state: "unknown" }) },
-				],
-			}),
-		}),
-		defineTool({
 			name: "status",
 			description: "Read steward status and budget.",
 			parameters: Type.Object({}),
