@@ -9,7 +9,8 @@ function requiredScope(method: string, path: string): Scope | undefined {
 		(/^\/v1\/(?:conversations|sessions)\/[^/]+\/(?:messages|abort)$/.test(
 			path,
 		) ||
-			path === "/v1/messages")
+			path === "/v1/messages" ||
+			path === "/v1/conversations")
 	)
 		return "chat";
 	// Acknowledging an inbox notice has no execution authority.

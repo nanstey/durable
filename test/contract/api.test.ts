@@ -146,6 +146,35 @@ test("proxy token header uses the same scopes and ambiguous credentials are refu
 		401,
 	);
 });
+test("chat and scout conversations are durable, filtered, and idempotent", async () => {
+	const token = tokens.chat;
+	const request = (kind: string, key: string, item?: string) =>
+		api.request("/v1/conversations", {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${token}`,
+				"content-type": "application/json",
+				"idempotency-key": key,
+			},
+			body: JSON.stringify({ kind, item }),
+		});
+	const first = await request("chat", "chat-one");
+	assert.equal(first.status, 201);
+	const conversation = await first.json();
+	assert.deepEqual(
+		await (await request("chat", "chat-one")).json(),
+		conversation,
+	);
+	assert.equal((await request("worker-durable", "worker")).status, 400);
+	assert.equal((await request("scout", "scout-one", "issue-1")).status, 201);
+	const listed = await api.request(
+		"/v1/conversations?kind=scout&item=issue-1",
+		{
+			headers: { authorization: `Bearer ${tokens.read}` },
+		},
+	);
+	assert.equal((await listed.json()).nodes.length, 1);
+});
 test("unknown node cannot read another transcript", async () => {
 	for (const path of [
 		"/v1/conversations/missing",

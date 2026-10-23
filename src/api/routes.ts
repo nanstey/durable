@@ -2,6 +2,10 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AgentDef } from "../config/schema.ts";
 import { audit, readAudit } from "../steward/audit.ts";
+import {
+	isStartableConversationKind,
+	startableConversationKinds,
+} from "../steward/conversations.ts";
 import type { StewardHarness } from "../steward/harness.ts";
 import { type ApiEnv, auth } from "./auth.ts";
 import { ApiError, bodyHash, validateMessage } from "./chat.ts";
@@ -75,15 +79,63 @@ export function createApi(opts: {
 			agent: opts.agent,
 			profile: opts.profile,
 			scopeSummary: c.get("actor").scopes,
-			capabilities: { tree: true, startableKinds: [] },
+			capabilities: {
+				tree: true,
+				startableKinds: Array.from(
+					opts.definition.chat?.startableKinds ?? startableConversationKinds,
+				),
+			},
 			startedAt,
 		};
 		return c.json(device);
 	});
 	app.get("/v1/sessions", async (c) => c.json(await harness.tree()));
-	app.get("/v1/conversations", async (c) =>
-		c.json({ nodes: await harness.tree() }),
-	);
+	app.get("/v1/conversations", async (c) => {
+		const kind = c.req.query("kind");
+		const item = c.req.query("item");
+		if (kind && !startableConversationKinds.includes(kind as "chat" | "scout"))
+			throw new ApiError("invalid", "kind must be chat or scout");
+		const nodes = (await harness.tree()).filter(
+			(node) => (!kind || node.kind === kind) && (!item || node.item === item),
+		);
+		return c.json({ nodes });
+	});
+	app.post("/v1/conversations", async (c) => {
+		let body: { kind?: unknown; item?: unknown; name?: unknown };
+		try {
+			body = await c.req.json();
+		} catch {
+			throw new ApiError("invalid", "JSON object required");
+		}
+		if (
+			typeof body.kind !== "string" ||
+			!isStartableConversationKind(
+				body.kind,
+				opts.definition.chat?.startableKinds,
+			)
+		)
+			throw new ApiError("invalid", "conversation kind is not startable");
+		if (body.item !== undefined && typeof body.item !== "string")
+			throw new ApiError("invalid", "item must be a string");
+		if (body.name !== undefined && typeof body.name !== "string")
+			throw new ApiError("invalid", "name must be a string");
+		const idempotency = c.req.header("idempotency-key");
+		if (!idempotency || idempotency.length > 200)
+			throw new ApiError("invalid", "Idempotency-Key required");
+		const id = await harness.create(
+			body.kind,
+			idempotency,
+			body.item,
+			JSON.stringify(body),
+		);
+		audit(opts.agent, {
+			event: "conversation-created",
+			kind: body.kind,
+			conversationId: id,
+			client: c.get("actor").client,
+		});
+		return c.json({ id, kind: body.kind }, 201);
+	});
 	app.get("/v1/budget", async (c) => c.json((await harness.snapshot()).budget));
 	app.get("/v1/queue", async (c) => c.json({ items: await harness.queue() }));
 	app.get("/v1/inbox", async (c) => c.json((await harness.snapshot()).inbox));
@@ -114,7 +166,16 @@ export function createApi(opts: {
 		return found;
 	}
 	async function mainId() {
-		return (await harness.tree()).find((n) => n.kind === "steward")!.id;
+		const steward = (await harness.tree()).find(
+			(node) => node.kind === "steward",
+		);
+		if (!steward)
+			throw new ApiError(
+				"unavailable",
+				"steward conversation unavailable",
+				503,
+			);
+		return steward.id;
 	}
 	async function snapshot(id: string | undefined, hash: string) {
 		if (!tokenActive(opts.agent, hash))

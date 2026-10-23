@@ -7,6 +7,8 @@ import {
 	type Scope,
 } from "../api/tokens.ts";
 import { loadMachine } from "../config/load.ts";
+import { DurableClient } from "../client/client.ts";
+import { attachTui } from "../tui/main.ts";
 import { durableHome } from "../config/paths.ts";
 import { SystemdUserServiceManager } from "../platform/service/systemdUser.ts";
 import { resumeLocal } from "../steward/killswitch.ts";
@@ -30,14 +32,140 @@ function selected(value?: string) {
 		: assignments[0].id;
 }
 const subCommands: SubCommandsDef = {};
-for (const action of [
-	"enable",
-	"disable",
-	"start",
-	"stop",
-	"status",
-	"logs",
-] as const) {
+const remoteArgs = {
+	agent: { type: "positional", description: "Agent assigned to this machine" },
+	json: { type: "boolean", default: false },
+} as const;
+function clientFor(agent?: string) {
+	const id = selected(agent);
+	return new DurableClient(
+		`http://127.0.0.1:${assignedPort(id)}`,
+		localToken(id),
+	);
+}
+function print(value: unknown, json = false) {
+	console.log(JSON.stringify(value, null, json ? 2 : 2));
+}
+function readCommand(
+	name: "queue" | "inbox" | "audit" | "status",
+	path: string,
+) {
+	subCommands[name] = defineCommand({
+		meta: { name },
+		args: { ...remoteArgs, all: { type: "boolean", default: false } },
+		async run({ args }) {
+			const suffix = args.all
+				? `${path.includes("?") ? "&" : "?"}all=true`
+				: "";
+			print(await clientFor(args.agent).request(`${path}${suffix}`), args.json);
+		},
+	});
+}
+readCommand("queue", "/v1/conversations?tree=true");
+readCommand("inbox", "/v1/inbox");
+readCommand("audit", "/v1/audit");
+readCommand("status", "/v1/device");
+subCommands.inbox = defineCommand({
+	meta: { name: "inbox" },
+	subCommands: {
+		ack: defineCommand({
+			meta: { name: "ack" },
+			args: { ...remoteArgs, id: { type: "positional", required: true } },
+			async run({ args }) {
+				print(
+					await clientFor(args.agent).request(
+						`/v1/inbox/${encodeURIComponent(args.id)}/ack`,
+						{ method: "POST" },
+					),
+					args.json,
+				);
+			},
+		}),
+	},
+});
+subCommands.ask = defineCommand({
+	meta: { name: "ask" },
+	args: { ...remoteArgs, text: { type: "positional", required: true } },
+	async run({ args }) {
+		const client = clientFor(args.agent);
+		const { nodes } = await client.conversations();
+		const steward = nodes.find((node) => node.kind === "steward");
+		if (!steward) throw Error("steward conversation not found");
+		print(await client.message(steward.id, args.text), args.json);
+	},
+});
+subCommands.attach = defineCommand({
+	meta: { name: "attach" },
+	args: { target: { type: "positional", required: true } },
+	async run({ args }) {
+		const [agent, conversation] = args.target.split("/", 2);
+		await attachTui(clientFor(agent), conversation);
+	},
+});
+subCommands.chat = defineCommand({
+	meta: { name: "chat" },
+	subCommands: {
+		new: defineCommand({
+			meta: { name: "new" },
+			args: {
+				...remoteArgs,
+				kind: { type: "string", default: "chat" },
+				item: { type: "string" },
+				name: { type: "string" },
+			},
+			async run({ args }) {
+				if (args.kind !== "chat" && args.kind !== "scout")
+					throw Error("kind must be chat or scout");
+				print(
+					await clientFor(args.agent).createConversation(args.kind, {
+						item: args.item,
+						name: args.name,
+					}),
+					args.json,
+				);
+			},
+		}),
+		list: defineCommand({
+			meta: { name: "list" },
+			args: {
+				...remoteArgs,
+				kind: { type: "string" },
+				item: { type: "string" },
+			},
+			async run({ args }) {
+				const query = new URLSearchParams();
+				if (args.kind) query.set("kind", args.kind);
+				if (args.item) query.set("item", args.item);
+				print(
+					await clientFor(args.agent).conversations(
+						query.size ? `?${query}` : "",
+					),
+					args.json,
+				);
+			},
+		}),
+		resume: defineCommand({
+			meta: { name: "resume" },
+			args: {
+				...remoteArgs,
+				id: { type: "positional", required: true },
+				text: { type: "positional", required: true },
+				steer: { type: "boolean", default: false },
+			},
+			async run({ args }) {
+				print(
+					await clientFor(args.agent).message(
+						args.id,
+						args.text,
+						args.steer ? "steer" : "followUp",
+					),
+					args.json,
+				);
+			},
+		}),
+	},
+});
+for (const action of ["enable", "disable", "start", "stop", "logs"] as const) {
 	subCommands[action] = defineCommand({
 		meta: { name: action },
 		args: {
@@ -59,8 +187,7 @@ for (const action of [
 				dryRun: args["dry-run"],
 				home: process.env.DURABLE_HOME ? durableHome() : undefined,
 			});
-			if (action === "status") console.log((await manager.status(agent)).text);
-			else if (action === "logs")
+			if (action === "logs")
 				for await (const line of manager.logs(agent))
 					process.stdout.write(line);
 			else await manager[action](agent);
