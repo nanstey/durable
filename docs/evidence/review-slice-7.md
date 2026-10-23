@@ -135,7 +135,18 @@ Counts: **High 3, Medium 8, Low 8.**
 | H3 | fixed | Missing observed assistant provenance now refuses the review; regression in `gate-review.test.ts`. |
 | M1 | fixed | Only `human-approval-required` creates a waiting approval gate or nonce. |
 | M6 | fixed | Approval requires an active gate and a matching live PR head SHA. |
-| M2-M5, M7-M8, L1-L8 | not fixed | Not addressed in this focused remediation. |
+| M2 | fixed | `Github.readyPr` uses GraphQL `markPullRequestReadyForReview` and verifies `isDraft: false`. |
+| M3 | fixed | Reviewer failures retry once per SHA; final failure persists `review-failed` and notifies escalation. |
+| M4 | fixed | `changes` and `blocked` verdicts requeue the producer with SHA-bound reviewer feedback. |
+| M5 | fixed | Pi reviewer output now uses a private steward state directory and is removed after collection. |
+| M7 | fixed | Connector call budgets are atomically reserved and durably persisted per agent/connector before invocation; failed calls remain counted. |
+| M8 | fixed | Every mediator attempt receives start/final audit records and a 30-second abort timeout. |
+| L1 | fixed | Changed-file truncation fails closed; renamed previous paths and protected directory/glob locations are evaluated. |
+| L2 | not fixed | Policy facts and edge semantics remain outside this remediation. |
+| L3 | fixed | Gate comments require the Durable login and review status stays pending until approval. |
+| L4 | fixed | Gate notification intent is persisted before nonce delivery. |
+| L5-L7 | not fixed | Resolution flow, observed producer provenance, and remaining connector schema/doctor hardening are not addressed. |
+| L8 | partially fixed | Gate nonce notifications now have a neutral approval title; nonce attempt limiting and route coverage remain open. |
 
 ## Top fixes in order
 

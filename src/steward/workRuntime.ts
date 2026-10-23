@@ -1,3 +1,4 @@
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentDef, MachineCfg } from "../config/schema.ts";
 import { monitorWorker } from "../dispatch/monitor.ts";
@@ -18,6 +19,7 @@ import { readLocalBody } from "../sources/localFiles.ts";
 import type { WorkerHandle, WorkerKindRegistry } from "../workers/kind.ts";
 import type { WorkerRegistry } from "../workers/registry.ts";
 import { audit } from "./audit.ts";
+import { agentDir } from "./files.ts";
 import { claim } from "./claims.ts";
 import { intakeNumber, prMarker, type WorkGithub } from "./github.ts";
 import { quietHours } from "./killswitch.ts";
@@ -298,6 +300,9 @@ export class WorkRuntime {
 				if (!model) throw Error("models.worker required for review");
 				const id = `durable-${this.options.agent}-${item.id}-review-${sha.slice(0, 12)}`;
 				const checkout = this.options.checkoutFor(item.repo) ?? item.repo;
+				const reviewDir = mkdtempSync(
+					join(agentDir(this.options.agent), "review-"),
+				);
 				const launched = await launchReviewer(
 					this.options.definition,
 					this.options.machine,
@@ -318,7 +323,7 @@ export class WorkRuntime {
 						producer: model,
 						workspace: { id, repo: checkout, branch: this.branch(item) },
 						briefText: `Review draft PR #${pr.number} at ${sha}. Use pr_diff, then report_verdict with this exact head SHA.`,
-						outputFile: join(checkout, `.durable-review-${id}.json`),
+						outputFile: join(reviewDir, "verdict.json"),
 						env: { ...this.options.env, DURABLE_ITEM: item.id },
 						limits: this.options.definition.limits ?? {},
 					},
@@ -345,6 +350,20 @@ export class WorkRuntime {
 					this.options.definition,
 				);
 			} catch (error) {
+				const failures = (task.reviewFailures?.[sha] ?? 0) + 1;
+				task.reviewFailures ??= {};
+				task.reviewFailures[sha] = failures;
+				delete task.review;
+				if (failures < 2) {
+					audit(this.options.agent, {
+						event: "reviewer-retry",
+						item: item.id,
+						sha,
+						failures,
+					});
+					await this.store.save(state);
+					return;
+				}
 				item.review = {
 					sha,
 					failed: true,
@@ -356,8 +375,13 @@ export class WorkRuntime {
 					state: "wait-human",
 					reasons: ["review-failed"],
 				};
-				delete task.review;
 				await this.store.save(state);
+				await this.options.notify("escalation", item.id).catch(() =>
+					audit(this.options.agent, {
+						event: "notify-failed",
+						item: item.id,
+					}),
+				);
 				return;
 			}
 			delete task.review;
@@ -365,12 +389,14 @@ export class WorkRuntime {
 		if (!item.review || item.review.failed) return;
 		const review = item.review;
 		if (review.result.verdict !== "approve") {
-			item.gate = {
-				pr: pr.number,
-				sha,
-				state: "wait-human",
-				reasons: ["review-requested-changes"],
-			};
+			// A reviewer verdict is feedback, not a terminal approval state. Requeue
+			// the producer with the SHA-bound review text and review the new head.
+			task.phase = "dispatch";
+			task.resume = true;
+			task.briefText = `${task.briefText ?? ""}\n\nReviewer feedback for ${sha}:\n${review.result.summary}`;
+			delete item.review;
+			delete item.gate;
+			await this.store.save(state);
 			return;
 		}
 		const githubFacts = await collectFacts(
@@ -411,16 +437,19 @@ export class WorkRuntime {
 			item.repo,
 			pr.number,
 			sha,
-			"| Fact | Value |\n| --- | --- |\n| Head SHA | current |\n| Independent review | passed |\n\nAction: human approval required.",
+			`| Fact | Value |\n| --- | --- |\n| Head SHA | \`${sha}\` |\n| Review verdict | ${review.result.verdict} |\n| Risk | ${review.result.risk} |\n| Gate reasons | ${decision.reasons.join(", ")} |\n\nAction: human approval required.`,
 			item.id,
 		);
+		// Persist delivery intent before side effects, so a restart cannot replace an
+		// already delivered nonce.
+		item.gate.notified = true;
+		await this.store.save(state);
 		await this.options.notifyApproval?.(item.id, sha);
 		if (!(await this.options.issueApproval?.(item.id, sha)))
 			audit(this.options.agent, {
 				event: "approval-nonce-unavailable",
 				item: item.id,
 			});
-		item.gate.notified = true;
 		audit(this.options.agent, {
 			event: "gate-decision",
 			item: item.id,

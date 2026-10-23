@@ -32,6 +32,7 @@ const fields = [
 	"reviewDecision",
 	"statusCheckRollup",
 	"files",
+	"changedFiles",
 	"additions",
 	"deletions",
 	"reviews",
@@ -57,7 +58,8 @@ type GhPr = {
 	mergeStateStatus?: unknown;
 	reviewDecision?: unknown;
 	statusCheckRollup?: Array<{ conclusion?: unknown; status?: unknown }> | null;
-	files?: Array<{ path?: unknown }> | null;
+	files?: Array<{ path?: unknown; previousPath?: unknown }> | null;
+	changedFiles?: unknown;
 	reviews?: Array<{
 		author?: { login?: unknown } | null;
 		state?: unknown;
@@ -91,10 +93,18 @@ export async function collectFacts(
 			fields,
 		]);
 		const value = JSON.parse(output) as GhPr;
-		const paths = Array.isArray(value.files)
-			? value.files
-					.map((file) => file.path)
-					.filter((path): path is string => typeof path === "string")
+		const files = Array.isArray(value.files) ? value.files : null;
+		const filesComplete =
+			files !== null &&
+			files.length < 100 &&
+			(typeof value.changedFiles !== "number" ||
+				value.changedFiles === files.length);
+		const paths = filesComplete
+			? files.flatMap((file) =>
+					[file.path, file.previousPath].filter(
+						(path): path is string => typeof path === "string",
+					),
+				)
 			: null;
 		// GitHub reviews are not an authorization input. In particular, a review
 		// authored by the PR author is ignored rather than counted as approval.

@@ -38,6 +38,15 @@ test("hard paths include CODEOWNERS variants and .github", () => {
 	assert.equal(isHardPath("src/main.ts", ["src/main.ts"]), true);
 });
 
+test("protected locations support directory prefixes and globs", () => {
+	assert.equal(isHardPath("infra/secrets/key", ["infra/"]), true);
+	assert.equal(
+		isHardPath("services/api/deploy.yml", ["services/*/deploy.yml"]),
+		true,
+	);
+	assert.equal(isHardPath("src/main.ts", ["infra/"]), false);
+});
+
 test("effective policy is tighten-only and unverified policies cannot enable auto merge", () => {
 	const result = effectivePolicy(
 		{
@@ -186,4 +195,26 @@ test("collectFacts uses only computed fields and ignores PR-author reviews", asy
 		),
 		null,
 	);
+});
+
+test("collectFacts fails closed when GitHub truncates changed files", async () => {
+	const result = await collectFacts(
+		{ repo: "acme/api", number: 7, profileLogin: "operator" },
+		"head",
+		async () =>
+			JSON.stringify({
+				isDraft: false,
+				author: { login: "operator" },
+				headRefOid: "head",
+				mergeStateStatus: "CLEAN",
+				reviewDecision: "APPROVED",
+				statusCheckRollup: [],
+				files: Array.from({ length: 100 }, (_, index) => ({
+					path: `src/${index}`,
+				})),
+				changedFiles: 101,
+			}),
+	);
+	assert.equal(result?.paths, null);
+	assert.equal(result?.hardPath, null);
 });

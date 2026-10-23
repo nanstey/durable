@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
+import { dirname } from "node:path";
 import { familyFor, providerFor } from "../config/agent.ts";
 import type { AgentDef, MachineCfg, ModelDef } from "../config/schema.ts";
 import type { WorkspaceSpec } from "../dispatch/types.ts";
@@ -86,6 +87,15 @@ export async function launchReviewer(
 	return { ...input, kind: kind.name };
 }
 
+async function readPiReview(outputFile: string) {
+	try {
+		return parseReviewResult(JSON.parse(await readFile(outputFile, "utf8")));
+	} finally {
+		await rm(outputFile, { force: true });
+		await rm(dirname(outputFile), { recursive: true, force: true });
+	}
+}
+
 type AssistantEntry = { provider?: string; model?: string; family?: string };
 function assistantEntries(line: string): AssistantEntry[] {
 	try {
@@ -128,9 +138,7 @@ export async function collectReview(
 	const review =
 		running.kind === "durable-conversation"
 			? result.review
-			: parseReviewResult(
-					JSON.parse(await readFile(running.outputFile, "utf8")),
-				);
+			: await readPiReview(running.outputFile);
 	if (!review) throw Error("reviewer failed without a verdict");
 	if (review.headSha !== running.headSha)
 		throw Error("review verdict head SHA does not match reviewed head");
