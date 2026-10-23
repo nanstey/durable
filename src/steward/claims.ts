@@ -1,4 +1,9 @@
-export type ClaimComment = { id: number; body: string };
+export type ClaimComment = {
+	id: number;
+	body: string;
+	login?: string;
+	authorAssociation?: string;
+};
 
 /** Injectable GitHub surface. Production code can adapt gh or Octokit; tests never write GitHub. */
 export interface ClaimGithub {
@@ -25,6 +30,8 @@ export type ClaimTarget = {
 	lease: string;
 	item?: string;
 	owner?: string;
+	/** GitHub login for the profile that owns Durable's claim comments. */
+	login?: string;
 };
 export type ClaimResult = {
 	state: "won" | "lost";
@@ -33,6 +40,16 @@ export type ClaimResult = {
 };
 const marker =
 	/^<!-- durable-claim agent=([^\s]+) lease=([^\s]+)(?: owner=([^\s]+))? -->$/;
+const maxLeaseMs = 2 * 3600000;
+function trustedComment(comment: ClaimComment, login?: string) {
+	return (
+		!login ||
+		Boolean(comment.login?.toLowerCase() === login.toLowerCase()) ||
+		["OWNER", "MEMBER", "COLLABORATOR"].includes(
+			comment.authorAssociation?.toUpperCase() ?? "",
+		)
+	);
+}
 
 // fallow-ignore-next-line unused-export
 export function claimMarker(
@@ -62,10 +79,18 @@ export async function claim(
 	target: ClaimTarget,
 	now = Date.now(),
 ): Promise<ClaimResult> {
+	const lease = new Date(
+		Math.min(Date.parse(target.lease), now + maxLeaseMs),
+	).toISOString();
+	const markerBody = claimMarker(target.agent, lease, target.owner);
 	const existing = (await github.listComments(target.repo, target.issue))
 		.filter((comment) => {
 			const parsed = parseClaim(comment.body);
-			return parsed && Date.parse(parsed.lease) > now;
+			return (
+				trustedComment(comment, target.login) &&
+				parsed &&
+				Date.parse(parsed.lease) > now
+			);
 		})
 		.sort((a, b) => a.id - b.id);
 	const prior = existing.find((comment) => {
@@ -76,17 +101,12 @@ export async function claim(
 		await github.updateComment?.(
 			target.repo,
 			prior.id,
-			claimMarker(target.agent, target.lease, target.owner),
+			markerBody,
 			target.item,
 		);
 		return { state: "won", commentId: prior.id, winner: target.agent };
 	}
-	await github.addLabel(target.repo, target.issue, "durable/claimed");
-	const own = await github.createComment(
-		target.repo,
-		target.issue,
-		claimMarker(target.agent, target.lease, target.owner),
-	);
+	const own = await github.createComment(target.repo, target.issue, markerBody);
 	const claims = (await github.listComments(target.repo, target.issue))
 		.map((comment) => ({ comment, marker: parseClaim(comment.body) }))
 		.filter(
@@ -95,12 +115,20 @@ export async function claim(
 			): entry is {
 				comment: ClaimComment;
 				marker: { agent: string; lease: string };
-			} => Boolean(entry.marker && Date.parse(entry.marker.lease) > now),
+			} =>
+				Boolean(
+					entry.marker &&
+						Date.parse(entry.marker.lease) > now &&
+						(entry.comment.id === own.id ||
+							trustedComment(entry.comment, target.login)),
+				),
 		)
 		.sort((a, b) => a.comment.id - b.comment.id);
 	const winner = claims[0];
-	if (winner?.comment.id === own.id)
+	if (winner?.comment.id === own.id) {
+		await github.addLabel(target.repo, target.issue, "durable/claimed");
 		return { state: "won", commentId: own.id, winner: target.agent };
+	}
 	await github.deleteComment?.(target.repo, own.id, target.item);
 	return { state: "lost", commentId: own.id, winner: winner?.marker.agent };
 }

@@ -6,6 +6,18 @@ import { ProcessContainment } from "../../src/platform/processContainment.ts";
 import { ProcessManager } from "../../src/steward/procs.ts";
 import { eventually, isolate } from "../support/harness.ts";
 
+test("completed fallback launches are removed so a restarted steward can sweep", async () => {
+	isolate();
+	const backend = new ProcessContainment();
+	const manager = new ProcessManager("fallback-restart", backend);
+	const result = await manager.launch(["true"], { PATH: process.env.PATH });
+	assert.equal(result.exitCode, 0);
+	assert.equal(manager.snapshot().invocations.length, 0);
+	const restarted = new ProcessManager("fallback-restart", backend);
+	assert.equal(await restarted.sweep(), true);
+	assert.equal(restarted.snapshot().invocations.length, 0);
+});
+
 test("process-group fallback kills marked descendants but cannot confirm an unmarked setsid escape", {
 	timeout: 10000,
 }, async () => {
@@ -29,8 +41,7 @@ test("process-group fallback kills marked descendants but cannot confirm an unma
 	await eventually(() => existsSync(started));
 	assert.equal(await manager.terminate({ item: "item" }), false);
 	await task;
-	assert.ok(await backend.empty(manager.snapshot().invocations[0]));
+	assert.equal(manager.snapshot().invocations.length, 0);
 	assert.ok(manager.fenced("item"));
-	assert.equal(manager.snapshot().invocations.length, 1);
 	await eventually(() => existsSync(escaped));
 });

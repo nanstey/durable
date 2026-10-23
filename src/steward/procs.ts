@@ -381,7 +381,9 @@ export class ProcessManager {
 				record.state = "running";
 			});
 			const result = await launch.done;
-			if ((await this.backend.empty(record)) && this.backend.confirmed)
+			// A completed child has no surviving process to contain. The fallback backend
+			// cannot attest to containment, but must not retain completed intents forever.
+			if (await this.backend.empty(record))
 				await this.persist(record, "delete", () => {
 					this.journal.invocations = this.journal.invocations.filter(
 						(r) => r.invocationId !== invocationId,

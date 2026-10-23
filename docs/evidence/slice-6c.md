@@ -49,9 +49,9 @@ are advisory, not a cancellation API.
 - `pnpm install --frozen-lockfile`
 - `pnpm check`, `pnpm hygiene`, and `git diff --check`: passed.
 - `node --test --test-timeout=30000 test/unit/durable-worker.test.ts test/unit/durable-config.test.ts test/contract/durable-gitops.test.ts test/contract/durable-known-limits.test.ts test/contract/durable-worker.test.ts`: **28 passed**.
-- Focused regression files: `worker-kinds`, `worker-guard`, `work-item-dispatch`, `work-safety`, `work-flow`, `ownership`, `model-config`, `pause-race`, `loop`: **57 passed**, including all ten selection rows.
-- **85 focused tests total**, no skipped tests. The exhaustive suite is left to CI, per contributor rules.
-- Complexity measurement: `confinedPath` reduced from CCN 16 to below the review threshold; `WorkRuntime.progress` reduced from CCN 16 to 13. Remaining flagged functions are in the review band, not the refactor band.
+- Focused regression files: `worker-kinds`, `worker-guard`, `work-item-dispatch`, `work-safety`, `work-replay`, `claims-pipeline`, `scout`, `work-flow`, `ownership`, `model-config`, `pause-race`, `loop`: **77 passed**, including all ten selection rows.
+- **105 focused tests total**, no skipped tests. The exhaustive suite is left to CI, per contributor rules.
+- Complexity measurement: `confinedPath` reduced from CCN 16 to below the review threshold; `WorkRuntime.progress` reduced from CCN 16 to 14 after integrating the latest dispatch safety fixes; cancellation reduced from CCN 16 to 12. Remaining flagged functions are in the review band, not the refactor band.
 
 ## Validation boundaries
 

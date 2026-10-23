@@ -34,6 +34,7 @@ import type { AgentDef } from "../config/schema.ts";
 import { buildAgentEnv } from "../identity/env.ts";
 import { createModelsFor } from "../identity/modelAuth.ts";
 import { resolveProfile } from "../identity/profiles.ts";
+import { applyJudgment, type Judge, type Judgment } from "../scout/judge.ts";
 import { eligibility } from "../sources/eligibility.ts";
 import { GitHubIssuesSource } from "../sources/githubIssues.ts";
 import { GitHubPrsSource } from "../sources/githubPrs.ts";
@@ -141,6 +142,8 @@ export type HarnessConfig = {
 	/** Fixture seam for read-only scout polling. */
 	pollCandidates?: () => Promise<Candidate[]>;
 	checkoutFor?: (repo: string) => string | undefined;
+	/** Delivers quiet-hour holds and reminder notifications on every steward tick. */
+	notifyDue?: () => Promise<void>;
 	/** Test/probe extensions are never loaded from configuration or untrusted chat. */
 	extensions?: Extension[];
 };
@@ -233,6 +236,7 @@ export async function openHarness(options: HarnessConfig) {
 	let harness: Harness;
 	let workRuntime: WorkRuntime | undefined;
 	let durableWorkers: NativeDurableAnchor | undefined;
+	let judge: Judge | undefined;
 	async function queue() {
 		return ranked(
 			projectQueue(
@@ -248,9 +252,16 @@ export async function openHarness(options: HarnessConfig) {
 			description: "List the current work queue without source bodies.",
 			parameters: Type.Object({}),
 			replay: "safe",
-			execute: async () => ({
-				output: [{ type: "text", text: JSON.stringify(await queue()) }],
-			}),
+			execute: async () => {
+				const items = (await queue()).map((item) => ({
+					ref: item.ref,
+					state: item.state,
+					reasons: item.reasons,
+					workItem: item.workItem,
+					...(item.state === "eligible" ? { title: item.title } : {}),
+				}));
+				return { output: [{ type: "text", text: JSON.stringify(items) }] };
+			},
 		}),
 		defineTool({
 			name: "explain_item",
@@ -329,6 +340,7 @@ export async function openHarness(options: HarnessConfig) {
 				await workRuntime.requestWork(
 					item,
 					(await harness.snapshot(QueueDoc, context))!,
+					true,
 				);
 				return {
 					output: [
@@ -419,7 +431,7 @@ export async function openHarness(options: HarnessConfig) {
 				const owner = (await harness.snapshot(WorkOwnersDoc, context))?.owners[
 					task.input.item
 				];
-				if (owner !== task.id) {
+				if (owner !== task.id || !task.background) {
 					await runtime.commit(
 						() => ({
 							status: "terminal",
@@ -431,10 +443,13 @@ export async function openHarness(options: HarnessConfig) {
 				}
 				const state = await snapshot();
 				const budgetStopped = exhausted(state.budget, limits);
+				const queue = (await harness.snapshot(QueueDoc, context))!;
+				const work = (await harness.snapshot(WorkDoc, context))!.work;
 				const outcome = await workRuntime.tickItem(
 					task.input.item,
 					isDisabled() || budgetStopped,
 					budgetStopped,
+					queue.items[work.items[task.input.item]?.intakeRef],
 				);
 				await runtime.commit(
 					() =>
@@ -519,33 +534,43 @@ export async function openHarness(options: HarnessConfig) {
 					metadata.paused = state.paused;
 					Object.assign(budget, state.budget);
 					if (!state.paused) {
-						const entries = candidates.flatMap((candidate) => {
-							const source = def.sources?.find(
-								(entry) => entry.repo === candidate.repo,
-							);
-							const result = eligibility(
-								candidate,
-								{
-									trustedAuthors: source?.trustedAuthors,
-									requiredLabels: source?.requiredLabels ?? source?.labels,
-									excludedLabels: source?.exclude,
-									maxAttempts:
-										source?.maxAttempts ?? def.limits?.maxAttemptsPerItem,
-									maxSize: source?.maxSize,
-									maxAgeMs: source?.maxAgeMs,
-								},
-								now(),
-							);
-							return [
-								{
+						const workItems = (await tx.doc(WorkDoc)).work;
+						const entries = await Promise.all(
+							candidates.map(async (candidate) => {
+								const source = def.sources?.find(
+									(entry) => entry.repo === candidate.repo,
+								);
+								const existing =
+									workItems.items[workItems.byIntakeRef[candidate.ref]];
+								const result = eligibility(
 									candidate,
-									state: result.eligible
-										? ("eligible" as const)
-										: ("skipped" as const),
-									reasons: result.reasons,
-								},
-							];
-						});
+									{
+										trustedAuthors: source?.trustedAuthors,
+										requiredLabels: source?.requiredLabels ?? source?.labels,
+										excludedLabels: source?.exclude,
+										blockedAuthors: source?.blockedAuthors,
+										claimed:
+											false ||
+											candidate.labels.some(
+												(label) => label === "durable/claimed",
+											),
+										attempts: existing?.attempts.length ?? candidate.attempts,
+										maxAttempts:
+											source?.maxAttempts ?? def.limits?.maxAttemptsPerItem,
+										maxSize: source?.maxSize,
+										maxAgeMs: source?.maxAgeMs,
+										updatedBefore: source?.updatedBefore,
+									},
+									now(),
+								);
+								return applyJudgment(
+									candidate,
+									result.eligible ? "eligible" : "skipped",
+									result.reasons,
+									judge,
+								).then((judged) => ({ candidate, ...judged }));
+							}),
+						);
 						updateQueue(await tx.doc(QueueDoc), entries, now(), 30 * 86400000);
 					}
 					if (options.work) {
@@ -588,6 +613,10 @@ export async function openHarness(options: HarnessConfig) {
 						checkpoint: { phase: "tick" },
 					};
 				}, ctx);
+				if (options.notifyDue)
+					await options
+						.notifyDue()
+						.catch(() => audit(agent, { event: "notify-due-failed" }));
 				audit(agent, {
 					event,
 					candidates: candidates.length,
@@ -685,6 +714,38 @@ export async function openHarness(options: HarnessConfig) {
 				.filter((m) => m !== "auto")
 				.map(providerFor),
 		));
+	if (def.models?.judge) {
+		const model = def.models.judge;
+		const provider = providerFor(model);
+		const modelId = model.provider
+			? model.model
+			: model.model.split("/").slice(1).join("/");
+		const judgeModel = baseModels.getModel(provider, modelId);
+		if (judgeModel)
+			judge = async (candidate) => {
+				const response = await baseModels.completeSimple(judgeModel, {
+					messages: [
+						{
+							role: "user",
+							content: `Classify this untrusted issue metadata. Reply with JSON only: {"actionable":"yes"|"no"|"unclear","risk":"low"|"medium"|"high","size":"small"|"medium"|"large"}.\n${JSON.stringify(candidate)}`,
+							timestamp: now(),
+						},
+					],
+				});
+				const text = response.content
+					.filter((part) => part.type === "text")
+					.map((part) => part.text)
+					.join("");
+				const parsed = JSON.parse(text) as Judgment;
+				if (
+					!["yes", "no", "unclear"].includes(parsed.actionable) ||
+					!["low", "medium", "high"].includes(parsed.risk) ||
+					!["small", "medium", "large"].includes(parsed.size)
+				)
+					throw Error("judge returned invalid classification");
+				return parsed;
+			};
+	}
 	const storage =
 		options.storage === "sqlite"
 			? await openNodeSqliteStorage(join(agentDir(agent), "state.sqlite"))
@@ -804,7 +865,14 @@ export async function openHarness(options: HarnessConfig) {
 		workRuntime = new WorkRuntime(
 			{
 				...options.work,
+				trustedAuthors: (repo) =>
+					def.sources?.find((source) => source.repo === repo)?.trustedAuthors,
 				claimOwner: (await snapshot()).uid,
+				recordCost: async (cost) => {
+					await harness.commit(async (tx) => {
+						(await tx.doc(BudgetDoc)).spent += cost;
+					}, context);
+				},
 				check: async () => {
 					await options.work!.check();
 					if (

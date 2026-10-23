@@ -304,7 +304,19 @@ test("quiet hours block only new dispatch, daily launch cap is enforced, and a T
 		);
 		await rig.step(86400000);
 		await eventually(() => rig.deps.dispatcher.launches.length === 2);
-		assert.equal((await rig.items())[0].attempts.length, 2);
+		// Either eligible item may win the next slot; no queue-priority contract orders equal candidates.
+		assert.equal(
+			(await rig.items()).reduce(
+				(count, item) => count + item.attempts.length,
+				0,
+			),
+			2,
+		);
+		assert.equal(
+			(await rig.items())[0].outcome,
+			undefined,
+			"guarded resume requeued paused work",
+		);
 	} finally {
 		await rig.harness.close();
 	}

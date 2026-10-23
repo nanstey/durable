@@ -12,7 +12,7 @@ import { PiSessionKind } from "../../src/workers/piSession.ts";
 import { WorkerRegistry } from "../../src/workers/registry.ts";
 
 class FakeWorkGithub implements WorkGithub {
-	comments: Array<{ id: number; body: string }> = [];
+	comments: Array<{ id: number; body: string; login?: string }> = [];
 	pulls: Array<
 		PullRequest & {
 			branch: string;
@@ -35,7 +35,11 @@ class FakeWorkGithub implements WorkGithub {
 	}
 	async createComment(_repo: string, _issue: number, body: string) {
 		this.write("create-comment");
-		const comment = { id: this.comments.length + 1, body };
+		const comment = {
+			id: this.comments.length + 1,
+			body,
+			login: "operator-login",
+		};
 		this.comments.push(comment);
 		return comment;
 	}

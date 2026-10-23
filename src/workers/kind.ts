@@ -44,6 +44,7 @@ export interface WorkerKind {
 	status(handle: WorkerHandle): Promise<"running" | "exited" | "unknown">;
 	result(handle: WorkerHandle): Promise<{
 		status: string;
+		cost?: number;
 		outcome?: import("./durable/anchor.ts").WorkerStop;
 	}>;
 	interrupt(

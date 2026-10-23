@@ -203,7 +203,7 @@ else console.log(JSON.stringify({ id: "terminal-1" }));
 		id: "job",
 		workspace,
 		command: "pi",
-		env: {},
+		env: { GH_TOKEN: "test-secret-not-in-argv" },
 	});
 	assert.equal(process.handle, "terminal-1");
 	assert.equal(
@@ -227,6 +227,7 @@ else console.log(JSON.stringify({ id: "terminal-1" }));
 	const logged = readFileSync(calls, "utf8").trim().split("\n");
 	assert.match(logged[0], /terminal list/);
 	assert.match(logged[1], /terminal create/);
+	assert.doesNotMatch(logged[1], /test-secret-not-in-argv/);
 	assert.match(logged[2], /terminal list/);
 	assert.match(logged[3], /terminal create/);
 	const registry = new WorkerRegistry();

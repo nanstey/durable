@@ -5,7 +5,7 @@ import {
 	pipelineDoctorErrors,
 	pipelineFor,
 } from "../pipeline/select.ts";
-import type { WorkerKindRegistry } from "../workers/kind.ts";
+import type { WorkerHandle, WorkerKindRegistry } from "../workers/kind.ts";
 import type { WorkerRegistry } from "../workers/registry.ts";
 import { selectWorkerKind } from "../workers/select.ts";
 import { type ClaimGithub, claim } from "./claims.ts";
@@ -30,6 +30,7 @@ export type TaskDependencies = {
 	agent: string;
 	lease: string;
 	claimOwner?: string;
+	login?: string;
 	github: ClaimGithub;
 	brief: () => Promise<string>;
 	dispatcher: WorkerDispatcher;
@@ -64,6 +65,7 @@ async function claimItem(
 				lease: deps.lease,
 				item: item.id,
 				owner: deps.claimOwner,
+				login: deps.login,
 			},
 			(deps.now ?? Date.now)(),
 		);
@@ -106,27 +108,34 @@ async function dispatchItem(
 	const intent = { ...task, workerId: attempt.id };
 	await deps.persist?.(intent);
 	await deps.check?.();
-	const handle = await deps.workers.launch(deps.dispatcher, kind, {
-		id: attempt.id,
-		agent: deps.agent,
-		item: item.id,
-		repo: item.repo,
-		baseRef: deps.definition.scope?.repos?.find(
-			(repo) => repo.slug === item.repo,
-		)?.base,
-		role: "worker",
-		briefText: task.briefText ?? (await deps.brief()),
-		workspace: {
-			id: `durable-${deps.agent}-${item.id}`,
-			repo: deps.checkout ?? item.repo,
-			branch: `durable/${deps.agent}/${item.id}`,
-		},
-		model: deps.model,
-		limits: deps.definition.limits ?? {},
-		env: deps.env,
-		piDir: deps.piDir,
-		resume: task.resume,
-	});
+	let handle: WorkerHandle;
+	try {
+		handle = await deps.workers.launch(deps.dispatcher, kind, {
+			id: attempt.id,
+			agent: deps.agent,
+			item: item.id,
+			repo: item.repo,
+			baseRef: deps.definition.scope?.repos?.find(
+				(repo) => repo.slug === item.repo,
+			)?.base,
+			role: "worker",
+			briefText: task.briefText ?? (await deps.brief()),
+			workspace: {
+				id: `durable-${deps.agent}-${item.id}`,
+				repo: deps.checkout ?? item.repo,
+				branch: `durable/${deps.agent}/${item.id}`,
+			},
+			model: deps.model,
+			limits: deps.definition.limits ?? {},
+			env: deps.env,
+			piDir: deps.piDir,
+			resume: task.resume,
+		});
+	} catch (error) {
+		attempt.endedAt = (deps.now ?? Date.now)();
+		await deps.persist?.(intent);
+		throw error;
+	}
 	attempt.worker = { kind: kind.name, process: handle.process };
 	return { ...intent, phase: "await-pr" };
 }

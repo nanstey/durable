@@ -282,10 +282,16 @@ export function createApi(opts: {
 	app.post("/v1/items/:id/release", async (c) => {
 		const item = c.req.param("id");
 		await requireItem(item);
-		const value = (await c.req.json()) as { code?: unknown };
+		let value: { code?: unknown } = {};
+		try {
+			value = (await c.req.json()) as { code?: unknown };
+		} catch {
+			/* Invalid bodies are treated as invalid credentials. */
+		}
 		const hold = opts.processes!.snapshot().holds[item];
 		if (
 			!hold ||
+			hold.state !== "held" ||
 			typeof value.code !== "string" ||
 			value.code.length > 256 ||
 			!opts.nonces?.verify("release", item, hold.holdEpoch, value.code)

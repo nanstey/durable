@@ -10,6 +10,7 @@ export async function deliverGithub(
 	payload: NotifyPayload,
 	targetLogin: string,
 	agentLogin: string | undefined,
+	env?: NodeJS.ProcessEnv,
 ): Promise<GithubDelivery> {
 	if (agentLogin === targetLogin) return "skipped-self";
 	if (!payload.target) throw Error("github notification requires a target URL");
@@ -25,6 +26,7 @@ export async function deliverGithub(
 		{
 			reject: true,
 			timeout: 15000,
+			env,
 		},
 	);
 	return "sent";
