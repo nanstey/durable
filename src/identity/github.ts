@@ -1,10 +1,12 @@
-import { spawnSync } from "node:child_process";
+import { execaSync } from "execa";
 import { readSecrets } from "./env.ts";
 import type { ResolvedProfile } from "./profiles.ts";
 
 export type GithubRunner = (args: string[], token: string) => string;
 export const runGithub: GithubRunner = (args, token) => {
-	const result = spawnSync("gh", args, {
+	const result = execaSync("gh", args, {
+		reject: false,
+		extendEnv: false,
 		env: {
 			PATH: process.env.PATH,
 			GH_TOKEN: token,
@@ -16,7 +18,7 @@ export const runGithub: GithubRunner = (args, token) => {
 		maxBuffer: 1048576,
 	});
 	// Never include subprocess stderr: it may contain credential material.
-	if (result.status !== 0)
+	if (result.exitCode !== 0)
 		throw new Error(
 			"GitHub identity probe failed; check profile token and gh installation",
 		);

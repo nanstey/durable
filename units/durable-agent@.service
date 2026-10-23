@@ -6,6 +6,7 @@ OnFailure=durable-agent-failure@%i.service
 Type=simple
 ExecStart=%h/.local/bin/durable run %i
 Restart=on-failure
+RestartSec=12
 KillMode=control-group
 TimeoutStopSec=30
 NoNewPrivileges=yes

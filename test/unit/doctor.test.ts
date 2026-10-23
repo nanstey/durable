@@ -137,7 +137,7 @@ const cases: Array<
 	[
 		"future configuration",
 		(_d, m) => {
-			m.network = { bind: "loopback" };
+			m.approval = { rpId: "localhost" };
 		},
 	],
 	[
@@ -250,6 +250,7 @@ for (const [name, mutate] of cases) {
 		const machine: MachineCfg = {
 			name: "test",
 			agents: ["a"],
+			network: { bind: "loopback" },
 			workers: { roles: { worker: { skills: [] }, reviewer: { skills: [] } } },
 		};
 		const caps = { ...capabilities };

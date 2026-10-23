@@ -225,6 +225,15 @@ export function doctor(
 		fix: "make systemd-run --user --scope true succeed before dispatch",
 	});
 	checks.push({
+		name: "recursive containment",
+		ok: true,
+		warning: caps.os === "linux" && caps.cgroupV2 === false,
+		detail:
+			caps.cgroupV2 === false
+				? "no cgroup v2: process groups and environment markers are best effort; exclusive ownership cannot be confirmed"
+				: "recursive cgroup v2 containment when available",
+	});
+	checks.push({
 		name: "gh",
 		ok: caps.gh,
 		detail: caps.gh ? "installed" : "missing",
@@ -236,11 +245,15 @@ export function doctor(
 		detail: caps.tailscaleCli ? "available" : "unavailable (optional)",
 		fix: "install tailscale or declare optional peer checking",
 	});
-	if (machine.network || machine.approval)
+	if (
+		machine.network?.peerCheck ||
+		machine.network?.tailnetAddress ||
+		machine.approval
+	)
 		checks.push({
 			name: "future configuration",
 			ok: false,
-			detail: "network/approval: not-yet-supported",
+			detail: "peer checking/approval: not-yet-supported",
 			fix: "remove these blocks until slices 11/12",
 		});
 	const ports = machine.agents.map((agent, index) =>

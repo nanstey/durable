@@ -124,7 +124,16 @@ export function assertProfileName(name: string): void {
 	if (!PROFILE_NAME.test(name) || name === "." || name === "..")
 		throw new Error("profile must match ^[A-Za-z0-9._-]+$");
 }
+function checkBind(value: unknown) {
+	const bind = (value as { network?: { bind?: unknown } } | null)?.network
+		?.bind;
+	if (bind !== undefined && bind !== "loopback")
+		throw new Error(
+			"network.bind must be loopback; other listeners are available from slice 11",
+		);
+}
 export function validateAgent(value: unknown): AgentDef {
+	checkBind(value);
 	if (!agentValidator(value))
 		throw new Error(
 			`invalid definition: ${ajv.errorsText(agentValidator.errors)}`,
@@ -145,6 +154,7 @@ export function validateAgent(value: unknown): AgentDef {
 	return x;
 }
 export function validateMachine(value: unknown): MachineCfg {
+	checkBind(value);
 	if (!machineValidator(value))
 		throw new Error(
 			`invalid machine: ${ajv.errorsText(machineValidator.errors)}`,

@@ -60,6 +60,8 @@ export const agentSchema = object(
 			maxAttemptsPerItem: positive,
 			itemMinutes: positive,
 			maxMergesPerDay: positive,
+			dailyDollars: { type: "number", minimum: 0 },
+			dailyTokens: { type: "integer", minimum: 0 },
 		}),
 		sources: {
 			type: "array",

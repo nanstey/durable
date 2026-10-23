@@ -1,0 +1,35 @@
+#!/usr/bin/env node
+// No target code runs until the parent has durably registered this invocation.
+import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync, writeSync } from "node:fs";
+import { Socket } from "node:net";
+
+const [expected, executable, ...args] = process.argv.slice(2);
+const fail = () => process.exit(97);
+if (!/^[a-f0-9]{64}$/.test(expected ?? "") || !executable || !process.execve) fail();
+try {
+	const text = readFileSync(`/proc/${process.pid}/stat`, "utf8");
+	const stat = text.slice(text.lastIndexOf(")") + 2).split(" ");
+	writeSync(4, `${JSON.stringify({ pid: process.pid, pgid: Number(stat[2]), startTime: stat[19] })}\n`);
+} catch { fail(); }
+const timer = setTimeout(fail, Number(process.env.DURABLE_GATE_TIMEOUT_MS ?? 60000));
+let input = Buffer.alloc(0);
+let released = false;
+try {
+	const stream = new Socket({ fd: 3, readable: true, writable: false });
+	stream.on("error", fail);
+	stream.on("end", () => { if (!released) fail(); });
+	stream.on("data", (chunk) => {
+		input = Buffer.concat([input, chunk]);
+		if (input.length > 1024) fail();
+		const end = input.indexOf(10);
+		if (end < 0) return;
+		if (end !== input.length - 1 || end === 0) fail();
+		const actual = createHash("sha256").update(input.subarray(0, end)).digest();
+		if (!timingSafeEqual(actual, Buffer.from(expected, "hex"))) fail();
+		released = true;
+		clearTimeout(timer);
+		stream.destroy();
+		try { process.execve(executable, [executable, ...args], process.env); } catch { fail(); }
+	});
+} catch { fail(); }

@@ -221,7 +221,7 @@ type Capabilities = { os: "linux" | "android"; service: "systemd-user" | "termux
 // INVARIANT PL6: daemon dependencies install with `--ignore-scripts` and are pure JavaScript (including the WebAuthn verifier); storage is chosen by capability (sqlite via node:sqlite, else jsonl).
 
 // api/chat.ts + steward/conversations.ts — interactive chat (architecture D16)
-// INVARIANT CH1: message bodies are plain text only; the API has no role, attachment, HTML or tool-call field; max bytes enforced (default 8192).
+// INVARIANT CH1: message bodies are plain text only; the API has no role, attachment, HTML or tool-call field; max bytes enforced (default 1 MiB, matching CH3).
 // INVARIANT CH2: credential screening on every message (token prefixes, private-key headers, cloud-key patterns, high-entropy strings) => 400 invalid:credential-like-content. Heuristic and documented; the model has no secret-reading tool.
 // INVARIANT CH3 (Q20): no default rate limits. A body-size sanity ceiling (default 1 MiB, configurable via chat.maxMessageBytes) protects the daemon process from a runaway client or loop; rate limiting exists only if the agent opts in (chat.rateLimit) => 429 rate_limited. Runaway cost stays bounded by the existing per-agent budgets and the kill switch.
 // INVARIANT CH4: every message audited {actor:human, via, client, serveUser?, conversationId, bytes, sha256}; content lives only in the conversation history.
@@ -305,7 +305,7 @@ main(id)
 ├─ steward/api.listen(127.0.0.1, token)
 └─ audit("start", {profile, login})
 ```
-Isolation: `steward/harness.ts` is the only pi-durable importer; `identity/modelAuth.ts` is the only place that knows about Anthropic shaping.
+Isolation: `steward/harness.ts` is the only production pi-durable importer; `identity/modelAuth.ts` is the only place that knows about Anthropic shaping. Slice 3 keeps invocations and hold/recovery fences in an atomic fsynced pre-open journal (`procs.json`), because the scheduler must not open/resume before sweeping them. Conversation metadata, budget, inbox and opt-in chat counters are native session documents. Upstream `beforeRequest` exceptions are advisory: model dispatch also checks safety at the provider boundary; `beforeTool` remains a blocking hook.
 
 ### 3.2 `steward-loop` (repeat task; step returns `{ again: { nextAt } }`)
 

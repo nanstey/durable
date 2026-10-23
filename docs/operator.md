@@ -48,9 +48,10 @@ A token-login mismatch must be investigated before rebinding.
 
 Doctor checks detected vs declared platform capabilities, service availability,
 Linux worker containment, port collisions, channels, worker kind enablement,
-required skills, providers, manifest and GitHub identity. `network` and `approval`
-blocks parse but report `not-yet-supported` until their implementation slices;
-do not mistake parsed configuration for implemented network/approval security.
+required skills, providers, manifest and GitHub identity. Literal loopback binding
+is supported. Peer-checking settings and `approval` blocks report
+`not-yet-supported`; do not mistake parsed configuration for implemented
+remote-network or approval security.
 Android state must be under private Termux HOME, not shared storage. Android
 notifications cannot safely carry approval nonces. Auto-merge requires an explicit
 Android opt-in and never bypasses repository policy or GitHub rules.
@@ -71,3 +72,32 @@ sandbox.** A same-user shell can still read files outside the worktree by an
 explicit path; environment omission does not claim otherwise.
 
 See [skills-contract.md](skills-contract.md) for per-role dispatch prerequisites.
+
+## API access and tokens
+
+Start the agent using [daemon commands](daemon.md). Its port is the assignment's
+explicit `port`, or `daemon.portBase` (default 7330) plus its assignment index.
+The [API reference](api.md) lists routes, message bodies and SSE frames.
+
+```sh
+durable token create <agent> --client <client-name> --scopes read,chat,pause --expires 90d
+durable token list <agent>
+durable token revoke <agent> --client <client-name>
+```
+
+Creation prints the token once. Save it outside the repository. Token storage
+contains SHA-256 hashes only, client labels, scopes, creation/last-use timestamps
+and expiry, mode 0600. Expiry defaults to 90 days. Revocation removes every token
+with that client label. The local CLI keeps its own 0600 token file with the same
+scopes and expiry; it renews an expired or revoked local token on its next use.
+Do not put daemon tokens in a profile secrets file or send credentials in chat.
+
+`read` grants GET requests and notice acknowledgement. `chat` grants screened
+messages and turn abort. `pause` grants agent pause. Combining scopes never
+grants approval, agent resume, enrollment, policy verification or hold release.
+Those actions have no bearer authorization path. Agent resume currently requires
+`durable resume <agent>` at a local TTY; it cannot clear global/environment stops.
+
+These controls protect against accidental or prompt-induced actions, not a
+compromised process running as your OS user. Such a process can read your local
+token files. Filesystem confinement is not an OS sandbox.
