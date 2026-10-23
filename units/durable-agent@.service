@@ -1,0 +1,14 @@
+[Unit]
+Description=Durable agent %i
+OnFailure=durable-agent-failure@%i.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/durable run %i
+Restart=on-failure
+KillMode=control-group
+TimeoutStopSec=30
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
