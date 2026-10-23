@@ -1,0 +1,22 @@
+# Composio connector research
+
+Researched 2026-10-23 by fetching the linked vendor documentation and pricing pages. The interactive `web_enable` tool was unavailable; the pages below were retrieved directly over HTTPS. Claims marked **unverified** were not established by the cited public material.
+
+## Findings
+
+- Composio models a toolkit connection as a **connected account**. Its sessions can create multiple connected accounts for a toolkit, select one explicitly, and pin a session to account IDs. This can map to a Durable agent profile only if Durable creates/selects an account from that profile and never falls back to another account. [Multiple connected accounts](https://docs.composio.dev/docs/authentication/managing-multiple-connected-accounts)
+- Its native provider integration formats tools and executes the model's calls; the OpenAI page shows a JavaScript tool-call loop. The service also has HTTP endpoints and its documented MCP endpoints, so Durable should put its own `ConnectorProvider` wrapper in front of either SDK or HTTP rather than let a worker use a vendor client directly. Whether the current Composio JavaScript SDK and all of its transitive dependencies are pure JavaScript is **unverified**; it must be checked before use on Android/Termux. [OpenAI provider](https://docs.composio.dev/docs/providers/openai), [API reference](https://docs.composio.dev/llms.mdx/reference)
+- Composio offers hosted MCP: Connect is a shared remote endpoint at `https://connect.composio.dev/mcp` with seven meta-tools, and it also documents generated MCP endpoints for a configured toolkit and user ID. This is exposure through a hosted Composio service, not a local Durable tool boundary. [Composio Connect](https://docs.composio.dev/docs/composio-connect), [Single Toolkit MCP](https://docs.composio.dev/docs/single-toolkit-mcp)
+- Auth configuration may use Composio-managed OAuth or caller-supplied OAuth/API credentials. The documented OAuth callback is on Composio's backend. Therefore, hosted Composio can hold or mediate third-party credentials; that conflicts with the current plan's machine-local credential custody unless the user explicitly chooses it. The precise encryption, retention, regional custody and self-hosting options are **unverified** from the public documentation found. [Programmatic auth configs](https://docs.composio.dev/docs/authentication/programmatic-auth-configs)
+- The public pricing page currently advertises a 100,000-tool-call/month free allowance, 50,000 triggers and three members; its FAQ says managed OAuth apps have a 20,000 free-call allowance and then $0.0002 per call. Prices, caps and terms are vendor-controlled and must be rechecked at adoption. [Composio pricing](https://composio.dev/pricing)
+- Public docs found do not establish a Durable-suitable per-tool-call audit webhook/hook, an exportable immutable audit record, a self-hosted control plane, or an on-premises credential store. Those capabilities are **unverified**. Durable must therefore create its own audit record before and after every connector invocation and cannot rely on a vendor audit log.
+
+## Alternatives
+
+- **Plain MCP server per agent:** keeps the server and its credentials under the agent's machine-local profile when the selected server supports that deployment. MCP is only a transport/protocol; Durable still needs an allowlist, code-owned wrapper, timeout/budget and audit layer. [MCP transports](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
+- **Nango:** an integration/auth platform worth evaluating when OAuth connection lifecycle is the primary need. Its current pricing page advertises a free tier and usage pricing; its self-hosting and credential-custody details were not verified in this research. [Nango pricing](https://nango.dev/pricing/)
+- **Pipedream Connect:** hosted integration platform with MCP documentation and a broad tool catalogue. It has the same hosted-custody question and needs the same Durable wrapper; pricing, audit hooks and self-hosting are **unverified** here. [Pipedream MCP](https://pipedream.com/docs/connect/mcp/)
+
+## Planning implication
+
+Composio is a candidate first `ConnectorProvider`, not a trusted execution boundary or intake source. The implementation must preserve Durable's agent/profile isolation, classify read versus write tools, audit every call, apply its own kill switch and connector budgets, and treat every response as untrusted content. Hosted credential custody remains an explicit user decision.
