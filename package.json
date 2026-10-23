@@ -5,5 +5,20 @@
   "description": "Durable, proactive agents that push project work to human review, built on pi-durable.",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22" }
+  "files": [
+    "bin/",
+    "src/",
+    "web/",
+    "schema/",
+    "examples/",
+    "units/",
+    "termux/",
+    "templates/",
+    "pi-extension/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  }
 }
