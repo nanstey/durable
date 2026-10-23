@@ -1,6 +1,10 @@
 /* Orca CLI flags verified against `orca --help` (2026-10-23). Keep CLI drift here. */
 import { execa, execaSync } from "execa";
-import { rememberWorkspace, workspaceList } from "./memory.ts";
+import {
+	assertRemovableWorkspace,
+	rememberWorkspace,
+	workspaceList,
+} from "./memory.ts";
 import type {
 	AttachInfo,
 	DispatcherCapabilities,
@@ -78,7 +82,7 @@ export class OrcaDispatcher implements WorkerDispatcher {
 		workspace: Workspace,
 		options: { held?: boolean } = {},
 	): Promise<void> {
-		if (options.held) throw Error("workspace is human-held");
+		await assertRemovableWorkspace(workspace, options);
 		await this.run(["worktree", "rm", "--worktree", `path:${workspace.path}`]);
 		this.workspaces.delete(workspace.id);
 	}
@@ -160,7 +164,6 @@ export class OrcaDispatcher implements WorkerDispatcher {
 			"--enter",
 		]);
 	}
-	// fallow-ignore-next-line unused-class-member -- dispatcher contract capability
 	async readOutput(process: HostedProcess): Promise<string> {
 		return (await this.run(["terminal", "read", "--terminal", process.handle]))
 			.stdout;

@@ -1,5 +1,11 @@
+import type { WorkerDispatcher, WorkspaceSpec } from "../dispatch/types.ts";
 import type { TreeNode } from "../tree/nodes.ts";
-import type { WorkerHandle, WorkerKind } from "./kind.ts";
+import type { JobSpec, WorkerHandle, WorkerKind } from "./kind.ts";
+
+/** A job is registered only after its dispatcher-created workspace launches. */
+export type PendingJobSpec = Omit<JobSpec, "workspace"> & {
+	workspace: WorkspaceSpec;
+};
 
 export class WorkerRegistry {
 	private readonly workers = new Map<
@@ -8,6 +14,16 @@ export class WorkerRegistry {
 	>();
 	register(kind: WorkerKind, handle: WorkerHandle): void {
 		this.workers.set(handle.id, { kind, handle });
+	}
+	async launch(
+		dispatcher: WorkerDispatcher,
+		kind: WorkerKind,
+		job: PendingJobSpec,
+	): Promise<WorkerHandle> {
+		const workspace = await dispatcher.createWorkspace(job.workspace);
+		const handle = await kind.start({ ...job, workspace });
+		this.register(kind, handle);
+		return handle;
 	}
 	async list() {
 		return Promise.all(

@@ -1,3 +1,4 @@
+import { execa } from "execa";
 import type {
 	HostedProcess,
 	ProcessSpec,
@@ -16,6 +17,18 @@ export function rememberWorkspace(
 }
 export function workspaceList(workspaces: Map<string, Workspace>): Workspace[] {
 	return [...workspaces.values()];
+}
+export async function assertRemovableWorkspace(
+	workspace: Workspace,
+	options: { held?: boolean },
+): Promise<void> {
+	if (options.held) throw Error("workspace is human-held");
+	const dirty = await execa(
+		"git",
+		["-C", workspace.path, "status", "--porcelain"],
+		{ reject: false },
+	);
+	if (dirty.stdout.trim()) throw Error("refusing to remove dirty workspace");
 }
 export function rememberProcess(
 	processes: Map<string, HostedProcess>,

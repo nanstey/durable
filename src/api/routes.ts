@@ -137,7 +137,12 @@ export function createApi(opts: {
 		const item = body.item as string | undefined;
 		if (kind === "scout" && !item)
 			throw new ApiError("invalid", "scout conversations require an item");
-		const id = await harness.create(kind, idempotency, item, JSON.stringify(body));
+		const id = await harness.create(
+			kind,
+			idempotency,
+			item,
+			JSON.stringify(body),
+		);
 		audit(opts.agent, {
 			event: "conversation-created",
 			kind,

@@ -68,8 +68,9 @@ export class PiSessionKind implements WorkerKind {
 		await this.dispatcher.sendInput(handle.process, text);
 	}
 	async *transcript(handle: WorkerHandle): AsyncIterable<string> {
-		const sessions = join(handle.job.piDir ?? "", "sessions");
-		if (!sessions || !existsSync(sessions)) return;
+		if (!handle.job.piDir) return;
+		const sessions = join(handle.job.piDir, "sessions");
+		if (!existsSync(sessions)) return;
 		for (const file of readdirSync(sessions)
 			.filter((name) => name.endsWith(".jsonl"))
 			.sort()) {

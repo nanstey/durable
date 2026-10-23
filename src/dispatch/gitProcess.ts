@@ -8,7 +8,11 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { execa } from "execa";
-import { rememberProcess, rememberWorkspace } from "./memory.ts";
+import {
+	assertRemovableWorkspace,
+	rememberProcess,
+	rememberWorkspace,
+} from "./memory.ts";
 import type {
 	AttachInfo,
 	DispatcherCapabilities,
@@ -50,13 +54,7 @@ export class GitProcessDispatcher implements WorkerDispatcher {
 		workspace: Workspace,
 		options: { held?: boolean } = {},
 	): Promise<void> {
-		if (options.held) throw Error("workspace is human-held");
-		const dirty = await execa(
-			"git",
-			["-C", workspace.path, "status", "--porcelain"],
-			{ reject: false },
-		);
-		if (dirty.stdout.trim()) throw Error("refusing to remove dirty workspace");
+		await assertRemovableWorkspace(workspace, options);
 		await execa(
 			"git",
 			["-C", workspace.path, "worktree", "remove", workspace.path],
@@ -110,7 +108,6 @@ export class GitProcessDispatcher implements WorkerDispatcher {
 			/* an exited worker is already interrupted */
 		}
 	}
-	// fallow-ignore-next-line unused-class-member -- dispatcher contract capability
 	async readOutput(process: HostedProcess, tail = 65536): Promise<string> {
 		const log = process.handle.slice(0, -4);
 		if (!existsSync(log)) return "";
