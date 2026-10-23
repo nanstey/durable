@@ -24,6 +24,14 @@
           "type": "integer",
           "minimum": 1
         },
+        "leaseSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "leaseGraceSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
         "quietHours": {
           "type": "string"
         }

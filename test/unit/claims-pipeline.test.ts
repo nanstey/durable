@@ -10,6 +10,7 @@ import {
 	type ClaimComment,
 	type ClaimGithub,
 	claim,
+	readClaim,
 } from "../../src/steward/claims.ts";
 import {
 	emptyWorkItems,
@@ -40,6 +41,10 @@ class FakeGithub implements ClaimGithub {
 	}
 	async deleteComment(_repo: string, id: number) {
 		this.comments = this.comments.filter((comment) => comment.id !== id);
+	}
+	async updateComment(_repo: string, id: number, body: string) {
+		const comment = this.comments.find((entry) => entry.id === id);
+		if (comment) comment.body = body;
 	}
 }
 test("claim uses read-after-write and the lowest marker wins", async () => {
@@ -119,23 +124,78 @@ test("foreign claim markers cannot block, update, or be deleted", async () => {
 	assert.equal(github.comments[0].id, 1);
 	assert.ok(github.labels.has("durable/claimed"));
 });
-test("expired claims cannot win arbitration", async () => {
+test("expiry takeover waits through grace and the returning holder loses on a world re-read", async () => {
 	const github = new FakeGithub();
-	github.comments.push({
-		id: 1,
-		body: "<!-- durable-claim agent=old lease=2000-01-01T00:00:00.000Z -->",
-	});
+	const policy = { durationMs: 1000, graceMs: 100 };
+	const target = { repo: "acme/repo", issue: 1 };
+	const holder = {
+		...target,
+		agent: "linux-a",
+		lease: new Date(1000).toISOString(),
+	};
+	assert.equal((await claim(github, holder, 0, policy)).state, "won");
 	assert.equal(
 		(
-			await claim(github, {
-				repo: "acme/repo",
-				issue: 1,
-				agent: "new",
-				lease: "2999-01-01T00:00:00.000Z",
-			})
+			await claim(
+				github,
+				{ ...target, agent: "linux-b", lease: new Date(2200).toISOString() },
+				1099,
+				policy,
+			)
+		).state,
+		"lost",
+	);
+	assert.equal(
+		(
+			await claim(
+				github,
+				{ ...target, agent: "linux-b", lease: new Date(2200).toISOString() },
+				1100,
+				policy,
+			)
 		).state,
 		"won",
 	);
+	assert.deepEqual(await readClaim(github, holder, 1100, policy), {
+		state: "lost",
+		commentId: 2,
+		winner: "linux-b",
+	});
+});
+test("a killed worker is replaced once, on a fresh takeover attempt, for both worker kinds", async () => {
+	const policy = { durationMs: 1000, graceMs: 100 };
+	const target = { repo: "acme/repo", issue: 1 };
+	for (const kind of ["pi-session", "durable-conversation"] as const) {
+		const github = new FakeGithub();
+		const launches: Array<{ agent: string; branch: string }> = [];
+		const holder = {
+			...target,
+			agent: `${kind}-a`,
+			lease: new Date(1000).toISOString(),
+		};
+		assert.equal((await claim(github, holder, 0, policy)).state, "won");
+		launches.push({
+			agent: holder.agent,
+			branch: `durable/${holder.agent}/item`,
+		});
+		// SIGKILL/long sleep performs no release; only the fake clock advances.
+		const takeover = {
+			...target,
+			agent: `${kind}-b`,
+			lease: new Date(2200).toISOString(),
+		};
+		assert.equal((await claim(github, takeover, 1099, policy)).state, "lost");
+		assert.equal((await claim(github, takeover, 1100, policy)).state, "won");
+		launches.push({
+			agent: takeover.agent,
+			branch: `durable/${takeover.agent}/item`,
+		});
+		assert.equal((await readClaim(github, holder, 1100, policy)).state, "lost");
+		assert.deepEqual(launches, [
+			{ agent: holder.agent, branch: `durable/${holder.agent}/item` },
+			{ agent: takeover.agent, branch: `durable/${takeover.agent}/item` },
+		]);
+	}
 });
 test("pipeline defaults and rejects missing mandatory stages", () => {
 	assert.deepEqual(selectPipeline(), defaultPipeline);

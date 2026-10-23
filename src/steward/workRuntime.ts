@@ -19,8 +19,8 @@ import { readLocalBody } from "../sources/localFiles.ts";
 import type { WorkerHandle, WorkerKindRegistry } from "../workers/kind.ts";
 import type { WorkerRegistry } from "../workers/registry.ts";
 import { audit } from "./audit.ts";
+import { claim, defaultClaimLeasePolicy, readClaim } from "./claims.ts";
 import { agentDir } from "./files.ts";
-import { claim } from "./claims.ts";
 import { intakeNumber, prMarker, type WorkGithub } from "./github.ts";
 import { quietHours } from "./killswitch.ts";
 import { canDispatch, itemTimedOut } from "./limits.ts";
@@ -155,7 +155,10 @@ export class WorkRuntime {
 			else await this.store.save(state);
 			return;
 		}
-		if (o.processes.fenced(item.id)) return;
+		if (o.processes.fenced(item.id)) {
+			await this.renew(state, item);
+			return;
+		}
 		if (!(await this.refreshCandidate(state, item, queueItem))) return;
 		if (await this.stopIfLimited(state, item, paused, budgetStopped)) return;
 		if (this.inactive(item, task, paused)) return;
@@ -482,6 +485,8 @@ export class WorkRuntime {
 				this.taskDependencies(state, item),
 			);
 			state.tasks[item.id] = task;
+			if (task.phase === "finish" && item.outcome === "parked")
+				audit(o.agent, { event: "claim-lost", item: item.id });
 			await this.store.save(state);
 		}
 	}
@@ -597,7 +602,7 @@ export class WorkRuntime {
 		if (!model) throw Error("models.worker required for dispatch");
 		return {
 			agent: o.agent,
-			lease: new Date(this.now() + 2 * 3600000).toISOString(),
+			lease: new Date(this.now() + this.leasePolicy().durationMs).toISOString(),
 			claimOwner: o.claimOwner,
 			login: o.login,
 			github: o.github,
@@ -613,6 +618,7 @@ export class WorkRuntime {
 			skillsRoot: o.skillsRoot,
 			checkout: o.checkoutFor(item.repo),
 			now: this.now,
+			claimLeasePolicy: this.leasePolicy(),
 			check: async () => {
 				await o.check();
 				if (o.processes.fenced(item.id)) throw Error("item held");
@@ -623,34 +629,54 @@ export class WorkRuntime {
 			},
 		};
 	}
+	private leasePolicy() {
+		return {
+			durationMs:
+				(this.options.definition.schedule?.leaseSeconds ??
+					defaultClaimLeasePolicy.durationMs / 1000) * 1000,
+			graceMs:
+				(this.options.definition.schedule?.leaseGraceSeconds ??
+					defaultClaimLeasePolicy.graceMs / 1000) * 1000,
+		};
+	}
 	private async renew(state: WorkState, item: WorkItem) {
 		const o = this.options;
+		if (!item.claim?.commentId || item.candidate.kind === "file") return;
+		const now = this.now();
+		const target = {
+			repo: item.repo,
+			issue: intakeNumber(item.candidate.ref),
+			agent: o.agent,
+			lease: item.claim.lease,
+			item: item.id,
+			owner: o.claimOwner,
+			login: o.login,
+		};
+		const observed = await readClaim(o.github, target, now, this.leasePolicy());
 		if (
-			item.claim?.commentId &&
-			item.candidate.kind !== "file" &&
-			Date.parse(item.claim.lease) - this.now() < 3600000
+			observed.state === "lost" ||
+			observed.commentId !== item.claim.commentId
 		) {
-			const lease = new Date(this.now() + 2 * 3600000).toISOString();
-			const result = await claim(
-				o.github,
-				{
-					repo: item.repo,
-					issue: intakeNumber(item.candidate.ref),
-					agent: o.agent,
-					lease,
-					item: item.id,
-					owner: o.claimOwner,
-					login: o.login,
-				},
-				this.now(),
-			);
-			if (result.state === "lost") {
-				await this.cancel(state, item, "interrupted");
-				throw Error("claim lease lost");
-			}
-			item.claim.lease = lease;
-			await this.store.save(state);
+			await o.github.deleteComment?.(item.repo, item.claim.commentId, item.id);
+			audit(o.agent, { event: "claim-lost", item: item.id });
+			await this.cancel(state, item, "interrupted");
+			throw Error("claim lease lost");
 		}
+		if (Date.parse(item.claim.lease) - now >= this.leasePolicy().durationMs / 2)
+			return;
+		const lease = new Date(now + this.leasePolicy().durationMs).toISOString();
+		const result = await claim(
+			o.github,
+			{ ...target, lease },
+			now,
+			this.leasePolicy(),
+		);
+		if (result.state === "lost") {
+			await this.cancel(state, item, "interrupted");
+			throw Error("claim lease lost");
+		}
+		item.claim.lease = lease;
+		await this.store.save(state);
 	}
 	private async finish(state: WorkState, item: WorkItem, task: WorkItemTask) {
 		if (task.finished) return;

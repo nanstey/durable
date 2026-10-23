@@ -33,6 +33,14 @@ export type ClaimTarget = {
 	/** GitHub login for the profile that owns Durable's claim comments. */
 	login?: string;
 };
+export type ClaimLeasePolicy = {
+	durationMs: number;
+	graceMs: number;
+};
+export const defaultClaimLeasePolicy: ClaimLeasePolicy = {
+	durationMs: 2 * 60 * 60 * 1000,
+	graceMs: 5 * 60 * 1000,
+};
 export type ClaimResult = {
 	state: "won" | "lost";
 	commentId?: number;
@@ -40,7 +48,6 @@ export type ClaimResult = {
 };
 const marker =
 	/^<!-- durable-claim agent=([^\s]+) lease=([^\s]+)(?: owner=([^\s]+))? -->$/;
-const maxLeaseMs = 2 * 3600000;
 function trustedComment(comment: ClaimComment, login?: string) {
 	return (
 		!login ||
@@ -49,6 +56,24 @@ function trustedComment(comment: ClaimComment, login?: string) {
 			comment.authorAssociation?.toUpperCase() ?? "",
 		)
 	);
+}
+function activeLease(lease: string, now: number, graceMs: number) {
+	const expiresAt = Date.parse(lease);
+	return Number.isFinite(expiresAt) && expiresAt + graceMs > now;
+}
+function ownsClaim(
+	claim: { agent: string; owner?: string },
+	target: ClaimTarget,
+) {
+	return claim.agent === target.agent && claim.owner === target.owner;
+}
+function policyWithDefaults(
+	policy?: Partial<ClaimLeasePolicy>,
+): ClaimLeasePolicy {
+	return {
+		durationMs: policy?.durationMs ?? defaultClaimLeasePolicy.durationMs,
+		graceMs: policy?.graceMs ?? defaultClaimLeasePolicy.graceMs,
+	};
 }
 
 // fallow-ignore-next-line unused-export
@@ -73,64 +98,74 @@ export function parseClaim(
 		: undefined;
 }
 
-/** GitHub is the arbitration record: after writing, read it back and lowest comment id wins. */
-export async function claim(
+/** Re-read GitHub before every action; grace absorbs bounded clock skew and replication delay. */
+export async function readClaim(
 	github: ClaimGithub,
 	target: ClaimTarget,
 	now = Date.now(),
+	policy?: Partial<ClaimLeasePolicy>,
 ): Promise<ClaimResult> {
-	const lease = new Date(
-		Math.min(Date.parse(target.lease), now + maxLeaseMs),
-	).toISOString();
-	const markerBody = claimMarker(target.agent, lease, target.owner);
-	const existing = (await github.listComments(target.repo, target.issue))
-		.filter((comment) => {
-			const parsed = parseClaim(comment.body);
-			return (
-				trustedComment(comment, target.login) &&
-				parsed &&
-				Date.parse(parsed.lease) > now
-			);
-		})
-		.sort((a, b) => a.id - b.id);
-	const prior = existing.find((comment) => {
-		const parsed = parseClaim(comment.body);
-		return parsed?.agent === target.agent && parsed?.owner === target.owner;
-	});
-	if (prior && existing[0]?.id === prior.id) {
-		await github.updateComment?.(
-			target.repo,
-			prior.id,
-			markerBody,
-			target.item,
-		);
-		return { state: "won", commentId: prior.id, winner: target.agent };
-	}
-	const own = await github.createComment(target.repo, target.issue, markerBody);
-	const claims = (await github.listComments(target.repo, target.issue))
+	const { graceMs } = policyWithDefaults(policy);
+	const winner = (await github.listComments(target.repo, target.issue))
 		.map((comment) => ({ comment, marker: parseClaim(comment.body) }))
 		.filter(
 			(
 				entry,
 			): entry is {
 				comment: ClaimComment;
-				marker: { agent: string; lease: string };
+				marker: { agent: string; lease: string; owner?: string };
 			} =>
 				Boolean(
 					entry.marker &&
-						Date.parse(entry.marker.lease) > now &&
-						(entry.comment.id === own.id ||
-							trustedComment(entry.comment, target.login)),
+						trustedComment(entry.comment, target.login) &&
+						activeLease(entry.marker.lease, now, graceMs),
 				),
 		)
-		.sort((a, b) => a.comment.id - b.comment.id);
-	const winner = claims[0];
-	if (winner?.comment.id === own.id) {
+		.sort((a, b) => a.comment.id - b.comment.id)[0];
+	if (!winner) return { state: "lost" };
+	return {
+		state: ownsClaim(winner.marker, target) ? "won" : "lost",
+		commentId: winner.comment.id,
+		winner: winner.marker.agent,
+	};
+}
+
+/** GitHub is the arbitration record: after writing, world-read again and lowest comment id wins. */
+export async function claim(
+	github: ClaimGithub,
+	target: ClaimTarget,
+	now = Date.now(),
+	policy?: Partial<ClaimLeasePolicy>,
+): Promise<ClaimResult> {
+	const options = policyWithDefaults(policy);
+	const requestedLease = Date.parse(target.lease);
+	const lease = new Date(
+		Math.min(
+			Number.isFinite(requestedLease)
+				? requestedLease
+				: now + options.durationMs,
+			now + options.durationMs,
+		),
+	).toISOString();
+	const markerBody = claimMarker(target.agent, lease, target.owner);
+	const before = await readClaim(github, target, now, options);
+	if (before.state === "won" && before.commentId !== undefined) {
+		await github.updateComment?.(
+			target.repo,
+			before.commentId,
+			markerBody,
+			target.item,
+		);
+		return { ...before, winner: target.agent };
+	}
+	const own = await github.createComment(target.repo, target.issue, markerBody);
+	const after = await readClaim(github, target, now, options);
+	if (after.state === "won" && after.commentId === own.id) {
 		await github.addLabel(target.repo, target.issue, "durable/claimed");
-		return { state: "won", commentId: own.id, winner: target.agent };
+		return after;
 	}
 	await github.deleteComment?.(target.repo, own.id, target.item);
-	return { state: "lost", commentId: own.id, winner: winner?.marker.agent };
+	return { state: "lost", commentId: own.id, winner: after.winner };
 }
 
 // fallow-ignore-next-line unused-export

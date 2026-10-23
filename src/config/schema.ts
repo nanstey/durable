@@ -18,7 +18,12 @@ export type AgentDef = {
 	version?: 1;
 	description?: string;
 	network?: { bind: "loopback" };
-	schedule?: { pollSeconds?: number; quietHours?: string };
+	schedule?: {
+		pollSeconds?: number;
+		leaseSeconds?: number;
+		leaseGraceSeconds?: number;
+		quietHours?: string;
+	};
 	limits?: Record<string, number>;
 	connectors?: Array<{
 		id: string;

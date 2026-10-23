@@ -74,6 +74,40 @@ never silently updates a pinned login when tokens change.
 Only in-process users opening the operator's canonical `auth.json` path can share
 that credential store safely.
 
+## Add a machine
+
+Each machine is independent and has its own local profiles, checkout roots and
+channels. Profile names are shared labels only: `work` on two machines can name
+different credentials and must never mean copied credential files.
+
+1. Install Durable either through the skills repository's pinned-clone `install.sh`
+   flow or with the standalone steps in [install.md](install.md).
+2. Select the named Pi profile and run `/login` for its providers. Then run
+   `pi-secret -p <profile> set GH_TOKEN` for that machine's GitHub token.
+3. Run `durable profile init <profile>`, fill in its manifest, then run
+   `durable profile bind-github <profile>`.
+4. Write `machine.yaml` with a distinct `name`, its assigned agent IDs, checkout
+   roots, channels and ports. Copy or synchronize the portable agent definition;
+   keep both files and every profile private to the machine.
+5. Run `durable doctor <id>`. It fails closed if that machine lacks the named
+   profile, manifest or GitHub secret; fix the reported profile steps before
+   continuing.
+6. On Linux with systemd --user, run `loginctl enable-linger` for an unattended
+   host, then `durable enable <id>`. Other operating systems skip service setup;
+   launchd support is deferred.
+
+Claims coordinate machines through GitHub; they are not a security boundary. A
+claim marker records the agent ID, lease expiry and optional installation ID.
+Stewards re-read GitHub before acting; lowest comment ID wins. A running worker
+renews its lease and releases it after finish or failure. A takeover waits for
+expiry plus the grace period, then starts a new attempt from pushed branch state;
+it never resumes the vanished machine's Pi session or durable conversation.
+
+Use a conservative `schedule.pollSeconds` (300 seconds is the default guidance)
+for each machine. Two machines polling five repositories use roughly 2,880 list
+requests per day before item/PR reads. Raise the interval or narrow sources before
+adding machines if GitHub rate limits become material.
+
 ## Assignment and diagnosis
 
 Put definitions in `~/.config/durable/agents/<id>.yaml` (override with
