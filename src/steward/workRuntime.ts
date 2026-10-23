@@ -51,6 +51,8 @@ export type WorkRuntimeOptions = {
 	trustedAuthors?: (repo: string) => string[] | undefined;
 	scout: (item: WorkItem, body: string) => Promise<string>;
 	notify: (event: "escalation" | "budget-stop", item: string) => Promise<void>;
+	notifyApproval?: (item: string, sha: string) => Promise<void>;
+	issueApproval?: (item: string, sha: string) => Promise<boolean>;
 	check: () => Promise<void>;
 	now?: () => number;
 	drainMs?: number;
@@ -241,11 +243,48 @@ export class WorkRuntime {
 			}
 		}
 		if (item.prs.length && !item.outcome) {
-			// Review and gate implementations arrive in slice 7. Never cross them on a prompt's authority.
-			item.stage = "review";
 			const primary = item.prs.find((pr) => pr.primary);
 			if (!primary) throw Error("primary PR missing");
 			await o.github.attributePr(item.repo, primary.number, item.id);
+			// A SHA is the durable boundary for review, reports and approval. Older
+			// adapters without it remain safely parked at review.
+			const observed = await o.github.readPr(item.repo, primary.number);
+			Object.assign(primary, observed);
+			if (primary.headSha && item.gate?.sha !== primary.headSha) {
+				item.stage = "gate";
+				item.gate = {
+					pr: primary.number,
+					sha: primary.headSha,
+					state: "waiting-approval",
+					reasons: ["human-approval-required"],
+				};
+				// Commit the task before external delivery so a restart never makes a
+				// second task for the same item/SHA.
+				await this.store.save(state);
+			}
+			if (primary.headSha && item.gate && !item.gate.notified) {
+				await o.github.readyPr?.(item.repo, primary.number, item.id);
+				await o.github.mirrorGate?.(
+					item.repo,
+					primary.number,
+					primary.headSha,
+					"| Fact | Value |\n| --- | --- |\n| Head SHA | current |\n\nAction: human approval required.",
+					item.id,
+				);
+				await o.notifyApproval?.(item.id, primary.headSha);
+				if (!(await o.issueApproval?.(item.id, primary.headSha)))
+					audit(o.agent, {
+						event: "approval-nonce-unavailable",
+						item: item.id,
+					});
+				item.gate.notified = true;
+				audit(o.agent, {
+					event: "gate-decision",
+					item: item.id,
+					sha: primary.headSha,
+					action: "wait-human",
+				});
+			} else if (!primary.headSha) item.stage = "review";
 			if ((await kind.status(handle)) !== "running")
 				attempt.endedAt ??= this.now();
 		}
@@ -506,6 +545,26 @@ export class WorkRuntime {
 		)
 			return "needs-human";
 		return reason;
+	}
+	/** Records a SHA-bound human approval; the gate re-runs before any future merge executor. */
+	async approveGate(id: string, sha: string) {
+		return this.enqueue(async () => {
+			const state = await this.store.load();
+			const item = state.work.items[id];
+			if (!item?.gate || item.gate.sha !== sha)
+				throw Object.assign(Error("approval does not match the current gate"), {
+					code: "conflict",
+				});
+			item.gate.state = "approved";
+			item.gate.approvedAt = this.now();
+			item.updatedAt = this.now();
+			await this.store.save(state);
+			audit(this.options.agent, {
+				event: "gate-approved-nonce",
+				item: id,
+				sha,
+			});
+		});
 	}
 	async requestWork(id: string, queue: Queue, modelRequested = false) {
 		return this.enqueue(async () => {

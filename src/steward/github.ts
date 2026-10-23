@@ -7,6 +7,7 @@ export type PullRequest = {
 	number: number;
 	state: "open" | "merged" | "closed";
 	url?: string;
+	headSha?: string;
 };
 export interface WorkGithub extends ClaimGithub, PrMonitorGithub {
 	readPr(repo: string, number: number): Promise<PullRequest>;
@@ -16,6 +17,14 @@ export interface WorkGithub extends ClaimGithub, PrMonitorGithub {
 		kind: "issue" | "pull-request",
 	): Promise<string>;
 	attributePr(repo: string, number: number, item: string): Promise<void>;
+	readyPr?(repo: string, number: number, item: string): Promise<void>;
+	mirrorGate?(
+		repo: string,
+		number: number,
+		sha: string,
+		report: string,
+		item: string,
+	): Promise<void>;
 }
 export const prMarker = (agent: string, item: string) =>
 	`<!-- durable-item agent=${agent} item=${item} -->`;
@@ -191,6 +200,7 @@ export class Github implements WorkGithub {
 			state: string;
 			merged_at: string | null;
 			html_url: string;
+			head?: { sha?: string };
 		}>(repo, `repos/${repo}/pulls/${number}`);
 		return {
 			number: pr.number,
@@ -200,6 +210,7 @@ export class Github implements WorkGithub {
 					? "closed"
 					: "open",
 			url: pr.html_url,
+			headSha: pr.head?.sha,
 		};
 	}
 	async findDraftPr(input: { repo: string; branch: string; marker: string }) {
@@ -256,6 +267,42 @@ export class Github implements WorkGithub {
 				{ labels: [`durable/agent:${this.options.agent}`] },
 				item,
 			);
+	}
+	async readyPr(repo: string, number: number, item: string) {
+		await this.request(
+			repo,
+			`repos/${repo}/pulls/${number}`,
+			"PATCH",
+			{ draft: false },
+			item,
+		);
+	}
+	async mirrorGate(
+		repo: string,
+		number: number,
+		sha: string,
+		report: string,
+		item: string,
+	) {
+		const marker = `<!-- durable-gate sha=${sha} -->`;
+		const comments = await this.listComments(repo, number);
+		if (!comments.some((comment) => comment.body.includes(marker)))
+			await this.createComment(repo, number, `${marker}\n${report}`);
+		try {
+			await this.request(
+				repo,
+				`repos/${repo}/statuses/${sha}`,
+				"POST",
+				{
+					state: "success",
+					context: "durable/review",
+					description: "Durable review complete",
+				},
+				item,
+			);
+		} catch {
+			audit(this.options.agent, { event: "gate-status-skipped", item, sha });
+		}
 	}
 	async commentOnce(input: { repo: string; item: string; body: string }) {
 		const issue = Number(input.item.match(/\d+$/)?.[0]);
