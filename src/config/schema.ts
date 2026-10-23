@@ -7,7 +7,7 @@ const machineValidator = ajv.compile(machineSchema);
 const manifestValidator = ajv.compile(manifestSchema);
 
 export const PROFILE_NAME = /^[A-Za-z0-9._-]+$/;
-export type WorkerKind = "pi-session" | "durable-conversation";
+export type WorkerKindName = "pi-session" | "durable-conversation";
 export type ModelDef = {
 	provider?: string;
 	model: string;
@@ -66,8 +66,8 @@ export type AgentDef = {
 	};
 	workers?: {
 		dispatcher?: "orca" | "git-process";
-		kind?: WorkerKind;
-		roles?: Record<string, { kind?: WorkerKind }>;
+		kind?: WorkerKindName;
+		roles?: Record<string, { kind?: WorkerKindName }>;
 		durable?: {
 			enabledRoles?: string[];
 			maxConcurrent?: number;
@@ -120,7 +120,9 @@ export type MachineCfg = {
 		}
 	>;
 	workers?: {
-		roles?: Record<string, { kind?: WorkerKind; skills?: string[] }>;
+		dispatcher?: "orca" | "git-process";
+		fallback?: boolean;
+		roles?: Record<string, { kind?: WorkerKindName; skills?: string[] }>;
 	};
 };
 export type ProfileManifest = {

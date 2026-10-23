@@ -3,7 +3,7 @@ import test from "node:test";
 import type {
 	AgentDef,
 	MachineCfg,
-	WorkerKind,
+	WorkerKindName,
 } from "../../src/config/schema.ts";
 import {
 	assertRoleDispatchReady,
@@ -15,11 +15,11 @@ const durable = "durable-conversation";
 const cases: Array<
 	[
 		"linux" | "android",
-		WorkerKind | undefined,
-		WorkerKind | undefined,
-		WorkerKind | undefined,
+		WorkerKindName | undefined,
+		WorkerKindName | undefined,
+		WorkerKindName | undefined,
 		boolean | undefined,
-		WorkerKind,
+		WorkerKindName,
 		boolean,
 	]
 > = [

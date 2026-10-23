@@ -3,6 +3,10 @@ import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { startApi } from "../api/server.ts";
+import { selectDispatcher } from "../dispatch/select.ts";
+import { WorkerKindRegistry } from "../workers/kind.ts";
+import { PiSessionKind } from "../workers/piSession.ts";
+import { WorkerRegistry } from "../workers/registry.ts";
 import { localToken } from "../api/tokens.ts";
 import { loadAgent, loadMachine } from "../config/load.ts";
 import { loadManifest } from "../config/manifest.ts";
@@ -181,6 +185,18 @@ export async function run(
 				processes,
 			),
 		);
+		const dispatcher = selectDispatcher({
+			definition,
+			machine,
+			root: join(agentDir(agent), "workspaces"),
+			orcaAvailable: caps.orca,
+		});
+		const workers = new WorkerRegistry();
+		const kinds = new WorkerKindRegistry();
+		kinds.register(
+			new PiSessionKind(dispatcher, join(agentDir(agent), "launchers")),
+		);
+		kinds.get("pi-session");
 		const harness = await openHarness({
 			agent,
 			definition,
@@ -202,6 +218,7 @@ export async function run(
 			port,
 			definition,
 			harness,
+			workers,
 			bind: definition.network?.bind ?? machine.network?.bind,
 		});
 		let closing = false;
