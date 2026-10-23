@@ -106,6 +106,7 @@ test("selected native kind: claim -> fake workspace -> faux model fixed tools ->
 		);
 		const agent = await conversation.agent(rig.harness.context);
 		assert.equal(agent.cwd, rig.checkout);
+		assert.match(agent.instructions ?? "", /Interrupted tool recovery/);
 		assert.deepEqual(
 			agent.tools.map((tool) => tool.name).sort(),
 			[...durableWorkerToolNames].sort(),
@@ -375,6 +376,28 @@ for (const operation of [
 			await rig.harness.close();
 		}
 	});
+
+test("durable worker concurrency cap refuses a third in-process child", async () => {
+	const rig = await durableRig();
+	rig.faux.setResponses([
+		call("bash", { command: "sleep 30" }),
+		call("bash", { command: "sleep 30" }),
+	]);
+	try {
+		rig.harness.start();
+		const { handle, kind } = await worker(rig);
+		await eventually(() => rig.processes.commands.length === 1);
+		const second = await kind.start({ ...handle.job, id: "second-attempt" });
+		await eventually(() => rig.processes.commands.length === 2);
+		await assert.rejects(
+			() => kind.start({ ...handle.job, id: "third-attempt" }),
+			{ code: "capacity_exceeded" },
+		);
+		await kind.interrupt(second, "hard");
+	} finally {
+		await rig.harness.close();
+	}
+});
 
 test("parallel tool reservations cannot exceed maxToolCalls and native model dispatch stops at maxTurns", async () => {
 	const rig = await durableRig({ maxToolCalls: 1, maxTurns: 2 });
