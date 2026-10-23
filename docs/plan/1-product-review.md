@@ -52,8 +52,8 @@ Rules:
 
 ## Model providers: what can the steward reuse? (C4)
 
-Straight answer: **yes, generically.** Pi's file-backed credential store (`AuthStorage`) holds OAuth
-or API-key credentials for any provider pi-ai supports. The steward opens the agent's profile file
+Straight answer: **yes, generically.** Pi's file-backed credential store (opened through `ModelRuntime.create({ authPath })`; the older `AuthStorage` export is gone, slice 1) holds OAuth
+or API-key credentials for any provider pi-ai supports. Agents use **named** profiles only (slice 1 showed a file-symlinked `auth.json` loses updates). The steward opens the agent's profile file
 and uses it through pi-ai, so OpenAI/Codex OAuth, OpenRouter, other API-key providers and TypeSafe all
 work the same way, with refresh under the same lock Pi uses.
 
