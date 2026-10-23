@@ -670,6 +670,9 @@ export async function openHarness(options: HarnessConfig) {
 			check: work.check,
 			budgetStopped: async () =>
 				exhausted((await harness.snapshot(BudgetDoc, context))!, limits),
+			maxConcurrent:
+				def.workers?.durable?.maxConcurrent ??
+				(work.machine.platform?.os === "android" ? 1 : 2),
 			account: async (usage) => {
 				await harness.commit(async (tx) => {
 					const budget = await tx.doc(BudgetDoc);

@@ -61,5 +61,21 @@ the supported shims can bypass their audit and attribution. Use repository rules
 and a fine-grained, repository-limited token without administration or workflows
 write permission.
 
+## Durable-conversation workers
+
+The opt-in `durable-conversation` kind runs headlessly in the steward process.
+It has only fixed code-owned tools and loads no user skills, extensions, prompts,
+or Pi packages. `workers.durable.skills` can inline allowlisted `SKILL.md` text
+from the generated Pi directory; a skill requiring subagents, codemode, or helper
+scripts is refused. Keep `idea-to-pr`, `build`, `review-code`, `planning`, and
+any workflow that orchestrates subagents or runs skill scripts on Pi-session
+workers.
+
+Durable workers share one steward storage owner. `workers.durable.maxConcurrent`
+defaults to 2 (and to 1 on Android); extra starts are refused rather than opening
+the storage from another process. After a crash, replay-safe tools rerun. A
+non-replay-safe tool can report `interrupted`; the worker playbook requires
+checking `git status`, files, the remote branch, and any draft PR before retrying.
+
 See [operator controls](operator.md#work-items-and-workers), the
 [API reference](api.md), and [integration evidence](evidence/slice-6b.md).

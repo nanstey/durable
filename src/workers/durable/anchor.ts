@@ -29,6 +29,8 @@ import {
 } from "./gitops.ts";
 import { durableLimitStop } from "./limits.ts";
 import { withWorkerOperation } from "./operation.ts";
+import { interruptedToolPlaybook } from "./playbook.ts";
+import { durableSkillSections } from "./skills.ts";
 import {
 	assertCommand,
 	durableBash,
@@ -93,6 +95,8 @@ export type NativeAnchorOptions = {
 	budgetStopped: () => Promise<boolean>;
 	account: (usage: Usage) => Promise<void>;
 	verifyIdentity?: () => Promise<void>;
+	/** All durable children share this harness storage and must be admitted here. */
+	maxConcurrent?: number;
 };
 
 /** Native storage is the only owner index. No in-memory worker or task identity is authoritative. */
@@ -459,9 +463,17 @@ export class NativeDurableAnchor implements DurableAnchor {
 					this.options.github.remoteHead(job.repo!, job.workspace.branch),
 				)
 			: undefined;
+		const skillSections = await durableSkillSections(job.piDir, job.skills);
 		await this.options.harness().commit(async (tx) => {
 			const doc = await tx.doc(WorkersDoc);
 			if (doc.workers[job.id]) return;
+			const active = Object.values(doc.workers).filter(
+				(record) => !record.outcome && record.reported === undefined,
+			).length;
+			if (active >= (this.options.maxConcurrent ?? 2))
+				throw Object.assign(Error("durable worker concurrency limit reached"), {
+					code: "capacity_exceeded",
+				});
 			if (this.options.disabled() || this.options.processes.fenced(job.item))
 				throw Error("worker launch fenced");
 			const owner = await this.options.owner(tx, job.item);
@@ -487,7 +499,9 @@ export class NativeDurableAnchor implements DurableAnchor {
 				},
 				thinkingLevel: job.model.thinking as ModelThinkingLevel | undefined,
 				instructions:
-					"Use only the fixed code-owned tools. Commit, push_branch, open_draft_pr, then report. Bash is not a sandbox. No user skills or extensions are loaded.",
+					"Use only the fixed code-owned tools. Commit, push_branch, open_draft_pr, then report. Bash is not a sandbox. No user skills, extensions, prompts, or packages are loaded." +
+					interruptedToolPlaybook +
+					skillSections,
 			});
 			const { env: _env, ...stored } = job;
 			doc.workers[job.id] = {

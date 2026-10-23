@@ -80,10 +80,18 @@ OS user can access, including credential files. Shell credentials are omitted,
 not made inaccessible. Code-owned GitHub tools are the supported path, not an
 enforced one. Sandbox hardening remains deferred.
 
-Items 6–12 are not completed or enabled by this PR: recovery playbook/full crash
-matrix, skills runtime, concurrency/storage policy and load benchmark, model-auth
-policy, viewer integration, reviewer verdicts, operator docs and live pilot.
-Reviewer launch explicitly refuses rather than exposing write tools. No live
-GitHub writes, provider requests or operator credentials were used. Independent
-source review was supplied by the coordinator. This worker implemented the three
-findings above and does not claim an independent post-fix review.
+## Items 6–9 recovery and policy
+
+| Spec item | Implementation | Executed evidence |
+| --- | --- | --- |
+| 6 | `workers/durable/playbook.ts` is appended to every durable worker instruction. It requires inspection of git status, files, branch and PR state before retrying an `interrupted` non-replay-safe call. The existing ownership index reattaches the same child after the steward reopens. | Faux-model `close during native bash` restarts with one child and records the native `interrupted` tool result; the instruction snapshot includes the recovery playbook. |
+| 7 | `workers/durable/skills.ts` reads only named `skills/<name>/SKILL.md` files under the generated Pi directory, caps each at 32 KiB, and rejects subagent, codemode and helper-script workflows. The durable child still configures only its code-owned extension/tool list. | Allowlisted body inlining, empty default, traversal rejection and runtime-workflow denial tests pass. |
+| 8 | `NativeDurableAnchor` counts unreported, non-terminal durable children inside its storage transaction and refuses starts past `maxConcurrent`. `steward/harness.ts` supplies definition value or Linux default 2 / Android default 1. | Faux-model cap test starts two children and rejects the third with `capacity_exceeded`. |
+| 9 | The steward opens the harness model runtime through `createModelsFor(resolveProfile(def.profile), providersOf(def))`; child configuration selects its declared provider/model from that profile-scoped runtime. The plain model-auth implementation rejects Anthropic OAuth shaping; doctor reports it unsupported until the explicit `modelAuth` implementation option exists. | Existing model-auth and doctor contracts cover profile provider selection and OAuth refusal; durable child capability reports `anthropicOAuth: modelAuth-option`. |
+
+Items 10–12 remain for the later PR: viewer integration, reviewer verdicts, full
+operator docs and live pilot. The full five-minute responsiveness benchmark and
+Linux cgroup/`setsid` SIGKILL matrix remain validation boundaries for item 8/6;
+the focused faux-model restart and cap contracts above prove the implemented
+policy. Reviewer launch explicitly refuses rather than exposing write tools. No
+live GitHub writes, provider requests or operator credentials were used.
