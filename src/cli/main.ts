@@ -782,11 +782,11 @@ subCommands.token = defineCommand({
 		}),
 		revoke: defineCommand({
 			meta: { name: "revoke" },
-			args: { ...agentArg, client: { type: "string", required: true } },
+			args: { ...agentArg, id: { type: "string", required: true } },
 			run({ args }) {
 				if (args["dry-run"])
-					console.log(`token revoke ${selected(args.agent)} ${args.client}`);
-				else revokeToken(selected(args.agent), args.client);
+					console.log(`token revoke ${selected(args.agent)} ${args.id}`);
+				else revokeToken(selected(args.agent), args.id);
 			},
 		}),
 	},

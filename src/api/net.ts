@@ -22,7 +22,16 @@ export async function tailnetAddress(
 }
 
 function checkedAddress(address: string) {
-	if (!/^100\.(?:[6-9]\d|1[0-2]\d)\.\d{1,3}\.\d{1,3}$/.test(address))
+	const octets = address.split(".").map(Number);
+	if (
+		octets.length !== 4 ||
+		octets.some(
+			(octet) => !Number.isInteger(octet) || octet < 0 || octet > 255,
+		) ||
+		octets[0] !== 100 ||
+		octets[1] < 64 ||
+		octets[1] > 127
+	)
 		throw Error("tailscale did not return a valid tailnet IPv4 address");
 	return address;
 }
@@ -33,7 +42,9 @@ export async function peerAllowed(
 	run = execa,
 ): Promise<boolean> {
 	if (!remoteAddress || !allowedPeers.length) return false;
-	const result = await run("tailscale", ["whois", "--json", remoteAddress]);
+	const result = await run("tailscale", ["whois", "--json", remoteAddress], {
+		timeout: 5_000,
+	});
 	const whois = JSON.parse(result.stdout) as Whois;
 	const names = [
 		...(whois.Node?.Tags ?? []),

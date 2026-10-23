@@ -19,10 +19,19 @@ export function consoleGuard(
 		context.header("Referrer-Policy", "no-referrer");
 		const host = context.req.header("host") ?? "";
 		const local = /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host);
-		const serve = Boolean(
-			options.serveHostname && host === options.serveHostname,
-		);
-		if (!local && !serve) return context.text("invalid host", 421);
+		const serve = Boolean(options.serveHostname);
+		if (!local && host !== options.serveHostname)
+			return context.text("invalid host", 421);
+		// Host is supplied by the client and cannot distinguish a local request
+		// from one forwarded by Serve.  When Serve is configured, require its
+		// identity header for every request, including reads and loopback Hosts.
+		if (
+			serve &&
+			!options.allowedUsers?.includes(
+				context.req.header("tailscale-user-login") ?? "",
+			)
+		)
+			return context.text("Serve identity refused", 403);
 		if (!["GET", "HEAD", "OPTIONS"].includes(context.req.method)) {
 			const origin = context.req.header("origin");
 			if (!origin || new URL(origin).host !== host)
@@ -36,13 +45,6 @@ export function consoleGuard(
 				return context.text("JSON required", 415);
 			if (!equal(context.req.header("x-durable-csrf"), csrf))
 				return context.text("CSRF token required", 403);
-			if (
-				serve &&
-				!options.allowedUsers?.includes(
-					context.req.header("tailscale-user-login") ?? "",
-				)
-			)
-				return context.text("Serve identity refused", 403);
 		}
 		await next();
 	};

@@ -66,7 +66,7 @@ export function effectivePolicy(
 		...base,
 		enabled: resolved.state === "verified" && base.enabled === true,
 		mode: definition.mode ?? "human-approval",
-		shadow: definition.shadow ?? false,
+		shadow: definition.shadow ?? definition.mode === "auto-when-safe",
 		state: resolved.state,
 		warnings,
 		authors: intersect("authors", base.authors, tighten.authors),

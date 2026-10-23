@@ -55,8 +55,7 @@ export class FixturePolicySource implements RepoPolicySource {
 		if (
 			process.env.DURABLE_ALLOW_FIXTURE_SOURCE !== "1" &&
 			process.env.NODE_ENV !== "test" &&
-			!process.execArgv.includes("--test") &&
-			!process.argv.some((argument) => /(?:^|\/)test\//.test(argument))
+			!process.execArgv.includes("--test")
 		)
 			throw Error("fixture policy source is test-only");
 	}

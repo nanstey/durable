@@ -17,6 +17,7 @@ export type MuxFrame = {
 type Tab = {
 	id: string;
 	subs: Set<string>;
+	generations: Map<string, number>;
 	controllers: AbortController[];
 	write: (frame: MuxFrame) => Promise<void>;
 };
@@ -39,6 +40,7 @@ export class StreamMux {
 			const tab: Tab = {
 				id,
 				subs: new Set(),
+				generations: new Map(),
 				controllers: [],
 				write: async (frame) =>
 					stream.writeSSE({ event: frame.type, data: JSON.stringify(frame) }),
@@ -65,8 +67,14 @@ export class StreamMux {
 		const tab = this.tabs.get(id);
 		if (!tab) return false;
 		this.closeSources(tab);
+		for (const key of tab.subs)
+			tab.generations.set(key, (tab.generations.get(key) ?? 0) + 1);
 		tab.subs = new Set(keys);
-		for (const key of tab.subs) void this.fanIn(tab, key);
+		for (const key of tab.subs) {
+			const generation = (tab.generations.get(key) ?? 0) + 1;
+			tab.generations.set(key, generation);
+			void this.fanIn(tab, key, generation).catch(() => this.close(tab));
+		}
 		return true;
 	}
 	private closeSources(tab: Tab) {
@@ -77,7 +85,7 @@ export class StreamMux {
 		this.closeSources(tab);
 		this.tabs.delete(tab.id);
 	}
-	private async fanIn(tab: Tab, key: string) {
+	private async fanIn(tab: Tab, key: string, generation: number) {
 		const [deviceId, scope, id] = key.split("/");
 		const device = this.devices.get(deviceId);
 		if (!device || !deviceId || !scope) {
@@ -89,7 +97,11 @@ export class StreamMux {
 				? `/v1/conversations/${encodeURIComponent(id ?? "")}/events`
 				: "/v1/events";
 		let delay = 1000;
-		while (this.tabs.get(tab.id) === tab && tab.subs.has(key)) {
+		while (
+			this.tabs.get(tab.id) === tab &&
+			tab.subs.has(key) &&
+			tab.generations.get(key) === generation
+		) {
 			const controller = new AbortController();
 			tab.controllers.push(controller);
 			try {
@@ -110,7 +122,12 @@ export class StreamMux {
 				delay = 1000;
 			} catch (error) {
 				if (controller.signal.aborted) return;
-				await tab.write({ type: "disconnected", key, detail: String(error) });
+				try {
+					await tab.write({ type: "disconnected", key, detail: String(error) });
+				} catch {
+					this.close(tab);
+					return;
+				}
 			}
 			tab.controllers = tab.controllers.filter((entry) => entry !== controller);
 			await new Promise((resolve) => setTimeout(resolve, delay));

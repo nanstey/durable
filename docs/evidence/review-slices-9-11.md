@@ -113,3 +113,27 @@ Counts: **High 2, Medium 9, Low 8.**
 - The runtime re-resolves the source just before the merge and compares fingerprints (`workRuntime.ts:489-500`). Shadow mode never reaches `runGh`.
 - `startApi` binds the loopback listener plus the explicit Tailscale address only. It refuses to start `peerCheck: required` without `allowedPeers`, and each request returns 503 when `whois` fails in `required` mode. Approval routes still reject bearer credentials. Tokens are stored as hashes with expiry, and device tokens are in 0600 files outside `devices.yaml`.
 - The proxy allowlist is anchored, one-segment routes. I found no `..` traversal that reaches an approval route.
+
+## Remediation status
+
+| Finding | Status |
+| --- | --- |
+| H1 | Fixed: Serve-configured console requests require an allowlisted Tailscale identity, including spoofed loopback hosts; covered by `test/unit/console.test.ts`. |
+| H2 | Partially fixed: risk limit is enforced and cooling-off fails closed until a timestamp-backed implementation exists. Daily-cap persistence and a kill-switch fact remain open. |
+| M1 | Partially fixed: an empty check rollup now fails. Pre-merge fact refresh remains open. |
+| M2 | Fixed: auto-merge requires `pathAllow`; unlisted paths deny. |
+| M3 | Open. |
+| M4 | Open. |
+| M5 | Fixed: token listing exposes a short id and revoke removes exactly that id. |
+| M6 | Open. |
+| M7 | Fixed with H1 for Serve-configured consoles. |
+| M8 | Open: evidence needs broader correction and coverage. |
+| M9 | Open. |
+| L1 | Fixed: addresses are parsed and restricted to 100.64.0.0/10. |
+| L2 | Fixed: subscription generations fence stale fan-in loops and write failures close the tab. |
+| L3 | Fixed: `auto-when-safe` shadows by default and repo `tighten` deep-merges agent `tighten`. |
+| L4 | Open. |
+| L5 | Fixed: finish removes the claim label only when it still owns the current claim. |
+| L6 | Fixed: fixture-source authorization no longer examines arbitrary argv paths. |
+| L7 | Fixed: inline legacy device tokens migrate to private token files and are removed from YAML. |
+| L8 | Open. |
