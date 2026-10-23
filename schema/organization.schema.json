@@ -1,0 +1,237 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "memberAgents": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._-]+$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "maxConcurrentWorkers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxWorkersPerDay": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxAttemptsPerItem": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "itemMinutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxTurns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxToolCalls": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tokenBudget": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxMergesPerDay": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "dailyDollars": {
+          "type": "number",
+          "minimum": 0
+        },
+        "dailyTokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "schedule": {
+      "type": "object",
+      "properties": {
+        "quietHours": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "notify": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          {
+            "type": "object",
+            "properties": {
+              "channels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true
+              },
+              "priority": {
+                "enum": [
+                  "low",
+                  "normal",
+                  "high"
+                ]
+              }
+            },
+            "required": [
+              "channels"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._-]+$"
+      },
+      "uniqueItems": true
+    },
+    "connectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+$"
+          },
+          "provider": {
+            "const": "fake"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]+$"
+                },
+                "access": {
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "write": {
+                  "type": "boolean"
+                },
+                "maxCalls": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxCost": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "id",
+                "access"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "tools"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "pipeline": {
+      "type": "object",
+      "properties": {
+        "stages": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "scout",
+              "spec",
+              "build",
+              "review",
+              "gate",
+              "handoff"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "gates": {
+          "type": "object",
+          "properties": {
+            "specApproval": {
+              "type": "boolean"
+            },
+            "complexityThreshold": {
+              "enum": [
+                "medium",
+                "large"
+              ]
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "maxStaleAge": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "required": [
+    "name",
+    "memberAgents"
+  ],
+  "additionalProperties": false
+}

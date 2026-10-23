@@ -9,6 +9,10 @@ import {
 } from "../config/agent.ts";
 import { durableHome } from "../config/paths.ts";
 import {
+	listOrganizations,
+	loadOrganization,
+} from "../config/organizations.ts";
+import {
 	type AgentDef,
 	type MachineCfg,
 	validateAgent,
@@ -67,6 +71,31 @@ export function doctor(
 			fix: "validate against schema/ and remove unsupported or unknown keys",
 		});
 		return { ok: false, checks };
+	}
+	const organizationName = def.organization;
+	if (organizationName) {
+		try {
+			const organization = loadOrganization(organizationName);
+			const memberships = listOrganizations().filter((name) =>
+				loadOrganization(name).memberAgents.includes(id),
+			);
+			checks.push({
+				name: "organization membership",
+				ok: organization.memberAgents.includes(id) && memberships.length === 1,
+				detail:
+					organization.memberAgents.includes(id) && memberships.length === 1
+						? `${organizationName} validated`
+						: "missing or duplicate organization membership",
+				fix: "assign this agent to exactly one named organization",
+			});
+		} catch {
+			checks.push({
+				name: "organization membership",
+				ok: false,
+				detail: "organization document missing or invalid",
+				fix: "create a valid local organizations/<name>.yaml document",
+			});
+		}
 	}
 	const assigned = machine.agents.some(
 		(a) => (typeof a === "string" ? a : a.id) === id,

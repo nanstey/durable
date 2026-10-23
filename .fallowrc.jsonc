@@ -11,7 +11,8 @@
     { "file": "src/config/schema.ts", "exports": ["PROFILE_NAME"] },
     { "file": "src/identity/pidir.ts", "exports": ["createDerivedPiDir"] },
     { "file": "src/api/types.ts", "exports": ["ErrorCode", "ErrorResponse"] },
-    { "file": "src/console/registry.ts", "exports": ["consoleDir", "devicesPath", "consoleConfigPath", "vapidPath", "subscriptionsPath", "loadConsoleConfig", "saveDevices"] }
+    { "file": "src/console/registry.ts", "exports": ["consoleDir", "devicesPath", "consoleConfigPath", "vapidPath", "subscriptionsPath", "loadConsoleConfig", "saveDevices"] },
+    { "file": "src/config/organizations.ts", "exports": ["organizationsDir", "organizationPath", "assertOrganizationName", "contentHash", "issueOrganizationNonce", "verifyBundle", "effectiveOrganization"] }
   ],
   "ignoreDependencies": [
     "@earendil-works/chord",
