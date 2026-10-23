@@ -94,6 +94,7 @@ export function authorize(
 	return record?.scopes.includes(scope) ? record : undefined;
 }
 export function listTokens(agent: string) {
+	if (!existsSync(join(agentDir(agent), "tokens.json"))) return [];
 	return transaction(agent, (records) =>
 		records.map(({ hash: _hash, ...metadata }) => metadata),
 	);

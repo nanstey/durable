@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { bodyLimit } from "hono/body-limit";
 import type { ApprovalNonces } from "../approval/nonce.ts";
 import { verifyNonce } from "../gate/approval.ts";
@@ -16,6 +17,7 @@ import { type ApiEnv, auth } from "./auth.ts";
 import { ApiError, bodyHash, validateMessage } from "./chat.ts";
 import { events } from "./sse.ts";
 import { tokenActive } from "./tokens.ts";
+import { peerAllowed, type PeerCheck } from "./net.ts";
 import type { Device, MessageRequest } from "./types.ts";
 
 export function createApi(opts: {
@@ -31,10 +33,38 @@ export function createApi(opts: {
 	deliverNonce?: (item: string, code: string) => Promise<boolean>;
 	dispatcher?: WorkerDispatcher;
 	viewerWorkspace?: Workspace;
+	peerCheck?: { mode: PeerCheck; allowedPeers: string[] };
 }) {
 	const app = new Hono<ApiEnv>();
 	const { harness } = opts;
 	const startedAt = opts.startedAt ?? Date.now();
+	if (opts.peerCheck && opts.peerCheck.mode !== "off")
+		app.use("*", async (c, next) => {
+			if (c.req.path === "/healthz") return next();
+			const address = getConnInfo(c).remote.address ?? "";
+			try {
+				if (!(await peerAllowed(address, opts.peerCheck?.allowedPeers ?? []))) {
+					audit(opts.agent, { event: "peer-check-denied" });
+					return c.json(
+						{ error: { code: "forbidden", message: "tailnet peer refused" } },
+						403,
+					);
+				}
+			} catch {
+				if (opts.peerCheck?.mode === "required")
+					return c.json(
+						{
+							error: {
+								code: "unavailable",
+								message: "tailnet peer check unavailable",
+							},
+						},
+						503,
+					);
+				audit(opts.agent, { event: "peer-check-unavailable" });
+			}
+			return next();
+		});
 	const max = opts.definition.chat?.maxMessageBytes ?? 1048576;
 	async function tree() {
 		const durable = await harness.tree();

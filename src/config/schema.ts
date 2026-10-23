@@ -17,7 +17,7 @@ export type ModelDef = {
 export type AgentDef = {
 	version?: 1;
 	description?: string;
-	network?: { bind: "loopback" };
+	network?: { bind: "loopback" | "tailnet" };
 	schedule?: {
 		pollSeconds?: number;
 		leaseSeconds?: number;
@@ -138,9 +138,10 @@ export type MachineCfg = {
 		allowAutoMerge?: boolean;
 	};
 	network?: {
-		bind?: "loopback";
+		bind?: "loopback" | "tailnet";
 		peerCheck?: "required" | "optional" | "off";
 		tailnetAddress?: string;
+		allowedPeers?: string[];
 	};
 	channels?: Record<
 		string,
@@ -170,10 +171,8 @@ export function assertProfileName(name: string): void {
 function checkBind(value: unknown) {
 	const bind = (value as { network?: { bind?: unknown } } | null)?.network
 		?.bind;
-	if (bind !== undefined && bind !== "loopback")
-		throw new Error(
-			"network.bind must be loopback; other listeners are available from slice 11",
-		);
+	if (bind !== undefined && bind !== "loopback" && bind !== "tailnet")
+		throw new Error("network.bind must be loopback or tailnet");
 }
 export function validateAgent(value: unknown): AgentDef {
 	checkBind(value);
@@ -221,8 +220,8 @@ export function validateMachine(value: unknown): MachineCfg {
 			`invalid machine: ${ajv.errorsText(machineValidator.errors)}`,
 		);
 	const x = value as MachineCfg;
-	if (x.network?.bind && x.network.bind !== "loopback")
-		throw new Error("network.bind must be loopback");
+	if (x.network?.bind && !["loopback", "tailnet"].includes(x.network.bind))
+		throw new Error("network.bind must be loopback or tailnet");
 	return x;
 }
 export function validateManifest(value: unknown): ProfileManifest {

@@ -22,6 +22,6 @@ Run `pnpm check` for TypeScript, Biome linting and formatting, and Fallow dead-c
 ## Principles
 
 - One agent uses one credential profile and one GitHub identity.
-- GitHub is the durable record. Each machine runs independently.
+- GitHub is the durable record. Each machine runs independently; the optional console can run on more than one machine and holds no coordination state.
 - Auto-merge is off unless a repo opts in. The agent never bypasses GitHub rules.
 - The repo holds no secrets, no machine-local state and no absolute paths.

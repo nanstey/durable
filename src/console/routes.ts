@@ -10,7 +10,12 @@ import { consoleGuard } from "./guard.ts";
 import { DeviceMonitor } from "./monitor.ts";
 import { StreamMux } from "./mux.ts";
 import { proxyDaemon } from "./proxy.ts";
-import { type ConsoleDevice, loadDevices, saveDevices } from "./registry.ts";
+import {
+	type ConsoleDevice,
+	loadConsoleConfig,
+	loadDevices,
+	saveDevices,
+} from "./registry.ts";
 
 const webRoot = fileURLToPath(new URL("../../web", import.meta.url));
 const types: Record<string, string> = {
@@ -42,12 +47,13 @@ export function createConsoleApp(
 	options: { devices?: ConsoleDevice[]; csrf?: string } = {},
 ) {
 	const devices = options.devices ?? loadDevices();
+	const config = loadConsoleConfig();
 	const csrf = options.csrf ?? randomBytes(32).toString("base64url");
 	const deviceMap = new Map(devices.map((device) => [device.id, device]));
 	const monitor = new DeviceMonitor(devices);
 	const mux = new StreamMux(deviceMap);
 	const app = new Hono();
-	app.use("*", consoleGuard(csrf));
+	app.use("*", consoleGuard(csrf, config));
 	app.get("/api/bootstrap", async (c) =>
 		c.json({ csrf, devices: await monitor.checkAll() }),
 	);
