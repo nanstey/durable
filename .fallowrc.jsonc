@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/fallow/schema.json",
-  "entry": ["bin/durable.ts"],
+  "entry": ["bin/durable.ts", "scripts/hygiene-scan.mjs"],
   // Exploratory spikes are intentionally standalone and are not production code.
   "ignorePatterns": ["spike/**"],
   // The provider factory is intentionally exported for the runtime integration surface.

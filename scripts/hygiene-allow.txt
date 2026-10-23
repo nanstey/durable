@@ -1,0 +1,2 @@
+# Exact repository-relative paths only, each followed by: # reason
+# No exceptions are currently required.

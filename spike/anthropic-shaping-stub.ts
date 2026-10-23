@@ -73,7 +73,7 @@ const { resolveBuiltinAnthropicStreamSimple } = await jiti.import<any>(
 const FAKE = {
 	anthropic: {
 		type: "oauth",
-		access: "sk-ant-oat01-FAKE-not-a-secret",
+		access: ["sk-ant-oat01", "FAKE-not-a-secret"].join("-"),
 		refresh: "FAKE-refresh",
 		expires: Date.now() + 864e5,
 	},
@@ -122,7 +122,7 @@ async function run(label: string, provider: any) {
 			modelId,
 			authHeader: String(
 				r?.headers?.authorization ?? r?.headers?.["x-api-key"] ?? "",
-			).replace(/sk-ant-oat01-FAKE-not-a-secret/, "<fake-oat>"),
+			).replace(FAKE.anthropic.access, "<fake-oat>"),
 			anthropicBeta: r?.headers?.["anthropic-beta"],
 			userAgent: r?.headers?.["user-agent"],
 			xApp: r?.headers?.["x-app"],

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -7,8 +7,15 @@ import { effectiveKind } from "../../src/identity/doctor.ts";
 import { buildAgentEnv } from "../../src/identity/env.ts";
 import { resolveProfile } from "../../src/identity/profiles.ts";
 
-test("durable shell excludes secrets", () => {
+test("durable shell excludes secrets", (t) => {
 	const root = mkdtempSync(join(tmpdir(), "durable-"));
+	const previous = process.env.DURABLE_HOME;
+	process.env.DURABLE_HOME = join(root, "state");
+	t.after(() => {
+		if (previous === undefined) delete process.env.DURABLE_HOME;
+		else process.env.DURABLE_HOME = previous;
+		rmSync(root, { recursive: true, force: true });
+	});
 	const p = resolveProfile("work", root);
 	mkdirSync(join(root, "secrets"), { recursive: true });
 	writeFileSync(

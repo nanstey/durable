@@ -91,7 +91,7 @@ buildAgentEnv(def, machine, role: "steward" | "worker" | "reviewer" | "durable-s
 // INVARIANT I4: "durable-shell" (a durable worker's bash) is a minimal allowlist (PATH, LANG/LC_*, TERM, TZ, scratch HOME and TMPDIR, credential-free GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM=/dev/null, GIT_TERMINAL_PROMPT=0, empty GH_CONFIG_DIR, DURABLE_WORKER=1). It never contains GH_TOKEN, GITHUB_TOKEN, any secrets/<profile>.env entry, any provider key, PI_CODING_AGENT_DIR, SSH_AUTH_SOCK or DURABLE_HOME (test: both aliases + provider secrets in the profile file and the parent env never reach it).
 
 // identity/modelAuth.ts — the swap seam for the Anthropic decision
-createModelsFor(profile: ResolvedProfile, providers: string[]): Models   // plain = ModelRuntime.create({ authPath: profile.authFile }) (public, pi-coding-agent 1.4.0; own pi-ai CredentialStore as fallback) | anthropicShaped (spike decides)
+createModelsFor(profile: ResolvedProfile, providers: string[]): Promise<Models>   // plain = ModelRuntime.create({ authPath: profile.authFile }) (public, pi-coding-agent 1.4.0; own pi-ai CredentialStore as fallback) | anthropicShaped (spike decides)
 // model changes on an existing conversation go through configure(); harness.root(ctx, { agent }) applies the agent only on creation.
 
 // identity/doctor.ts
@@ -345,7 +345,7 @@ New commits after review invalidate the verdict and the nonce; the item returns 
 
 ```
 launch(ws, job)           (orca adapter)
-├─ identity/pidir.build(def, profile)  → $DURABLE_HOME/agents/<id>/pi  (settings generated; symlinks; no auth.json unless profile=default)
+├─ identity/pidir.build(def, profile)  → $DURABLE_HOME/agents/<id>/pi  (settings generated; directory symlinks only; auth.json absent or {}; default is refused for Pi-session workers)
 ├─ brief written to a 0600 file outside the worktree from job.briefText
 ├─ launcher script 0700: `env -i <job.env> exec pi --provider <p> --model <m> --thinking … "$(cat brief)"`   (separate flags, every launch; headless: stdin </dev/null)
 ├─ list-before-create: ORCA terminal list --worktree … ; reuse a live job with the same id

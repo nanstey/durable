@@ -123,7 +123,7 @@ versions; the extension already handles `claude_code_version_too_old` rejections
 the provider's terms. The operator accepts that risk per profile. This repo already hit the unshaped
 symptom (`400 You're out of extra usage`, `harness/pi/README.md`).
 
-**Seam:** `identity/modelAuth.ts` exposes `createModelsFor(profile, providers) -> Models`. Implementations:
+**Seam:** `identity/modelAuth.ts` exposes `createModelsFor(profile, providers) -> Promise<Models>` (await `ModelRuntime.create` before passing it to `Harness.open`). Implementations:
 `plain` (default), `anthropicShaped` (options 1 or 2). Agent definitions do not change when the choice
 changes.
 

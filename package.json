@@ -17,9 +17,10 @@
 		"LICENSE"
 	],
 	"bin": {
-		"durable": "bin/durable.ts"
+		"durable": "bin/durable"
 	},
 	"scripts": {
+		"schema:generate": "node --experimental-strip-types scripts/generate-schemas.ts",
 		"test": "node --experimental-strip-types --test test/unit/*.test.ts",
 		"lint": "biome lint .",
 		"format:check": "biome format .",
@@ -32,6 +33,7 @@
 		"@earendil-works/pi-ai": "1.4.0",
 		"@earendil-works/pi-coding-agent": "1.4.0",
 		"@earendil-works/pi-durable": "1.4.0",
+		"ajv": "8.17.1",
 		"proper-lockfile": "4.1.2",
 		"typebox": "1.4.3",
 		"yaml": "2.9.1"
