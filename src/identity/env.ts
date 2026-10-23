@@ -1,10 +1,4 @@
-import {
-	chmodSync,
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadManifest } from "../config/manifest.ts";
 import { durableHome } from "../config/paths.ts";
@@ -62,7 +56,7 @@ export function buildAgentEnv(
 	const shell = role === "durable-shell";
 	const home = shell ? join(state, "scratch", ctx.item || "default") : state;
 	privateDirectory(home);
-	const gh = shell ? mkdtempSync(join(home, "gh-")) : join(home, "gh");
+	const gh = join(home, "gh");
 	privateDirectory(gh);
 	const git = join(home, "gitconfig");
 	let identity = "[user]\n\tname = Durable Worker\n";

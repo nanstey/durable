@@ -59,6 +59,7 @@ type WorkerRecord = {
 	startedAt: number;
 	turns: number;
 	toolCalls: number;
+	assistantEntries: Array<{ provider: string; model: string; family: string }>;
 	outcome?: WorkerStop;
 	reported?: string;
 	review?: { result: ReviewResult; provenance: ModelProvenance };
@@ -189,7 +190,7 @@ export class NativeDurableAnchor implements DurableAnchor {
 						},
 						ctx,
 					);
-					await runtime.sleepUntil(o.now() + 100, { phase: "watch" }, ctx);
+					await runtime.sleepUntil(o.now() + 1000, { phase: "watch" }, ctx);
 				},
 			},
 			abort: async (task, runtime, ctx) => {
@@ -320,16 +321,24 @@ export class NativeDurableAnchor implements DurableAnchor {
 					await api.commit(async (tx) => {
 						const record = (await tx.doc(WorkersDoc)).workers[job.id];
 						if (record.review) throw Error("review verdict already reported");
-						const family = familyFor(job.model);
-						if (!job.reviewedFamily || family === job.reviewedFamily)
+						const entries = record.assistantEntries;
+						if (entries.length === 0)
+							throw Error("reviewer has no assistant provenance");
+						const [first] = entries;
+						const family = first.family;
+						if (
+							!job.reviewedFamily ||
+							family === job.reviewedFamily ||
+							entries.some((entry) => entry.family !== family)
+						)
 							throw Error("reviewer model family is not independent");
 						record.review = {
 							result,
 							provenance: {
-								provider: providerFor(job.model),
-								model: job.model.model,
+								provider: first.provider,
+								model: first.model,
 								family,
-								entries: record.turns,
+								entries: entries.length,
 								source: "durable-entries",
 							},
 						};
@@ -413,9 +422,19 @@ export class NativeDurableAnchor implements DurableAnchor {
 						);
 						if (record) {
 							record.turns++;
+							const model = message.responseModel ?? message.model;
+							record.assistantEntries.push({
+								provider: message.provider,
+								model,
+								family:
+									message.provider === providerFor(record.job.model) &&
+									model === record.job.model.model
+										? familyFor(record.job.model)
+										: familyFor({ provider: message.provider, model }),
+							});
 							if (
-								record.job.role === "reviewer" &&
 								!record.review &&
+								!record.reported &&
 								!message.content.some((part) => part.type === "toolCall")
 							)
 								record.outcome = "failed";
@@ -474,7 +493,7 @@ export class NativeDurableAnchor implements DurableAnchor {
 		await this.options.check();
 		const record = (await this.snapshot()).workers[job.id];
 		const stop = record.outcome ?? (await this.limit(record, reservedTool));
-		if (stop || record.reported !== undefined) {
+		if (stop || record.reported !== undefined || record.review !== undefined) {
 			if (stop) await this.stopRecord(job.id, stop);
 			throw Error("worker lifecycle fence");
 		}
@@ -538,7 +557,10 @@ export class NativeDurableAnchor implements DurableAnchor {
 			const doc = await tx.doc(WorkersDoc);
 			if (doc.workers[job.id]) return;
 			const active = Object.values(doc.workers).filter(
-				(record) => !record.outcome && record.reported === undefined,
+				(record) =>
+					!record.outcome &&
+					record.reported === undefined &&
+					record.review === undefined,
 			).length;
 			if (active >= (this.options.maxConcurrent ?? 2))
 				throw Object.assign(Error("durable worker concurrency limit reached"), {
@@ -589,6 +611,7 @@ export class NativeDurableAnchor implements DurableAnchor {
 				startedAt: this.options.now(),
 				turns: 0,
 				toolCalls: 0,
+				assistantEntries: [],
 			};
 			await this.options.mark(tx, child.id, job);
 		}, context);

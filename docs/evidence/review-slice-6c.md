@@ -57,6 +57,26 @@ Spec item 11 and `slice-6c.md` row 11 say provenance is "taken from the child co
 - **L7. Generic failure text.** An empty commit (nothing to add) surfaces as `code-owned git operation failed` (`gitops.ts:276`) with no hint, which tempts the model to retry via bash.
 - **L8. `read` loads whole files before slicing to 100 KB** (`tools.ts:44-48`); a very large or FIFO file in the worktree can stall or bloat the steward process.
 
+## Remediation status
+
+| Finding | Status | Evidence |
+| --- | --- | --- |
+| H1 | Deferred | Reviewer production dispatch is slice 7 work; this change does not touch its wiring. |
+| H2 | Fixed | `anchor.ts`; text-only workers fail, watch backs off to 1 s, and terminal workers release capacity. `durable-worker.test.ts`. |
+| M1 | Fixed | `gitops.ts` refreshes a confirmed intent when HEAD changes. `durable-gitops.test.ts`. |
+| M2 | Fixed | `modelAuth.ts` refuses Anthropic OAuth unless `workers.durable.modelAuth` is true. `modelAuth.test.ts`. |
+| M3/M5 | Fixed | `anchor.ts` records assistant provider/model provenance and excludes finished reviews from capacity. `durable-worker.test.ts`. |
+| M4 | Fixed | `durable-worker.test.ts` covers malformed, wrong-head, same-family, duplicate-call, and no-verdict refusals. |
+| M6 | Fixed | `skills.ts` recognizes plural and hyphenated subagents, code-mode variants, and script paths. `durable-skills.test.ts`. |
+| L1 | Fixed | `env.ts` reuses the item shell's `gh` directory. |
+| L2 | Deferred | ProcessManager does not expose streaming output or a per-launch timeout; adding it would cross the containment interface. |
+| L3 | Fixed | `gitops.ts` checks the steward-owned git config immediately before network use. |
+| L4 | Deferred | Requires the slice 7 PR-diff source wiring to fetch a SHA-pinned diff. |
+| L5 | Partially fixed | Push intents refresh for a new HEAD; report/PR title screening remains deferred. |
+| L6 | Deferred | Queue/audit behavior is in `workItemTask.ts`, excluded from this slice. |
+| L7 | Fixed | Git errors now suggest checking staged changes and status. |
+| L8 | Fixed | `tools.ts` rejects non-regular and over-100 KB reads before loading them. |
+
 ## Claims in `docs/evidence/slice-6c.md` not backed by code or tests
 
 | Claim | Status |

@@ -144,6 +144,7 @@ export const agentSchema = object(
 			roles,
 			durable: object({
 				enabledRoles: strings,
+				modelAuth: { type: "boolean" },
 				maxConcurrent: { ...positive, default: 2 },
 				skills: strings,
 				viewer: { enum: ["on-start", "on-demand", "never"] },

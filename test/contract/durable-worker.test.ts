@@ -190,6 +190,24 @@ test("on-start durable viewer opens through the dispatcher with an attach comman
 	}
 });
 
+test("text-only workers fail and free their concurrency slot", async () => {
+	const rig = await durableRig();
+	rig.faux.setResponses([fauxAssistantMessage("I cannot report a result.")]);
+	try {
+		rig.harness.start();
+		const { handle, kind } = await worker(rig);
+		await eventually(
+			async () => (await kind.result(handle)).outcome === "failed",
+		);
+		const replacement = await kind.start({ ...handle.job, id: "replacement" });
+		await eventually(
+			async () => (await kind.result(replacement)).outcome === "failed",
+		);
+	} finally {
+		await rig.harness.close();
+	}
+});
+
 test("durable reviewer records a validated verdict with provenance and exposes only read tools", async () => {
 	const rig = await durableRig();
 	try {
@@ -246,6 +264,88 @@ test("durable reviewer records a validated verdict with provenance and exposes o
 			node?.parentId,
 			nodes.find((entry) => entry.kind === "steward")?.id,
 		);
+	} finally {
+		await rig.harness.close();
+	}
+});
+
+test("reviewer refuses a wrong head and fails when it supplies no verdict", async () => {
+	const rig = await durableRig();
+	try {
+		rig.harness.start();
+		const { kind, handle } = await worker(rig);
+		await kind.interrupt(handle, "hard");
+		rig.faux.setResponses([
+			call("report_verdict", {
+				verdict: "approve",
+				risk: "low",
+				summary: "Wrong head.",
+				headSha: "wrong-head",
+			}),
+			fauxAssistantMessage("No verdict after refusal."),
+		]);
+		const reviewer = await kind.start({
+			...handle.job,
+			id: "wrong-review",
+			role: "reviewer",
+			model: { provider: "faux", model: "one", family: "reviewer" },
+			reviewedFamily: "worker",
+			reviewedHeadSha: "reviewed-head",
+		});
+		await eventually(
+			async () => (await kind.result(reviewer)).outcome === "failed",
+		);
+		await assert.rejects(
+			() =>
+				kind.start({
+					...handle.job,
+					id: "same-family-review",
+					role: "reviewer",
+					model: { provider: "faux", model: "one", family: "reviewer" },
+					reviewedFamily: "reviewer",
+					reviewedHeadSha: "reviewed-head",
+				}),
+			/opposite-family/,
+		);
+	} finally {
+		await rig.harness.close();
+	}
+});
+
+test("reviewer rejects malformed and duplicate verdict calls", async () => {
+	const rig = await durableRig();
+	try {
+		rig.harness.start();
+		const { kind, handle } = await worker(rig);
+		await kind.interrupt(handle, "hard");
+		const verdict = {
+			verdict: "approve",
+			risk: "low",
+			summary: "Looks good.",
+			headSha: "reviewed-head",
+		};
+		rig.faux.setResponses([
+			call("report_verdict", { verdict: "invalid" }),
+			fauxAssistantMessage(
+				[
+					fauxToolCall("report_verdict", verdict),
+					fauxToolCall("report_verdict", verdict),
+				],
+				{ stopReason: "toolUse" },
+			),
+		]);
+		const reviewer = await kind.start({
+			...handle.job,
+			id: "duplicate-review",
+			role: "reviewer",
+			model: { provider: "faux", model: "one", family: "reviewer" },
+			reviewedFamily: "worker",
+			reviewedHeadSha: "reviewed-head",
+		});
+		await eventually(async () => (await kind.status(reviewer)) === "exited");
+		const entries: string[] = [];
+		for await (const entry of kind.transcript(reviewer)) entries.push(entry);
+		assert.match(entries.join("\n"), /already reported|validation/i);
 	} finally {
 		await rig.harness.close();
 	}
@@ -621,7 +721,7 @@ test("SIGKILL of an idle native worker leaves no terminal outcome and restart re
 		const kind = rig.config.work.kinds.get("durable-conversation");
 		const handle = await kind.resume(message.handle);
 		assert.equal(handle.process.handle, message.handle.process.handle);
-		assert.equal((await kind.result(handle)).outcome, undefined);
+		assert.equal((await kind.result(handle)).outcome, "failed");
 		assert.equal((await rig.items())[0].attempts.length, 1);
 		assert.equal(
 			(await rig.harness.tree()).filter(
@@ -667,7 +767,7 @@ test("close during native bash writes no terminal outcome; reopen reattaches the
 					JSON.stringify(entry).includes("interrupted"),
 			),
 		);
-		assert.equal((await restoredKind.result(handle)).outcome, undefined);
+		assert.equal((await restoredKind.result(handle)).outcome, "failed");
 		assert.equal(
 			(await rig.harness.tree()).filter(
 				(node) => node.kind === "worker-durable",

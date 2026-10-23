@@ -717,6 +717,8 @@ export async function openHarness(options: HarnessConfig) {
 			Object.values(def.models ?? {})
 				.filter((m) => m !== "auto")
 				.map(providerFor),
+			"plain",
+			{ allowAnthropicOAuth: def.workers?.durable?.modelAuth },
 		));
 	if (def.models?.judge) {
 		const model = def.models.judge;

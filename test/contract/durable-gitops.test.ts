@@ -110,6 +110,30 @@ test("push response lost after success reconciles exact SHA; interrupted rerun n
 	}
 });
 
+test("a later commit refreshes a confirmed push intent and pushes its SHA", async () => {
+	const rig = await rigForOperations();
+	try {
+		const operations = rig.make();
+		writeFileSync(join(rig.checkout, "file.txt"), "first\n");
+		const first = await operations.commit(rig.job, "fix: first");
+		await operations.run(rig.job, "push_branch");
+		writeFileSync(join(rig.checkout, "file.txt"), "second\n");
+		const second = await operations.commit(rig.job, "fix: second");
+		assert.notEqual(second, first);
+		assert.equal(
+			(await operations.run(rig.job, "push_branch")).state,
+			"confirmed",
+		);
+		assert.equal(rig.records.get("attempt/push_branch")?.commitSha, second);
+		assert.equal(
+			await rig.github.remoteHead("acme/repo", rig.job.workspace.branch),
+			second,
+		);
+	} finally {
+		await rig.harness.close();
+	}
+});
+
 test("intervening branch changes before push or on interrupted retry are conflicts and never overwrite", async () => {
 	for (const beforeFirstPush of [true, false]) {
 		const rig = await rigForOperations();

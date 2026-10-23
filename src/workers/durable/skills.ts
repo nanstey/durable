@@ -3,7 +3,8 @@ import { join } from "node:path";
 
 const maxSkillBytes = 32 * 1024;
 const validSkillName = /^[A-Za-z0-9._-]+$/;
-const unsupportedWorkflow = /\b(?:subagent|codemode|helper scripts?)\b/i;
+const unsupportedWorkflow =
+	/\b(?:sub-?agents?|code[- ]?mode|helper scripts?|scripts?\/)\b/i;
 
 function skillPath(piDir: string, name: string): string {
 	if (!validSkillName.test(name) || name === "." || name === "..")

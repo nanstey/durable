@@ -677,6 +677,9 @@
               },
               "uniqueItems": true
             },
+            "modelAuth": {
+              "type": "boolean"
+            },
             "maxConcurrent": {
               "type": "integer",
               "minimum": 1,

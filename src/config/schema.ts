@@ -81,6 +81,7 @@ export type AgentDef = {
 		roles?: Record<string, { kind?: WorkerKindName }>;
 		durable?: {
 			enabledRoles?: string[];
+			modelAuth?: boolean;
 			maxConcurrent?: number;
 			skills?: string[];
 			viewer?: "on-start" | "on-demand" | "never";

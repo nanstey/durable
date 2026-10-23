@@ -40,6 +40,15 @@ test("durable skills reject runtime-dependent workflows", async () => {
 			() => durableSkillSections(root, ["small"]),
 			/subagent, codemode, or helper scripts/,
 		);
+		for (const workflow of [
+			"Use subagents.",
+			"Use a sub-agent.",
+			"Run code mode.",
+			"Run scripts/task.sh.",
+		]) {
+			await writeFile(join(root, "skills", "small", "SKILL.md"), workflow);
+			await assert.rejects(() => durableSkillSections(root, ["small"]));
+		}
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

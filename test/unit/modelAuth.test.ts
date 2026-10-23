@@ -172,6 +172,24 @@ test("plain runtime uses the selected API-key profile", async (t) => {
 	);
 });
 
+test("Anthropic OAuth requires explicit durable model-auth opt-in", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "durable-anthropic-oauth-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	mkdirSync(join(root, "auth-profiles"));
+	const profile = resolveProfile("work", root);
+	writeFileSync(
+		profile.authFile,
+		JSON.stringify({ anthropic: { type: "oauth", access: "fabricated" } }),
+	);
+	assert.throws(
+		() => createModelsFor(profile, ["anthropic"]),
+		/modelAuth: true/,
+	);
+	await createModelsFor(profile, ["anthropic"], "plain", {
+		allowAnthropicOAuth: true,
+	});
+});
+
 test("Anthropic shaped variant fails explicitly until configured", () =>
 	assert.throws(
 		() =>
