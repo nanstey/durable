@@ -68,6 +68,29 @@ readCommand("queue", "/v1/queue");
 readCommand("inbox", "/v1/inbox");
 readCommand("audit", "/v1/audit");
 readCommand("status", "/v1/device");
+subCommands.gate = defineCommand({
+	meta: { name: "gate" },
+	subCommands: {
+		report: defineCommand({
+			meta: { name: "report" },
+			args: {
+				...remoteArgs,
+				id: { type: "positional", required: false },
+				repo: { type: "string" },
+				since: { type: "string" },
+			},
+			async run({ args }) {
+				const query = new URLSearchParams();
+				if (args.repo) query.set("repo", args.repo);
+				if (args.since) query.set("since", args.since);
+				const path = args.id
+					? `/v1/gate/${encodeURIComponent(args.id)}`
+					: `/v1/gate/report${query.size ? `?${query}` : ""}`;
+				print(await clientFor(args.agent).request(path), args.json);
+			},
+		}),
+	},
+});
 subCommands.inbox = defineCommand({
 	meta: { name: "inbox" },
 	subCommands: {

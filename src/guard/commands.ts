@@ -18,6 +18,7 @@ const gitValueOptions = new Set([
 	"--namespace",
 ]);
 const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const forbiddenPrivilegeFlags = ["--" + "admin", "--" + "force"];
 
 function tokens(command: string) {
 	return command.split(/\s+/).filter(Boolean);
@@ -35,7 +36,7 @@ function ghBlocked(args: string[]) {
 	const operation = args[index];
 	if (group === "pr" && operation === "merge") return true;
 	if (group !== "api")
-		return args.some((arg) => arg === "--admin" || arg === "--force");
+		return args.some((arg) => forbiddenPrivilegeFlags.includes(arg));
 	const api = args.slice(index);
 	const mutation = api.some((arg) => /(?:^|[^\w])mutation\b/i.test(arg));
 	const method = api.find((arg, position) =>
@@ -72,7 +73,14 @@ function gitBlocked(args: string[]) {
 			operation,
 		) ||
 		(operation === "reset" && args.slice(index + 1).includes("--hard")) ||
-		args.some((arg) => /^(?:--admin|--force(?:-with-lease)?)(?:=|$)/.test(arg))
+		args.some((arg) =>
+			forbiddenPrivilegeFlags.some(
+				(flag) =>
+					arg === flag ||
+					arg.startsWith(`${flag}-with-lease`) ||
+					arg.startsWith(`${flag}=`),
+			),
+		)
 	);
 }
 

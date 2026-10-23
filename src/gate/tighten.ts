@@ -86,7 +86,7 @@ export function effectivePolicy(
 			base.requireCrossFamilyReview === true ||
 			tighten.requireCrossFamilyReview === true,
 		requireHumanApproval:
-			base.requireHumanApproval === true ||
+			base.requireHumanApproval !== false ||
 			tighten.requireHumanApproval === true,
 	};
 }

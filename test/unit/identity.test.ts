@@ -61,7 +61,7 @@ for (const [label, value] of Object.entries({
 	durable: { profile: "work", workers: { durable: { maxConcurrent: 0 } } },
 	policy: {
 		profile: "work",
-		scope: { repos: [{ slug: "acme/api", policySource: { kind: "unknown" } }] },
+		scope: { repos: [{ slug: "acme/api", policySource: { kind: "" } }] },
 	},
 	repo: { profile: "work", scope: { repos: [{ slug: "/absolute" }] } },
 	chat: { profile: "work", chat: { startableKinds: ["worker"] } },

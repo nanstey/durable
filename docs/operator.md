@@ -283,3 +283,32 @@ only authorizes the local steward and never bypasses GitHub rules.
 The nonce limits accidents and prompt injection, not a compromised same-user
 process. Never send it through the inbox, console, GitHub, logs, API responses,
 or a backend that is not explicitly nonce-safe.
+
+## Merge modes and repository policy sources
+
+`merge.mode` is `never`, `human-approval`, or `auto-when-safe`. `none` is the
+default repository policy source, so it disables automatic merging even if an
+agent definition requests it. `human-approval` remains available; no bearer
+token can approve a merge attempt.
+
+A policy source supplies the neutral gate input and a steward-resolved reference
+and fingerprint. It must never read a PR head, fork, worker worktree, or
+worker-writable location. A policy is usable only when it is verified by an
+approval-class action or GitHub-computed evidence. Changes to a
+source-protected location, CODEOWNERS, or `.github/` require human approval and
+invalidate verification. Definition constraints only tighten a repository
+policy.
+
+Built-in sources are `none` and test-only `fixture`. Choosing a real source is
+an **open per-repository decision**. Candidate kinds are an in-repository file,
+GitHub rules/rulesets only, agent-definition-only, and an out-of-repository
+store; Durable does not recommend one yet.
+
+Set `shadow: true` before any future auto-merge use. Shadow mode computes and
+audits `would-merge` or `would-not-merge` without writing a GitHub merge. A
+non-verified source produces `would-not-merge` and includes readiness for
+checks, review family, changed paths, mergeability, and cooling-off. Read it
+with `durable gate report <item>` or `GET /v1/gate/report`. Leave shadow mode
+only after an operator has reviewed those reports. Automatic attempts are
+SHA-pinned, re-resolve policy immediately before the merge call, remain subject
+to GitHub rules, and never use a bypass or administrator mode.

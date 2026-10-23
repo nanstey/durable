@@ -3,9 +3,13 @@ import { join } from "node:path";
 import type { AgentDef, MachineCfg } from "../config/schema.ts";
 import { monitorWorker } from "../dispatch/monitor.ts";
 import type { AttachInfo, WorkerDispatcher } from "../dispatch/types.ts";
+import { autoConstraintReasons, selectedMergeMethod } from "../gate/auto.ts";
 import { decide } from "../gate/decide.ts";
 import { collectFacts } from "../gate/facts.ts";
-import { noPolicy } from "../gate/policy.ts";
+import { mergeWhenSafe } from "../gate/merge.ts";
+import { effectivePolicy } from "../gate/tighten.ts";
+import { sourceFor, type FixturePolicyScript } from "../gate/policySource.ts";
+import { shadowReport } from "../gate/shadow.ts";
 import {
 	collectReview,
 	launchReviewer,
@@ -79,6 +83,8 @@ export type WorkRuntimeOptions = {
 		"git" | "github" | "shellEnv" | "prDiff" | "verifyIdentity"
 	>;
 	recordCost?: (cost: number) => Promise<void>;
+	/** In-process test seam only; fixture scripts are never loaded from definitions. */
+	fixturePolicies?: Record<string, FixturePolicyScript>;
 };
 export type WorkStore = {
 	load: () => Promise<WorkState>;
@@ -402,27 +408,60 @@ export class WorkRuntime {
 			await this.store.save(state);
 			return;
 		}
+		const repoDefinition = this.options.definition.scope?.repos?.find(
+			(repo) => repo.slug === item.repo,
+		);
+		const source = sourceFor(
+			repoDefinition?.policySource?.kind ?? "none",
+			this.options.fixturePolicies,
+		);
+		const resolution = await source.resolve({
+			slug: item.repo,
+			base: repoDefinition?.base,
+		});
+		const policy = effectivePolicy(resolution, {
+			...this.options.definition.merge,
+			...repoDefinition?.merge,
+		});
 		const githubFacts = await collectFacts(
 			{
 				repo: item.repo,
 				number: pr.number,
 				profileLogin: this.options.login,
+				protectedLocations: source.protectedLocations({
+					slug: item.repo,
+					base: repoDefinition?.base,
+				}),
 			},
 			sha,
 		);
-		const decision = decide(
-			noPolicy(this.options.definition.merge),
-			githubFacts && {
-				...githubFacts,
-				// collectReview has already verified every observed entry is opposite-family.
-				crossFamilyReview: true,
-				riskAcceptable:
-					review.result.risk === "low" || review.result.risk === "medium",
-				dailyCapAvailable: true,
-				coolingOffElapsed: true,
-				killSwitchOff: true,
-			},
-		);
+		const facts = githubFacts && {
+			...githubFacts,
+			// collectReview has already verified every observed entry is opposite-family.
+			crossFamilyReview: true,
+			riskAcceptable:
+				review.result.risk === "low" || review.result.risk === "medium",
+			dailyCapAvailable: true,
+			coolingOffElapsed: true,
+			killSwitchOff: true,
+		};
+		let decision = decide(policy, facts);
+		if (facts && decision.action === "merge") {
+			const constraints = autoConstraintReasons(policy, facts, {
+				profileLogin: this.options.login,
+				baseBranch: facts.baseBranch,
+				changedLines: facts.changedLines,
+				fileCount: facts.fileCount,
+				availableMethods:
+					(await this.options.github.allowedMergeMethods?.(item.repo)) ?? null,
+				baseProtected: await this.options.github.baseProtected?.(
+					item.repo,
+					facts.baseBranch ?? "",
+				),
+			});
+			if (constraints.length)
+				decision = { action: "wait-human", reasons: constraints };
+		}
 		item.stage = "gate";
 		const approvalRequired = decision.reasons.includes(
 			"human-approval-required",
@@ -432,7 +471,57 @@ export class WorkRuntime {
 			sha,
 			state: approvalRequired ? "waiting-approval" : "wait-human",
 			reasons: decision.reasons,
+			...(policy.shadow && facts
+				? { report: shadowReport(decision, facts, resolution, source.kind) }
+				: {}),
 		};
+		if (policy.shadow && item.gate.report)
+			audit(this.options.agent, {
+				event: "gate-shadow",
+				item: item.id,
+				sha,
+				outcome: item.gate.report.outcome,
+			});
+		if (
+			decision.action === "merge" &&
+			!policy.shadow &&
+			this.options.github.runGh
+		) {
+			// P6: resolve again immediately before the only merge executor call.
+			const finalResolution = await source.resolve({
+				slug: item.repo,
+				base: repoDefinition?.base,
+			});
+			if (
+				finalResolution.state !== "verified" ||
+				finalResolution.policy?.enabled !== true ||
+				finalResolution.fingerprint !== resolution.fingerprint
+			)
+				throw Error("policy changed before merge");
+			await this.options.check();
+			const method = selectedMergeMethod(
+				policy,
+				(await this.options.github.allowedMergeMethods?.(item.repo)) ?? [],
+			);
+			if (!method) throw Error("no allowed merge method before merge");
+			await mergeWhenSafe(
+				this.options.github as Required<
+					Pick<import("../gate/merge.ts").MergeGithub, "readPr" | "runGh">
+				>,
+				{
+					repo: item.repo,
+					number: pr.number,
+					sha,
+					method,
+					item: item.id,
+				},
+			);
+			item.gate.state = "wait-human";
+			item.gate.reasons = ["merge-requested"];
+			audit(this.options.agent, { event: "gate-merged", item: item.id, sha });
+			await this.store.save(state);
+			return;
+		}
 		if (item.gate.state !== "waiting-approval" || item.gate.notified) return;
 		await this.store.save(state);
 		await this.options.github.readyPr?.(item.repo, pr.number, item.id);

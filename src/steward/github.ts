@@ -8,9 +8,15 @@ export type PullRequest = {
 	state: "open" | "merged" | "closed";
 	url?: string;
 	headSha?: string;
+	mergedAt?: string | null;
 };
 export interface WorkGithub extends ClaimGithub, PrMonitorGithub {
 	readPr(repo: string, number: number): Promise<PullRequest>;
+	runGh?(args: string[], item: string): Promise<void>;
+	allowedMergeMethods?(
+		repo: string,
+	): Promise<Array<"squash" | "merge" | "rebase">>;
+	baseProtected?(repo: string, branch: string): Promise<boolean>;
 	readIntake(
 		repo: string,
 		ref: string,
@@ -219,7 +225,44 @@ export class Github implements WorkGithub {
 					: "open",
 			url: pr.html_url,
 			headSha: pr.head?.sha,
+			mergedAt: pr.merged_at,
 		};
+	}
+	async allowedMergeMethods(
+		repo: string,
+	): Promise<Array<"squash" | "merge" | "rebase">> {
+		const settings = await this.request<{
+			squash_merge_allowed?: boolean;
+			merge_commit_allowed?: boolean;
+			rebase_merge_allowed?: boolean;
+		}>(repo, `repos/${repo}`);
+		return [
+			...(settings.squash_merge_allowed ? ["squash" as const] : []),
+			...(settings.merge_commit_allowed ? ["merge" as const] : []),
+			...(settings.rebase_merge_allowed ? ["rebase" as const] : []),
+		];
+	}
+	async baseProtected(repo: string, branch: string): Promise<boolean> {
+		try {
+			return (
+				(
+					await this.request<{ protected?: boolean }>(
+						repo,
+						`repos/${repo}/branches/${encodeURIComponent(branch)}`,
+					)
+				).protected === true
+			);
+		} catch {
+			return false;
+		}
+	}
+	async runGh(args: string[], item: string) {
+		const result = await this.options.processes.launch(
+			["gh", ...args],
+			this.options.env,
+			{ item },
+		);
+		if (result.exitCode !== 0) throw Error("GitHub command failed");
 	}
 	async findDraftPr(input: { repo: string; branch: string; marker: string }) {
 		const pulls = await this.request<

@@ -278,10 +278,8 @@
                 "type": "object",
                 "properties": {
                   "kind": {
-                    "enum": [
-                      "none",
-                      "fixture"
-                    ],
+                    "type": "string",
+                    "minLength": 1,
                     "default": "none"
                   }
                 },

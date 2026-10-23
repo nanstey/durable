@@ -33,6 +33,51 @@ export type EffectivePolicy = AutoMergePolicy & {
 	warnings: string[];
 };
 
+const HARD_PATH = /^(?:CODEOWNERS|\.github\/|docs\/CODEOWNERS$)/;
+
+/** Validates the neutral gate input, not any source-specific storage format. */
+export function validateAutoMergePolicy(value: unknown): AutoMergePolicy {
+	if (!value || typeof value !== "object" || Array.isArray(value))
+		throw Error("policy must be an object");
+	const policy = value as AutoMergePolicy;
+	if (typeof policy.enabled !== "boolean")
+		throw Error("policy.enabled must be boolean");
+	if (policy.requireHumanApproval === false && policy.enabled !== true)
+		throw Error("requireHumanApproval: false requires enabled: true");
+	for (const path of policy.pathAllow ?? []) {
+		const expression = path
+			.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+			.replaceAll("*", "[^/]*");
+		const matchesHardPath = [
+			"CODEOWNERS",
+			".github/CODEOWNERS",
+			".github/workflows/ci.yml",
+			"docs/CODEOWNERS",
+		].some((candidate) => new RegExp(`^${expression}$`).test(candidate));
+		if (HARD_PATH.test(path) || matchesHardPath)
+			throw Error("pathAllow cannot match a hard path");
+	}
+	for (const key of [
+		"authors",
+		"baseBranches",
+		"pathAllow",
+		"pathDeny",
+		"methods",
+	] as const)
+		if (policy[key] !== undefined && !Array.isArray(policy[key]))
+			throw Error(`policy.${key} must be an array`);
+	for (const key of [
+		"maxChangedLines",
+		"maxFiles",
+		"coolingOffMinutes",
+	] as const) {
+		const limit = policy[key];
+		if (limit !== undefined && (!Number.isFinite(limit) || limit < 0))
+			throw Error(`policy.${key} must be a non-negative number`);
+	}
+	return policy;
+}
+
 export const noPolicy = (
 	definition: MergeDefinition = {},
 ): EffectivePolicy => ({

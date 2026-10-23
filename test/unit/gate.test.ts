@@ -22,7 +22,7 @@ const facts = {
 	killSwitchOff: true,
 } as const;
 const policy = effectivePolicy(
-	{ state: "verified", policy: { enabled: true } },
+	{ state: "verified", policy: { enabled: true, requireHumanApproval: false } },
 	{ mode: "auto-when-safe" },
 );
 
