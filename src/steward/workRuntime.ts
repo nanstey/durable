@@ -106,10 +106,13 @@ export class WorkRuntime {
 			if (!item) throw Error("work item missing");
 			try {
 				await this.progress(state, item, paused, budgetStopped, queueItem);
-			} catch {
+			} catch (error) {
 				// Keep the committed intent. The next invocation re-reads the external world.
 				audit(this.options.agent, {
-					event: "work-item-reconcile-failed",
+					event:
+						(error as { code?: string }).code === "capacity_exceeded"
+							? "work-item-queued-capacity"
+							: "work-item-reconcile-failed",
 					item: id,
 				});
 			}

@@ -16,7 +16,11 @@ import {
 	reconcilePush,
 } from "../../src/workers/durable/gitops.ts";
 import { durableLimitStop } from "../../src/workers/durable/limits.ts";
-import { DurableFileTools } from "../../src/workers/durable/tools.ts";
+import {
+	durableBash,
+	DurableFileTools,
+	screenPrTitle,
+} from "../../src/workers/durable/tools.ts";
 
 const root = () => mkdtempSync(join(tmpdir(), "durable-worker-"));
 test("file tools refuse traversal, .git, and symlink escapes", async () => {
@@ -75,6 +79,47 @@ test("search skips oversized, NUL-containing and invalid UTF-8 files", async () 
 	} finally {
 		rmSync(worktree, { recursive: true, force: true });
 	}
+});
+
+test("durable bash times out each call and terminates its attempt", async () => {
+	let terminated = false;
+	await assert.rejects(
+		() =>
+			durableBash({
+				command: "sleep forever",
+				job: {
+					id: "attempt",
+					item: "item",
+					agent: "agent",
+					role: "worker",
+					briefText: "brief",
+					workspace: { id: "workspace", path: root(), branch: "branch" },
+					model: { provider: "faux", model: "one" },
+					limits: {},
+					env: {},
+				},
+				env: {},
+				processes: {
+					launch: async () => await new Promise<never>(() => {}),
+					terminate: async () => {
+						terminated = true;
+						return true;
+					},
+				},
+				timeoutMs: 5,
+			}),
+		/bash timed out/,
+	);
+	assert.equal(terminated, true);
+});
+
+test("draft PR titles reject control characters and credential-like text", () => {
+	assert.equal(screenPrTitle("Fix worker timeout"), "Fix worker timeout");
+	assert.throws(() => screenPrTitle("Fix\nInjected body"), /single line/);
+	assert.throws(
+		() => screenPrTitle("ghp_exampletoken_12345678901234567890"),
+		/credential-like/,
+	);
 });
 
 test("durable limits give kill switch and holds precedence", () => {

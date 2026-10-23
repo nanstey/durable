@@ -69,11 +69,11 @@ Spec item 11 and `slice-6c.md` row 11 say provenance is "taken from the child co
 | M4 | Fixed | `durable-worker.test.ts` covers malformed, wrong-head, same-family, duplicate-call, and no-verdict refusals. |
 | M6 | Fixed | `skills.ts` recognizes plural and hyphenated subagents, code-mode variants, and script paths. `durable-skills.test.ts`. |
 | L1 | Fixed | `env.ts` reuses the item shell's `gh` directory. |
-| L2 | Deferred | ProcessManager does not expose streaming output or a per-launch timeout; adding it would cross the containment interface. |
+| L2 | Fixed | `tools.ts` terminates an overlong bash attempt after one minute and redirects output to private files read with a 100 KB cap. `durable-worker.test.ts`. |
 | L3 | Fixed | `gitops.ts` checks the steward-owned git config immediately before network use. |
-| L4 | Deferred | Requires the slice 7 PR-diff source wiring to fetch a SHA-pinned diff. |
-| L5 | Partially fixed | Push intents refresh for a new HEAD; report/PR title screening remains deferred. |
-| L6 | Deferred | Queue/audit behavior is in `workItemTask.ts`, excluded from this slice. |
+| L4 | Fixed | `WorkerGithubCli.prDiff()` verifies the assigned head SHA before and after the code-owned diff fetch. `durable-gitops.test.ts`. |
+| L5 | Fixed | Push intents refresh for a new HEAD; `report` screens output and `screenPrTitle` rejects multi-line or credential-like titles. `durable-worker.test.ts`. |
+| L6 | Fixed | A durable capacity refusal leaves the dispatch task queued without consuming an attempt and emits `work-item-queued-capacity`. `work-item-dispatch.test.ts`. |
 | L7 | Fixed | Git errors now suggest checking staged changes and status. |
 | L8 | Fixed | `tools.ts` rejects non-regular and over-100 KB reads before loading them. |
 

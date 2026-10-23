@@ -1,4 +1,12 @@
-import { open, readdir, readFile, writeFile } from "node:fs/promises";
+import {
+	mkdtemp,
+	open,
+	readFile,
+	readdir,
+	rm,
+	writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ConversationId, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
@@ -34,8 +42,38 @@ export function screenToolOutput(text: string): string {
 		);
 }
 
+/** PR titles are metadata, not a channel for bodies, trailers, or credentials. */
+export function screenPrTitle(title: string): string {
+	const screened = title.trim();
+	if (!screened || screened.length > 256)
+		throw Error("draft PR title must be 1-256 characters");
+	if (/[\r\n]/.test(screened) || screened.includes(String.fromCharCode(0)))
+		throw Error("draft PR title must be a single line");
+	if (credentialLike(screened))
+		throw Error("draft PR title contains credential-like content");
+	return screened;
+}
+
 const readFileBytes = 100_000;
 const searchFileBytes = 1024 * 1024;
+const bashOutputBytes = 100_000;
+const bashTimeoutMs = 60_000;
+
+async function boundedOutput(path: string): Promise<string> {
+	const file = await open(path, "r").catch(() => undefined);
+	if (!file) return "";
+	try {
+		const bytes = Buffer.alloc(bashOutputBytes + 1);
+		const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+		const suffix = bytesRead > bashOutputBytes ? "\n[output truncated]" : "";
+		return (
+			bytes.subarray(0, Math.min(bytesRead, bashOutputBytes)).toString() +
+			suffix
+		);
+	} finally {
+		await file.close();
+	}
+}
 
 export class DurableFileTools {
 	private readonly worktree: string;
@@ -127,32 +165,57 @@ export async function durableBash(input: {
 	env: NodeJS.ProcessEnv;
 	processes: Pick<ProcessManager, "launch" | "terminate">;
 	signal?: AbortSignal;
+	/** Test seam; production calls are capped at one minute. */
+	timeoutMs?: number;
 }): Promise<string> {
 	assertCommand(input.command);
 	const { job, processes } = input;
 	const abort = () => {
 		void processes.terminate({ attemptId: job.id }).catch(() => {});
 	};
+	const outputDir = await mkdtemp(join(tmpdir(), "durable-bash-"));
 	input.signal?.throwIfAborted();
 	input.signal?.addEventListener("abort", abort, { once: true });
 	try {
-		const result = await processes.launch(
+		const launched = processes.launch(
 			[
 				"sh",
 				"-c",
-				'cd -- "$1" && eval "$2"',
+				'cd -- "$1" && eval "$2" > "$3/stdout" 2> "$3/stderr"',
 				"durable-shell",
 				job.workspace.path,
 				input.command,
+				outputDir,
 			],
 			input.env,
 			{ item: job.item, attemptId: job.id },
 		);
+		// Do not leave an abandoned rejection if a timeout wins the race.
+		void launched.catch(() => {});
+		const result = await new Promise<Awaited<typeof launched>>(
+			(resolve, reject) => {
+				const timer = setTimeout(() => {
+					abort();
+					reject(Error("bash timed out"));
+				}, input.timeoutMs ?? bashTimeoutMs);
+				launched.then(
+					(value) => {
+						clearTimeout(timer);
+						resolve(value);
+					},
+					(error) => {
+						clearTimeout(timer);
+						reject(error);
+					},
+				);
+			},
+		);
 		return screenToolOutput(
-			`exit=${result.exitCode}\n${result.stdout}\n${result.stderr}`,
+			`exit=${result.exitCode}\n${await boundedOutput(join(outputDir, "stdout"))}\n${await boundedOutput(join(outputDir, "stderr"))}`,
 		);
 	} finally {
 		input.signal?.removeEventListener("abort", abort);
+		await rm(outputDir, { recursive: true, force: true });
 	}
 }
 

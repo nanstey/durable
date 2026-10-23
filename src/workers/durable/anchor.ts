@@ -44,6 +44,7 @@ import {
 	durableBash,
 	connectorTools,
 	fileTools,
+	screenPrTitle,
 	screenToolOutput,
 } from "./tools.ts";
 
@@ -285,7 +286,8 @@ export class NativeDurableAnchor implements DurableAnchor {
 						await this.runOperation(
 							api.conversationId,
 							ctx.abortSignal,
-							(job) => this.operations.run(job, "open_draft_pr", title),
+							(job) =>
+								this.operations.run(job, "open_draft_pr", screenPrTitle(title)),
 						),
 					),
 			}),

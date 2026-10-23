@@ -90,6 +90,36 @@ test("GitHub sources map fixtures and never invoke a write command", async () =>
 		),
 	);
 });
+test("GitHub issue polling backs off after failures and resets after success", async () => {
+	let now = 0;
+	let calls = 0;
+	const source = new GitHubIssuesSource({
+		repo: "org/repo",
+		intervalMs: 100,
+		now: () => now,
+		random: () => 0.5,
+		run: async (args) => {
+			if (args[0] === "api") return "4999";
+			calls++;
+			if (calls === 1) throw Error("offline");
+			return "[]";
+		},
+	});
+	await assert.rejects(source.poll(), /offline/);
+	now = 199;
+	assert.deepEqual(await source.poll(), []);
+	assert.equal(calls, 1);
+	now = 200;
+	assert.deepEqual(await source.poll(), []);
+	assert.equal(calls, 2);
+	now = 299;
+	assert.deepEqual(await source.poll(), []);
+	assert.equal(calls, 2);
+	now = 300;
+	await source.poll();
+	assert.equal(calls, 3);
+});
+
 test("local source accepts ready front matter and rejects a symlink escape", async () => {
 	const root = await mkdtemp(join(tmpdir(), "durable-scout-"));
 	const outside = await mkdtemp(join(tmpdir(), "durable-outside-"));

@@ -106,12 +106,14 @@ async function dispatchItem(
 		deps.skillsRoot,
 	);
 	let attempt = item.attempts.at(-1);
+	let createdAttempt = false;
 	if (!attempt || attempt.endedAt) {
 		attempt = {
 			id: `durable-${deps.agent}-${item.id}-${item.attempts.length + 1}`,
 			startedAt: (deps.now ?? Date.now)(),
 		};
 		item.attempts.push(attempt);
+		createdAttempt = true;
 	}
 	const intent = { ...task, workerId: attempt.id };
 	await deps.persist?.(intent);
@@ -145,7 +147,12 @@ async function dispatchItem(
 			resume: task.resume,
 		});
 	} catch (error) {
-		attempt.endedAt = (deps.now ?? Date.now)();
+		if (
+			createdAttempt &&
+			(error as { code?: string }).code === "capacity_exceeded"
+		)
+			item.attempts.pop();
+		else attempt.endedAt = (deps.now ?? Date.now)();
 		await deps.persist?.(intent);
 		throw error;
 	}
