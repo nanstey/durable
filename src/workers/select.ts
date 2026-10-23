@@ -8,8 +8,9 @@ export function selectWorkerKind(
 	definition: AgentDef,
 	machine: MachineCfg,
 	role: "worker" | "reviewer",
+	skillsRoot?: string,
 ): WorkerKind {
-	assertRoleDispatchReady(definition, machine, role);
+	assertRoleDispatchReady(definition, machine, role, skillsRoot);
 	return registry.get(effectiveKind(definition, machine, role));
 }
 

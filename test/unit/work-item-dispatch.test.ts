@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { holdItem, isHeld } from "../../src/dispatch/hold.ts";
 import { monitorWorker } from "../../src/dispatch/monitor.ts";
@@ -74,6 +77,12 @@ test("monitor only resumes unintentional exit without a draft PR", async () => {
 	assert.equal(resumed, 1);
 });
 test("work-item task creates workspace before starting selected Pi worker", async () => {
+	const skillsRoot = mkdtempSync(join(tmpdir(), "durable-skills-"));
+	for (const skill of ["idea-to-pr", "pr", "build"]) {
+		const path = join(skillsRoot, "skills", skill);
+		mkdirSync(path, { recursive: true });
+		writeFileSync(join(path, "SKILL.md"), "# fixture\n");
+	}
 	const dispatcher = new FakeDispatcher();
 	const registry = new WorkerKindRegistry();
 	registry.register(new PiSessionKind(dispatcher, "/tmp/durable-launchers"));
@@ -102,8 +111,10 @@ test("work-item task creates workspace before starting selected Pi worker", asyn
 			machine: { name: "machine", agents: ["agent"] },
 			model: { provider: "faux", model: "model" },
 			env: {},
+			skillsRoot,
 		},
 	);
 	assert.equal(next.phase, "await-pr");
 	assert.equal((await dispatcher.listWorkspaces()).length, 1);
+	rmSync(skillsRoot, { recursive: true, force: true });
 });

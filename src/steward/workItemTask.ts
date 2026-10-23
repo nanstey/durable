@@ -36,6 +36,7 @@ export async function advanceWorkItem(
 		model: ModelDef;
 		env: Record<string, string | undefined>;
 		piDir?: string;
+		skillsRoot?: string;
 	},
 ): Promise<WorkItemTask> {
 	if (item.outcome) return { ...task, phase: "finish" };
@@ -67,6 +68,7 @@ export async function advanceWorkItem(
 			deps.definition,
 			deps.machine,
 			"worker",
+			deps.skillsRoot,
 		);
 		const id = `durable-${deps.agent}-${item.id}`;
 		await deps.workers.launch(deps.dispatcher, kind, {
