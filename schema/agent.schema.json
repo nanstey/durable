@@ -53,6 +53,14 @@
         "maxMergesPerDay": {
           "type": "integer",
           "minimum": 1
+        },
+        "dailyDollars": {
+          "type": "number",
+          "minimum": 0
+        },
+        "dailyTokens": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [],

@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import { execaSync } from "execa";
 
 export type Probe = (command: string, args: string[]) => boolean;
 export type Capabilities = {
@@ -10,10 +11,12 @@ export type Capabilities = {
 	sqlite: boolean;
 	orca: boolean;
 	containment: boolean;
+	cgroupV2?: boolean;
 	gh: boolean;
 };
 const probe: Probe = (command, args) =>
-	spawnSync(command, args, { stdio: "ignore", timeout: 5000 }).status === 0;
+	execaSync(command, args, { stdio: "ignore", timeout: 5000, reject: false })
+		.exitCode === 0;
 export function detectCapabilities(
 	run: Probe = probe,
 	env = process.env,
@@ -36,6 +39,7 @@ export function detectCapabilities(
 			: run("systemctl", ["--user", "show-environment"]),
 		tailscaleCli: run("tailscale", ["version"]),
 		sqlite,
+		cgroupV2: !android && existsSync("/sys/fs/cgroup/cgroup.controllers"),
 		orca: run("orca-ide", ["status", "--json"]),
 		containment:
 			android || run("systemd-run", ["--user", "--scope", "--quiet", "true"]),

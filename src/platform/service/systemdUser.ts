@@ -1,57 +1,124 @@
-import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { execa } from "execa";
+import { assertProfileName } from "../../config/schema.ts";
 import type { ServiceManager, ServiceStatus } from "./types.ts";
-export function unitText(): string {
-	return `[Unit]\nDescription=Durable agent %i\nOnFailure=durable-agent-failure@%i.service\n\n[Service]\nType=simple\nExecStart=%h/.local/bin/durable run %i\nRestart=on-failure\nKillMode=control-group\nTimeoutStopSec=30\nNoNewPrivileges=yes\n\n[Install]\nWantedBy=default.target\n`;
+
+export function unitText(home?: string): string {
+	const environment = home
+		? `Environment="DURABLE_HOME=${home.replace(/[%\\"\n\r]/g, (char) => (char === "%" ? "%%" : char === "\n" || char === "\r" ? "" : `\\${char}`))}"\n`
+		: "";
+	return `[Unit]\nDescription=Durable agent %i\nOnFailure=durable-agent-failure@%i.service\n\n[Service]\nType=simple\nExecStart=%h/.local/bin/durable run %i\nRestart=on-failure\nRestartSec=12\nKillMode=control-group\nTimeoutStopSec=30\nNoNewPrivileges=yes\n${environment}\n[Install]\nWantedBy=default.target\n`;
 }
-function call(args: string[]): void {
-	const r = spawnSync("systemctl", ["--user", ...args], { encoding: "utf8" });
-	if (r.status !== 0)
-		throw new Error(r.stderr.trim() || `systemctl ${args.join(" ")} failed`);
-}
+export type ServiceRunner = (
+	command: string,
+	args: string[],
+) => Promise<{ exitCode: number; stdout: string; stderr?: string }>;
+const execute: ServiceRunner = async (command, args) => {
+	const result = await execa(command, args, { reject: false, timeout: 15000 });
+	return {
+		exitCode: result.exitCode ?? 1,
+		stdout: result.stdout,
+		stderr: result.stderr,
+	};
+};
 export class SystemdUserServiceManager implements ServiceManager {
-	async install(_agent: string) {
-		const d = join(homedir(), ".config/systemd/user");
-		mkdirSync(d, { recursive: true });
-		writeFileSync(join(d, "durable-agent@.service"), unitText(), {
-			mode: 0o644,
-		});
-		writeFileSync(
-			join(d, "durable-agent-failure@.service"),
-			"[Service]\nType=oneshot\nExecStart=/usr/bin/true\n",
-			{ mode: 0o644 },
-		);
-		call(["daemon-reload"]);
+	private runner: ServiceRunner;
+	private directory: string;
+	private dryRun: boolean;
+	private home?: string;
+	constructor(
+		options: {
+			runner?: ServiceRunner;
+			directory?: string;
+			dryRun?: boolean;
+			home?: string;
+		} = {},
+	) {
+		this.runner = options.runner ?? execute;
+		this.directory =
+			options.directory ?? join(homedir(), ".config/systemd/user");
+		this.dryRun = options.dryRun ?? false;
+		this.home = options.home;
+	}
+	private unit(agent: string) {
+		assertProfileName(agent);
+		return `durable-agent@${agent}.service`;
+	}
+	private async call(command: string, args: string[], allowFailure = false) {
+		if (this.dryRun) {
+			console.log([command, ...args].join(" "));
+			return { exitCode: 0, stdout: "dry-run" };
+		}
+		const result = await this.runner(command, args);
+		if (!allowFailure && result.exitCode !== 0)
+			throw Error(`${command} failed; inspect user service logs`);
+		return result;
+	}
+	async install(agent: string) {
+		this.unit(agent);
+		if (!this.dryRun) {
+			await mkdir(this.directory, { recursive: true });
+			await writeFile(
+				join(this.directory, "durable-agent@.service"),
+				unitText(this.home),
+				{ mode: 0o644 },
+			);
+			await writeFile(
+				join(this.directory, "durable-agent-failure@.service"),
+				await readFile(
+					new URL(
+						"../../../units/durable-agent-failure@.service",
+						import.meta.url,
+					),
+					"utf8",
+				),
+				{ mode: 0o644 },
+			);
+		}
+		await this.call("systemctl", ["--user", "daemon-reload"]);
 	}
 	async enable(agent: string) {
 		await this.install(agent);
-		call(["enable", "--now", `durable-agent@${agent}`]);
+		await this.call("systemctl", [
+			"--user",
+			"enable",
+			"--now",
+			this.unit(agent),
+		]);
 	}
 	async disable(agent: string) {
-		call(["disable", "--now", `durable-agent@${agent}`]);
+		await this.call("systemctl", [
+			"--user",
+			"disable",
+			"--now",
+			this.unit(agent),
+		]);
 	}
 	async start(agent: string) {
-		call(["start", `durable-agent@${agent}`]);
+		await this.call("systemctl", ["--user", "start", this.unit(agent)]);
 	}
 	async stop(agent: string) {
-		call(["stop", `durable-agent@${agent}`]);
+		await this.call("systemctl", ["--user", "stop", this.unit(agent)]);
 	}
 	async status(agent: string): Promise<ServiceStatus> {
-		const r = spawnSync(
+		const result = await this.call(
 			"systemctl",
-			["--user", "is-active", `durable-agent@${agent}`],
-			{ encoding: "utf8" },
+			["--user", "is-active", this.unit(agent)],
+			true,
 		);
-		return { active: r.status === 0, text: r.stdout.trim() };
+		return { active: result.exitCode === 0, text: result.stdout.trim() };
 	}
 	async *logs(agent: string) {
-		const r = spawnSync(
-			"journalctl",
-			["--user-unit", `durable-agent@${agent}`, "-n", "100", "--no-pager"],
-			{ encoding: "utf8" },
-		);
-		yield r.stdout;
+		yield (
+			await this.call("journalctl", [
+				"--user-unit",
+				this.unit(agent),
+				"-n",
+				"100",
+				"--no-pager",
+			])
+		).stdout;
 	}
 }

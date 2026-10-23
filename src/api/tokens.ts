@@ -1,13 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { durableHome } from "../config/paths.ts";
+import lockfile from "proper-lockfile";
+import { agentDir, loadJson, saveJson } from "../steward/files.ts";
+
 export type Scope = "read" | "chat" | "pause";
 export type TokenRecord = {
 	hash: string;
@@ -15,77 +11,108 @@ export type TokenRecord = {
 	scopes: Scope[];
 	createdAt: number;
 	lastUsedAt?: number;
-	expiresAt?: number;
+	expiresAt: number;
 };
-const file = (agent: string) =>
-	join(durableHome(), "agents", agent, "tokens.json");
-const hash = (s: string) => createHash("sha256").update(s).digest("hex");
-function load(agent: string): TokenRecord[] {
+const digest = (text: string) =>
+	createHash("sha256").update(text).digest("hex");
+function transaction<T>(
+	agent: string,
+	change: (records: TokenRecord[]) => T,
+): T {
+	const path = join(agentDir(agent), "tokens.json");
+	const release = lockfile.lockSync(path, { realpath: false });
 	try {
-		return JSON.parse(readFileSync(file(agent), "utf8")) as TokenRecord[];
-	} catch {
-		return [];
+		const records = loadJson<TokenRecord[]>(path, () => []);
+		const result = change(records);
+		saveJson(path, records);
+		return result;
+	} finally {
+		release();
 	}
-}
-function save(agent: string, x: TokenRecord[]) {
-	mkdirSync(join(durableHome(), "agents", agent), {
-		recursive: true,
-		mode: 0o700,
-	});
-	writeFileSync(file(agent), `${JSON.stringify(x)}\n`, { mode: 0o600 });
-	chmodSync(file(agent), 0o600);
 }
 export function createToken(
 	agent: string,
 	client: string,
 	scopes: Scope[],
-	expiresDays?: number,
+	expiresDays = 90,
+	now = Date.now(),
 ) {
 	if (
 		!client ||
-		scopes.length === 0 ||
-		scopes.some((s) => !(["read", "chat", "pause"] as string[]).includes(s))
+		client.length > 100 ||
+		!Array.isArray(scopes) ||
+		!scopes.length ||
+		scopes.some((s) => !["read", "chat", "pause"].includes(s)) ||
+		!Number.isFinite(expiresDays) ||
+		expiresDays <= 0
 	)
-		throw new Error("invalid token client or scopes");
+		throw Error("invalid token client, scopes, or expiry");
 	const token = `dur_${randomBytes(32).toString("base64url")}`;
-	const r: TokenRecord = {
-		hash: hash(token),
-		client,
-		scopes,
-		createdAt: Date.now(),
-		expiresAt: expiresDays ? Date.now() + expiresDays * 86400000 : undefined,
-	};
-	save(agent, [...load(agent), r]);
+	transaction(agent, (records) => {
+		records.push({
+			hash: digest(token),
+			client,
+			scopes: [...new Set(scopes)],
+			createdAt: now,
+			expiresAt: now + expiresDays * 86400000,
+		});
+	});
 	return token;
+}
+export function authenticate(
+	agent: string,
+	token: string | undefined,
+	now = Date.now(),
+): TokenRecord | undefined {
+	if (!token || token.length > 512) return;
+	const hash = Buffer.from(digest(token), "hex");
+	return transaction(agent, (records) => {
+		const record = records.find((candidate) => {
+			const expected = Buffer.from(candidate.hash, "hex");
+			return expected.length === hash.length && timingSafeEqual(expected, hash);
+		});
+		if (!record || record.expiresAt <= now) return;
+		record.lastUsedAt = now;
+		return structuredClone(record);
+	});
+}
+export function tokenActive(agent: string, hash: string, now = Date.now()) {
+	const records = loadJson<TokenRecord[]>(
+		join(agentDir(agent), "tokens.json"),
+		() => [],
+	);
+	return records.some(
+		(record) => record.hash === hash && record.expiresAt > now,
+	);
 }
 export function authorize(
 	agent: string,
 	token: string | undefined,
 	scope: Scope,
-): TokenRecord | undefined {
-	if (!token) return;
-	const h = hash(token);
-	const now = Date.now();
-	const records = load(agent);
-	const r = records.find((x) => {
-		const a = Buffer.from(x.hash),
-			b = Buffer.from(h);
-		return a.length === b.length && timingSafeEqual(a, b);
-	});
-	const valid =
-		r && (!r.expiresAt || r.expiresAt > now) && r.scopes.includes(scope);
-	if (valid) {
-		r.lastUsedAt = now;
-		save(agent, records);
-		return r;
-	}
+) {
+	const record = authenticate(agent, token);
+	return record?.scopes.includes(scope) ? record : undefined;
 }
-export function revokeToken(agent: string, client: string) {
-	save(
-		agent,
-		load(agent).filter((x) => x.client !== client),
+export function listTokens(agent: string) {
+	return transaction(agent, (records) =>
+		records.map(({ hash: _hash, ...metadata }) => metadata),
 	);
 }
-export function tokenFileExists(agent: string) {
-	return existsSync(file(agent));
+export function revokeToken(agent: string, client: string) {
+	transaction(agent, (records) => {
+		for (let i = records.length - 1; i >= 0; i--)
+			if (records[i].client === client) records.splice(i, 1);
+	});
+}
+export function localToken(agent: string) {
+	const path = join(agentDir(agent), "token");
+	if (existsSync(path)) {
+		chmodSync(path, 0o600);
+		const token = readFileSync(path, "utf8").trim();
+		if (authenticate(agent, token)) return token;
+	}
+	const token = createToken(agent, "local-cli", ["read", "chat", "pause"]);
+	writeFileSync(path, `${token}\n`, { mode: 0o600 });
+	chmodSync(path, 0o600);
+	return token;
 }
