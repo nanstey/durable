@@ -1,12 +1,12 @@
 # Independent review: slices 9, 10 and 11
 
-Scope: PR #44 (auto-merge seam: `src/gate/{policySource,auto,merge,shadow}.ts`, runtime wiring), PR #43 (claim leases), PR #45 (tailnet listener, remote tokens, console registry and mux), at main `1d0edfa`. Reviewed against specs 09, 10 and 11 and the defect classes in `review-slice-7.md`. The reviewer was an Anthropic-family model and the code authors were OpenAI-family. This was a read-only source review. No source was edited. PoC scripts live in `/tmp` only.
+Scope: PR #44 (auto-merge seam: `src/gate/{policySource,auto,merge,shadow}.ts`, runtime wiring), PR #43 (claim leases), PR #45 (Tailscale listener, remote tokens, console registry and mux), at main `1d0edfa`. Reviewed against specs 09, 10 and 11 and the defect classes in `review-slice-7.md`. The reviewer was an Anthropic-family model and the code authors were OpenAI-family. This was a read-only source review. No source was edited. PoC scripts live in `/tmp` only.
 
 Focused tests (all passed): `node --experimental-strip-types --test test/unit/gate.test.ts test/contract/policySource.test.ts test/unit/claims-pipeline.test.ts test/unit/console.test.ts test/unit/net.test.ts` gave 30 passed, 0 failed. Passing tests do not cover most findings below.
 
 ## Verdict
 
-Real auto-merge is unreachable today: the only sources are `none` and a test-only `fixture`. The merge executor itself is sound. It re-reads the PR, pins the head with `--match-head-commit`, uses no `--admin`, and confirms `MERGED`. `grep` finds no bypass flag anywhere in `src/`, and `fixture` is gated. The tailnet listener binds to the explicit tailnet address (never `0.0.0.0`), and approval routes still reject bearer credentials. Several defects remain.
+Real auto-merge is unreachable today: the only sources are `none` and a test-only `fixture`. The merge executor itself is sound. It re-reads the PR, pins the head with `--match-head-commit`, uses no `--admin`, and confirms `MERGED`. `grep` finds no bypass flag anywhere in `src/`, and `fixture` is gated. The Tailscale listener binds to the explicit Tailscale address (never `0.0.0.0`), and approval routes still reject bearer credentials. Several defects remain.
 
 - The gate silently ignores most policy fields, so a future real source inherits a fail-open gate.
 - The console identity check can be skipped by the client.
@@ -19,7 +19,7 @@ Counts: **High 2, Medium 9, Low 8.**
 
 **H1. The console identity allowlist is skipped when the request carries a loopback `Host` header.** `src/console/guard.ts:21-27,38-45`.
 - `local` is derived from the client-controlled `Host` header. The `allowedUsers` check runs only when `serve` is true (`host === serveHostname`).
-- Trigger: a tailnet peer that can reach the Serve URL sends `Host: localhost:4319`, `Origin: http://localhost:4319`, and the CSRF token from `GET /api/bootstrap` (which has no identity check, see M7). The host/origin check passes, `serve` is false, and the write (chat, pause, interrupt, steer) is allowed with no `Tailscale-User-Login`.
+- Trigger: a Tailscale peer that can reach the Serve URL sends `Host: localhost:4319`, `Origin: http://localhost:4319`, and the CSRF token from `GET /api/bootstrap` (which has no identity check, see M7). The host/origin check passes, `serve` is false, and the write (chat, pause, interrupt, steer) is allowed with no `Tailscale-User-Login`.
 - PoC `/tmp/rev911/poc.ts`: `serve host, no identity: 403`, `serve host, other user: 403`, `spoofed Host: localhost, no identity: 200`.
 - This depends on Tailscale Serve forwarding the client's `Host` unchanged. I could not verify that offline; confirm it in the live drill. The guard has no way to tell a Serve-proxied request from a local one, so it should not rely on `Host` for that.
 - Fix: decide "came through Serve" from something the client cannot choose, such as the presence of `Tailscale-User-Login` or `X-Forwarded-For`, or run the Serve proxy on a separate listener or port. Require the allowlist for every request that is not a direct loopback connection (use `getConnInfo`). Add a test: spoofed loopback `Host` with no identity must give 403.
@@ -67,7 +67,7 @@ Counts: **High 2, Medium 9, Low 8.**
 - Fix: add `timeout`, and a short TTL cache keyed by remote address (including negative results).
 
 **M7. Console reads, including `/api/bootstrap` (which returns the CSRF token), need no identity.** `src/console/guard.ts:36-45`.
-- The allowlist applies only to non-GET. Any tailnet node the ACL lets reach `console:443` can read transcripts, inbox, audit and items for every device through the proxy. The documented ACL grants `autogroup:member`.
+- The allowlist applies only to non-GET. Any Tailscale node the ACL lets reach `console:443` can read transcripts, inbox, audit and items for every device through the proxy. The documented ACL grants `autogroup:member`.
 - This matches the spec literally ("non-GET requests require"), but it widens read access beyond the operator. The CSRF token is also handed to any reader.
 - Fix: apply the allowlist to every request on the Serve host. Would the author consider the read path part of the identity boundary?
 
@@ -79,17 +79,17 @@ Counts: **High 2, Medium 9, Low 8.**
 - `docs/evidence/slice-10.md`: the "both worker kinds" test (`claims-pipeline.test.ts:165`) only calls `claim()` twice with different agent names (`pi-session-a` / `pi-session-b`) and pushes strings into a `launches` array. It runs no worker, no runtime and no branch logic. It also hides M4, because its two agents get different branches while the real machines share one name. Spec 10 item 5 (sandbox repo grep after a run) is attributed to `hygiene.test.ts`, which does not run the steward.
 - `docs/evidence/slice-11.md`:
   - Items 1, 5, 6, 7, 9 and 10 are weaker than the spec acceptance. There is no bind-address test of `startApi`, no flapping/slow-daemon test, no kill-the-console independence test (README only), no forged and missing header test (H1), no rig and no proxy-level tests.
-  - "retries the tailnet bind until Tailscale is up" (spec item 1) is not implemented: `startApi` throws (`src/api/server.ts:22-30`) and the steward exits.
+  - "retries the Tailscale network bind until Tailscale is up" (spec item 1) is not implemented: `startApi` throws (`src/api/server.ts:22-30`) and the steward exits.
 - Fix: correct the paths, mark unmet items as gaps, replace the tautological test with a runtime-level one, and add tests for H1, H2, M3 and M5.
 
 **M9. Device URLs are unrestricted, and the console keeps sending the token after a uid mismatch.** `src/console/registry.ts:46-60`, `src/cli/main.ts:575-612`, `src/console/proxy.ts`, `src/console/mux.ts:80-110`, `src/console/monitor.ts:53-60`.
-- `validUrl` and `add-device` accept any `http:` or `https:` host. The first request sends `Authorization: Bearer <token>` to it, so a mistyped or hostile URL (or a cloud-metadata address) gets the token in cleartext. The spec says "tailnet url".
+- `validUrl` and `add-device` accept any `http:` or `https:` host. The first request sends `Authorization: Bearer <token>` to it, so a mistyped or hostile URL (or a cloud-metadata address) gets the token in cleartext. The spec says "Tailscale URL".
 - `mismatch` and `incompatible` are only monitor labels. The proxy and mux still forward `device.token` to a host whose `uid` changed (a different daemon now at that URL).
-- Fix: require a tailnet host (`100.64.0.0/10`, `*.ts.net`, or loopback) unless an explicit override is given, refuse `http:` outside those, and have the proxy and mux require `status === online` with a matching `uid` before attaching the token.
+- Fix: require a Tailscale host (the CGNAT range 100.64/10, a MagicDNS name, or loopback) unless an explicit override is given, refuse `http:` outside those, and have the proxy and mux require `status === online` with a matching `uid` before attaching the token.
 
 ## Low
 
-**L1. The tailnet address check admits non-CGNAT ranges.** `src/api/net.ts:24-28`. The regex `100.([6-9]\d|1[0-2]\d).x.x` accepts `100.60-63.x.x` and `100.128-129.x.x` (public space). PoC: all four were `ACCEPTED`. It also accepts octets over 255 in the last two places. Impact is limited to an operator-set `tailnetAddress` that exists on the host. Fix: parse four octets and require `100.64.0.0/10`.
+**L1. The Tailscale address check admits non-CGNAT ranges.** `src/api/net.ts:24-28`. The regex `100.([6-9]\d|1[0-2]\d).x.x` (leading octet 100) accepts second octets 60-63 and 128-129 after the leading 100 (public space). PoC: all four were `ACCEPTED`. It also accepts octets over 255 in the last two places. Impact is limited to an operator-set the explicit-address option that exists on the host. Fix: parse four octets and require the 100.64/10 range.
 
 **L2. The mux can leak duplicate fan-in loops and raise unhandled rejections.** `src/console/mux.ts:80-135`. During the backoff `setTimeout`, the controller has already been dropped from `tab.controllers`, so a re-`PUT` that keeps the same key does not abort that loop, and `tab.subs.has(key)` stays true. The old loop wakes and a second fan-in runs for the key (duplicate frames, extra daemon connections). `await tab.write(...)` in the `catch` can also throw after the tab closes; `void this.fanIn(...)` leaves that rejection unhandled (a Node process crash by default). Tabs are not capped. Fix: use a generation counter per subscription and a try/catch around the writes.
 
@@ -111,5 +111,5 @@ Counts: **High 2, Medium 9, Low 8.**
 - `decide` (`src/gate/decide.ts`): `wait-human` unless the policy is `verified`, `enabled` and `requireHumanApproval` is false. `unknown` facts, a hard path and `REVIEW_REQUIRED` all stop before a merge. `effectivePolicy` never loosens, with clamps recorded.
 - `isHardPath` covers `CODEOWNERS` variants and `.github/**`, and `collectFacts` includes `previousPath` for renames. A `files` list of 100 or more makes `paths` null (fail closed).
 - The runtime re-resolves the source just before the merge and compares fingerprints (`workRuntime.ts:489-500`). Shadow mode never reaches `runGh`.
-- `startApi` binds the loopback listener plus the explicit tailnet address only. It refuses to start `peerCheck: required` without `allowedPeers`, and each request returns 503 when `whois` fails in `required` mode. Approval routes still reject bearer credentials. Tokens are stored as hashes with expiry, and device tokens are in 0600 files outside `devices.yaml`.
+- `startApi` binds the loopback listener plus the explicit Tailscale address only. It refuses to start `peerCheck: required` without `allowedPeers`, and each request returns 503 when `whois` fails in `required` mode. Approval routes still reject bearer credentials. Tokens are stored as hashes with expiry, and device tokens are in 0600 files outside `devices.yaml`.
 - The proxy allowlist is anchored, one-segment routes. I found no `..` traversal that reaches an approval route.
