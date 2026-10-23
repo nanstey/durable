@@ -11,7 +11,8 @@ export type Candidate = {
 	url?: string;
 	state?: string;
 	attempts?: number;
-	size?: number;
+	/** Source-declared or validated judge size; numeric source size remains for eligibility caps. */
+	size?: number | "small" | "medium" | "large";
 };
 
 export interface Source {

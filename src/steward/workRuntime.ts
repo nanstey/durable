@@ -10,6 +10,8 @@ import {
 	type RunningReview,
 } from "../gate/review.ts";
 import { assembleWorkerBrief, createScoutBrief } from "../scout/brief.ts";
+import { specBranch, specEligible } from "../pipeline/spec.ts";
+import { pipelineFor } from "../pipeline/select.ts";
 import { eligibility } from "../sources/eligibility.ts";
 import { readLocalBody } from "../sources/localFiles.ts";
 import type { WorkerHandle, WorkerKindRegistry } from "../workers/kind.ts";
@@ -61,6 +63,11 @@ export type WorkRuntimeOptions = {
 	notify: (event: "escalation" | "budget-stop", item: string) => Promise<void>;
 	notifyApproval?: (item: string, sha: string) => Promise<void>;
 	issueApproval?: (item: string, sha: string) => Promise<boolean>;
+	issueSpecApproval?: (
+		item: string,
+		pr: number,
+		sha: string,
+	) => Promise<boolean>;
 	check: () => Promise<void>;
 	now?: () => number;
 	drainMs?: number;
@@ -424,6 +431,10 @@ export class WorkRuntime {
 			step < 3 && task.phase !== "await-pr" && task.phase !== "finish";
 			step++
 		) {
+			if (task.phase === "spec") {
+				await this.progressSpec(state, item, task);
+				return;
+			}
 			if (task.phase === "dispatch" && !this.capacity(state, item)) return;
 			await o.check();
 			if (o.processes.fenced(item.id)) return;
@@ -436,6 +447,88 @@ export class WorkRuntime {
 			state.tasks[item.id] = task;
 			await this.store.save(state);
 		}
+	}
+	private async progressSpec(
+		state: WorkState,
+		item: WorkItem,
+		task: WorkItemTask,
+	) {
+		const pipeline = pipelineFor(this.options.definition, item.repo);
+		const approval = pipeline.gates.specApproval === true;
+		if (item.spec && item.spec.pr) {
+			const current = await this.options.github.readPr(item.repo, item.spec.pr);
+			if (current.state === "closed") {
+				item.spec.state = "needs-human";
+				item.outcome = "needs-human";
+				await this.store.save(state);
+				return;
+			}
+			if (!current.headSha) throw Error("spec PR head SHA is required");
+			if (current.headSha !== item.spec.sha) {
+				item.spec.sha = current.headSha;
+				item.spec.state = approval ? "waiting-spec-approval" : "opened";
+				delete item.spec.notified;
+			}
+		}
+		const eligible = specEligible(
+			item.candidate,
+			pipeline.gates.complexityThreshold,
+		);
+		if (eligible !== true) {
+			if (approval) {
+				item.spec = { pr: 0, sha: "", state: "needs-human" };
+				item.outcome = "needs-human";
+				await this.store.save(state);
+				return;
+			}
+			item.stage = "build";
+			task.phase = "dispatch";
+			await this.store.save(state);
+			return;
+		}
+		if (!item.spec) {
+			if (!this.options.github.createSpecPr)
+				throw Error("GitHub spec PR creation is unavailable");
+			const spec = await this.options.github.createSpecPr({
+				repo: item.repo,
+				item: item.id,
+				branch: specBranch(this.options.agent, item.id),
+				base:
+					this.options.definition.scope?.repos?.find(
+						(repo) => repo.slug === item.repo,
+					)?.base ?? "main",
+				title: `Draft spec: ${item.candidate.title}`,
+				body: task.briefText ?? "",
+			});
+			if (!spec.headSha) throw Error("spec PR head SHA is required");
+			item.spec = {
+				pr: spec.number,
+				sha: spec.headSha,
+				state: approval ? "waiting-spec-approval" : "opened",
+			};
+			await this.store.save(state);
+		}
+		if (item.spec.state === "waiting-spec-approval") {
+			if (!item.spec.notified) {
+				if (
+					!(await this.options.issueSpecApproval?.(
+						item.id,
+						item.spec.pr,
+						item.spec.sha,
+					))
+				)
+					audit(this.options.agent, {
+						event: "spec-approval-nonce-unavailable",
+						item: item.id,
+					});
+				item.spec.notified = true;
+				await this.store.save(state);
+			}
+			return;
+		}
+		item.stage = "build";
+		task.phase = "dispatch";
+		await this.store.save(state);
 	}
 	private async brief(item: WorkItem) {
 		const o = this.options;
@@ -666,6 +759,25 @@ export class WorkRuntime {
 		return reason;
 	}
 	/** Records a SHA-bound human approval; the gate re-runs before any future merge executor. */
+	// fallow-ignore-next-line unused-class-member -- invoked by the HTTP approval route.
+	async approveSpec(id: string, pr: number, sha: string) {
+		return this.enqueue(async () => {
+			const state = await this.store.load();
+			const item = state.work.items[id];
+			if (!item?.spec || item.spec.pr !== pr || item.spec.sha !== sha)
+				throw Object.assign(Error("approval does not match the current spec"), {
+					code: "conflict",
+				});
+			item.spec.state = "approved";
+			item.updatedAt = this.now();
+			await this.store.save(state);
+			audit(this.options.agent, {
+				event: "spec-approved-nonce",
+				item: id,
+				sha,
+			});
+		});
+	}
 	// fallow-ignore-next-line unused-class-member -- invoked by the HTTP approval route.
 	async approveGate(id: string, sha: string) {
 		return this.enqueue(async () => {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { specEligible } from "../../src/pipeline/spec.ts";
 import {
 	defaultPipeline,
 	pipelineDoctorErrors,
@@ -148,11 +149,23 @@ test("pipeline defaults and rejects missing mandatory stages", () => {
 				gates: { specApproval: true },
 			}),
 		),
-		[
-			"pipeline spec stage is not supported until slice 7",
-			"pipeline specApproval gate is not supported until slice 7",
-		],
+		[],
 	);
+});
+test("spec threshold is inclusive and missing size is not eligible", () => {
+	const candidate = {
+		ref: "acme/repo#1",
+		repo: "acme/repo",
+		kind: "issue" as const,
+		title: "x",
+		author: "a",
+		labels: [],
+		updatedAt: new Date().toISOString(),
+	};
+	assert.equal(specEligible({ ...candidate, size: "small" }, "medium"), false);
+	assert.equal(specEligible({ ...candidate, size: "medium" }, "medium"), true);
+	assert.equal(specEligible({ ...candidate, size: "large" }, "medium"), true);
+	assert.equal(specEligible(candidate, "medium"), undefined);
 });
 test("eligible queue entry migrates once and only primary PR completion finishes it", () => {
 	const queue = {

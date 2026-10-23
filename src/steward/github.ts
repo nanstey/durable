@@ -25,6 +25,14 @@ export interface WorkGithub extends ClaimGithub, PrMonitorGithub {
 		report: string,
 		item: string,
 	): Promise<void>;
+	createSpecPr?(input: {
+		repo: string;
+		item: string;
+		branch: string;
+		base: string;
+		title: string;
+		body: string;
+	}): Promise<PullRequest>;
 }
 export const prMarker = (agent: string, item: string) =>
 	`<!-- durable-item agent=${agent} item=${item} -->`;
@@ -267,6 +275,88 @@ export class Github implements WorkGithub {
 				{ labels: [`durable/agent:${this.options.agent}`] },
 				item,
 			);
+	}
+	async createSpecPr(input: {
+		repo: string;
+		item: string;
+		branch: string;
+		base: string;
+		title: string;
+		body: string;
+	}): Promise<PullRequest> {
+		const owner = input.repo.split("/", 1)[0];
+		const pulls = await this.request<Array<{ number: number; body?: string }>>(
+			input.repo,
+			`repos/${input.repo}/pulls?state=all&head=${encodeURIComponent(`${owner}:${input.branch}`)}`,
+		);
+		const marker = `<!-- durable-spec agent=${this.options.agent} item=${input.item} -->`;
+		const existing = pulls.find((pull) => pull.body?.includes(marker));
+		if (existing) return this.readPr(input.repo, existing.number);
+		const base = await this.request<{ object: { sha: string } }>(
+			input.repo,
+			`repos/${input.repo}/git/ref/heads/${encodeURIComponent(input.base)}`,
+		);
+		const blob = await this.request<{ sha: string }>(
+			input.repo,
+			`repos/${input.repo}/git/blobs`,
+			"POST",
+			{ content: input.body, encoding: "utf-8" },
+			input.item,
+		);
+		const tree = await this.request<{ sha: string }>(
+			input.repo,
+			`repos/${input.repo}/git/trees`,
+			"POST",
+			{
+				base_tree: base.object.sha,
+				"tree[0][path]": `.durable/specs/${input.item}.md`,
+				"tree[0][mode]": "100644",
+				"tree[0][type]": "blob",
+				"tree[0][sha]": blob.sha,
+			},
+			input.item,
+		);
+		const commit = await this.request<{ sha: string }>(
+			input.repo,
+			`repos/${input.repo}/git/commits`,
+			"POST",
+			{
+				message: `durable: draft spec for ${input.item}`,
+				tree: tree.sha,
+				parents: base.object.sha,
+			},
+			input.item,
+		);
+		await this.request(
+			input.repo,
+			`repos/${input.repo}/git/refs`,
+			"POST",
+			{ ref: `refs/heads/${input.branch}`, sha: commit.sha },
+			input.item,
+		);
+		const pr = await this.request<{
+			number: number;
+			html_url: string;
+			head: { sha: string };
+		}>(
+			input.repo,
+			`repos/${input.repo}/pulls`,
+			"POST",
+			{
+				title: input.title,
+				head: input.branch,
+				base: input.base,
+				draft: true,
+				body: `${marker}\n\n${input.body}`,
+			},
+			input.item,
+		);
+		return {
+			number: pr.number,
+			url: pr.html_url,
+			headSha: pr.head.sha,
+			state: "open",
+		};
 	}
 	async readyPr(repo: string, number: number, item: string) {
 		await this.request(

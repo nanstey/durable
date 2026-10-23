@@ -221,3 +221,31 @@ Release re-reads PR state and starts a new attempt or returns to review.
 The two required low-risk pilot runs (Orca and git-process), terminal input check,
 viewer check, and steward crash drill require an operator and are listed in
 `docs/evidence/slice-6b.md`.
+
+## Spec and worker approval
+
+A repository can select the optional `spec` stage with a `complexityThreshold`
+(`medium` or `large`). At or above that source-declared or judge-produced size,
+Durable opens a draft spec PR from the read-only scout result. Its work-item name
+is idempotent, so a restart reuses the PR. With `specApproval: true`, no worker
+starts until the spec is approved:
+
+```sh
+durable approve-spec <agent> <spec-pr> --code <nonce>
+```
+
+The single-use, five-minute nonce is delivered only through a nonce-safe desktop
+or command channel. It is bound to the agent, work item, spec PR number and head
+SHA; a new commit voids it. A missing size, unavailable judge, or closed unmerged
+spec PR parks an approval-required item as `needs-human`. Without `specApproval`,
+Durable still opens the spec PR but dispatch continues.
+
+Worker PR approval uses `durable approve <agent> <worker-pr> --code <nonce>`.
+GitHub labels, comments and statuses are not approvals: under a shared GitHub
+identity a worker can forge those signals with the operator token. A human GitHub
+merge or review from another account is observable evidence, while the nonce
+only authorizes the local steward and never bypasses GitHub rules.
+
+The nonce limits accidents and prompt injection, not a compromised same-user
+process. Never send it through the inbox, console, GitHub, logs, API responses,
+or a backend that is not explicitly nonce-safe.

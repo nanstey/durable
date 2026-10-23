@@ -71,6 +71,27 @@ class FakeWorkGithub implements WorkGithub {
 				pr.labels.includes("durable/agent:agent"),
 		);
 	}
+	async createSpecPr(input: {
+		item: string;
+		branch: string;
+		title: string;
+		body: string;
+	}) {
+		const existing = this.pulls.find((pull) => pull.branch === input.branch);
+		if (existing) return existing;
+		this.write("create-spec-pr");
+		const pr = {
+			number: this.pulls.length + 1,
+			branch: input.branch,
+			marker: `<!-- durable-spec agent=agent item=${input.item} -->`,
+			draft: true,
+			labels: ["durable/agent:agent"],
+			state: "open" as const,
+			headSha: `spec-${input.item}`,
+		};
+		this.pulls.push(pr);
+		return pr;
+	}
 	async attributePr(_repo: string, number: number) {
 		this.write("attribute-pr");
 		(await this.readPr("", number)).footer =
