@@ -9,6 +9,10 @@ Revision 7: the definition's `workers` block carries `dispatcher` (`orca | git-p
 Revision 6 (U5): all paths are repo-root paths of the **durable repo** (`nanstey/durable`); this spec no longer touches the skills repo (the installer step, thin skill, catalog row and Pi-README row moved to spec 02b); it adds the repo scaffold, CI, the public-repo **hygiene scan** and a required-skills doctor check.
 Depends on: spec 01 (version pins, symlink result, Anthropic option for the `modelAuth` seam).
 
+## Follow-up from Warp research (post-shipment)
+
+Do not retrofit the shipped schema in this slice. Slice 6b adds the optional per-project `pipeline` field beside `scope.repos[]`, validates it through the existing agent JSON Schema and keeps the default current flow.
+
 ## Checklist
 
 1. **Scaffold the repo** (durable repo, root): `package.json` (`@nanstey/durable`, `"type": "module"`, `engines.node` **`>=22.19.0`**, `files` excluding `spike/`, `docs/plan/` optional), `pnpm-lock.yaml`, `tsconfig.json` (`erasableSyntaxOnly`), `bin/durable`, `AGENTS.md` (public repo rules, commit conventions), existing `LICENSE` kept. **Exact** pins from the spike (`docs/evidence/spike.md` "Version pins"): `@earendil-works/pi-durable@1.4.0`, `@earendil-works/pi-ai@1.4.0`, `@earendil-works/pi-coding-agent@1.4.0`, and `@earendil-works/chord@1.4.0` as a **direct** dependency (pnpm does not hoist it); `typebox`, `yaml`; dev: `typescript`, `@types/node`. A test asserts these exact versions and the engines floor in `package.json`. Branch flow respects the protected `main` (PRs, squash-only). Acceptance: `pnpm install --frozen-lockfile` in a fresh clone; `tsc --noEmit` passes.

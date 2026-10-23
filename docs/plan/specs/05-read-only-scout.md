@@ -6,6 +6,10 @@ Revision 1: identity is the operator's account via the agent's profile (C2); tru
 Revision 2: renumbered (was 04). `GET /v1/queue` and the SSE `queue` frames extend API v1 additively; the CLI (`durable queue`) and the console (spec 08) display them.
 Depends on: spec 04 (client, notifier) and spec 03 (API).
 
+## Follow-up from Warp research (post-shipment)
+
+The shipped queue item remains the read-only intake projection. Slice 6b migrates each eligible entry into the named work-item record that carries claim, attempts, PRs and final outcome; it does not rewrite this slice's shipped queue behaviour.
+
 ## Checklist
 
 1. **Source interface** `sources/types.ts`: `Source.poll(): Promise<Candidate[]>`; `Candidate = { ref, kind, repo, title, author, authorAssociation, labels, updatedAt, bodyRef, url, state }`. Bodies are stored as references and never logged. Acceptance: type tests via fixtures.
