@@ -27,6 +27,21 @@ for (const command of [
 			true,
 		);
 	});
+for (const command of [
+	"git -C /work push --force origin branch",
+	"/usr/bin/git push origin main",
+	"gh --repo a/b pr merge 1",
+	"gh api graphql -f query=mutation{mergePullRequest}",
+	"gh api repos/a/b/git/refs/heads/main --method=PATCH",
+])
+	test(`worker guard blocks option-interleaved command: ${command}`, () => {
+		assert.equal(blockedWorkerCommand(command), true);
+		assert.equal(
+			shouldBlockDurableWorkerCommand(command, { DURABLE_WORKER: "1" }),
+			true,
+		);
+	});
+
 test("worker guard is inactive outside durable workers", () =>
 	assert.equal(shouldBlockDurableWorkerCommand("gh pr merge 1", {}), false));
 
@@ -55,7 +70,7 @@ test("shared table and registered Pi tool_call handler cannot drift; holding and
 				handler = callback;
 			},
 		});
-		assert.equal(blockedWorkerCommandPatterns.length, 9);
+		assert.equal(blockedWorkerCommandPatterns.length, 1);
 		for (const command of [
 			"gh pr merge 1",
 			"gh repo edit --force",

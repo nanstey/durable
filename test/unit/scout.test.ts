@@ -40,6 +40,16 @@ test("trusted scout brief has a stable safety and attribution snapshot", () => {
 		`# Durable worker brief\n\nLoad \`idea-to-pr\` and run it in autopilot mode for this task. This workspace is isolated.\nStop at a draft PR, even if a loaded workflow normally proceeds to merge.\n\n- Do not merge a pull request.\n- Do not force-push or push to a default or protected branch.\n- Create a draft PR only, with the required durable label and marker.\n- Do not read, print, or add secrets to files, commits, or PR text.\n\n## Task\n\nitem\n\nImplement the change.\n\n## Attribution\n\nBranch: \`durable/agent/item\`\nCommit trailer: \`Durable-Agent: agent\`\nPR label: \`durable/agent:agent\`\nPR marker: \`<!-- durable-item agent=agent item=item -->\`\nPR footer: \`Opened by durable agent agent for operator-login; not yet reviewed by a human.\`\n`,
 	);
 });
+test("worker brief preserves dollar and template sequences in untrusted task text", () => {
+	const brief = assembleWorkerBrief({
+		brief: createScoutBrief(candidate, true, "cost $& $` $' {{branch}}"),
+		branch: "durable/agent/item",
+		agent: "agent",
+		login: "operator-login",
+	});
+	assert.match(brief, /cost \$& \$` \$' \{\{branch\}\}/);
+});
+
 test("GitHub sources map fixtures and never invoke a write command", async () => {
 	const calls: string[][] = [];
 	const run = async (args: string[]) => {

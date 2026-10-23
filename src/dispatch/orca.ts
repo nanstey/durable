@@ -1,4 +1,7 @@
 /* Orca CLI flags verified against `orca --help` (2026-10-23). Keep CLI drift here. */
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { execa, execaSync } from "execa";
 import {
 	assertRemovableWorkspace,
@@ -45,6 +48,32 @@ function array(value: string): OrcaTerminal[] {
 	return Array.isArray(parsed)
 		? (parsed as OrcaTerminal[])
 		: ((parsed as { terminals?: OrcaTerminal[] }).terminals ?? []);
+}
+function shellQuote(value: string) {
+	return `'${value.replaceAll("'", "'\\''")}'`;
+}
+/** Secrets must be inherited by the terminal shell, never serialized into Orca argv. */
+function terminalCommand(spec: ProcessSpec): string {
+	const directory = mkdtempSync(join(tmpdir(), "durable-orca-"));
+	const envFile = join(directory, "env");
+	const entries = Object.entries(spec.env).filter(
+		(entry): entry is [string, string] => entry[1] !== undefined,
+	);
+	writeFileSync(
+		envFile,
+		entries.map(([key, value]) => `${key}=${shellQuote(value)}`).join("\n"),
+		{ mode: 0o600 },
+	);
+	chmodSync(envFile, 0o600);
+	return [
+		"env",
+		"-i",
+		"sh",
+		"-c",
+		`set -a; . ${shellQuote(envFile)}; rm -f ${shellQuote(envFile)}; rmdir ${shellQuote(directory)}; exec ${[spec.command, ...(spec.args ?? [])].map(shellQuote).join(" ")}`,
+	]
+		.map(shellQuote)
+		.join(" ");
 }
 function terminalHandle(value: unknown): string {
 	const terminal = value as OrcaTerminal;
@@ -129,17 +158,7 @@ export class OrcaDispatcher implements WorkerDispatcher {
 								"--title",
 								title,
 								"--command",
-								[
-									"env",
-									"-i",
-									...Object.entries(spec.env)
-										.filter((entry) => entry[1] !== undefined)
-										.map(([key, value]) => `${key}=${value}`),
-									spec.command,
-									...(spec.args ?? []),
-								]
-									.map((value) => `'${value.replaceAll("'", "'\\''")}'`)
-									.join(" "),
+								terminalCommand(spec),
 							])
 						).stdout,
 					),

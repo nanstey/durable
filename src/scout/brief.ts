@@ -28,10 +28,15 @@ export function assembleWorkerBrief(values: {
 	const path =
 		values.templatePath ??
 		fileURLToPath(new URL("../../templates/worker-brief.md", import.meta.url));
-	return readFileSync(path, "utf8")
-		.replaceAll("{{brief}}", values.brief.text)
-		.replaceAll("{{branch}}", values.branch)
-		.replaceAll("{{agent}}", values.agent)
-		.replaceAll("{{login}}", values.login)
-		.replaceAll("{{item}}", values.item ?? "");
+	const replacements: Record<string, string> = {
+		"{{brief}}": values.brief.text,
+		"{{branch}}": values.branch,
+		"{{agent}}": values.agent,
+		"{{login}}": values.login,
+		"{{item}}": values.item ?? "",
+	};
+	return readFileSync(path, "utf8").replace(
+		/\{\{brief\}\}|\{\{branch\}\}|\{\{agent\}\}|\{\{login\}\}|\{\{item\}\}/g,
+		(token) => replacements[token],
+	);
 }

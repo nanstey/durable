@@ -26,7 +26,11 @@ class FakeGithub implements ClaimGithub {
 		this.labels.delete(label);
 	}
 	async createComment(_repo: string, _issue: number, body: string) {
-		const comment = { id: this.comments.length + 1, body };
+		const comment = {
+			id: this.comments.length + 1,
+			body,
+			login: "durable-bot",
+		};
 		this.comments.push(comment);
 		return comment;
 	}
@@ -95,6 +99,24 @@ test("two installations of the same agent cannot reuse each other's claim", asyn
 		"won",
 	);
 	assert.equal(github.comments.length, 1);
+});
+test("foreign claim markers cannot block, update, or be deleted", async () => {
+	const github = new FakeGithub();
+	github.comments.push({
+		id: 1,
+		body: "<!-- durable-claim agent=agent lease=2999-01-01T00:00:00.000Z -->",
+		login: "untrusted",
+	});
+	const result = await claim(github, {
+		repo: "acme/repo",
+		issue: 1,
+		agent: "agent",
+		login: "durable-bot",
+		lease: "2999-01-01T00:00:00.000Z",
+	});
+	assert.equal(result.state, "won");
+	assert.equal(github.comments[0].id, 1);
+	assert.ok(github.labels.has("durable/claimed"));
 });
 test("expired claims cannot win arbitration", async () => {
 	const github = new FakeGithub();

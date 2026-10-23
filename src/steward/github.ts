@@ -142,11 +142,25 @@ export class Github implements WorkGithub {
 	async listComments(repo: string, issue: number) {
 		const comments: ClaimComment[] = [];
 		for (let page = 1; ; page++) {
-			const batch = await this.request<ClaimComment[]>(
+			const batch = await this.request<
+				Array<{
+					id: number;
+					body: string;
+					user?: { login?: string };
+					author_association?: string;
+				}>
+			>(
 				repo,
 				`repos/${repo}/issues/${issue}/comments?per_page=100&page=${page}`,
 			);
-			comments.push(...batch);
+			comments.push(
+				...batch.map((comment) => ({
+					id: comment.id,
+					body: comment.body,
+					login: comment.user?.login,
+					authorAssociation: comment.author_association,
+				})),
+			);
 			const item = this.issueItem(repo, issue);
 			if (item)
 				for (const comment of batch) this.commentItems.set(comment.id, item);

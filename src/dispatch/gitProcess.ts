@@ -24,6 +24,33 @@ import type {
 	WorkspaceSpec,
 } from "./types.ts";
 
+function processStartTime(pid: number | undefined) {
+	if (!pid || process.platform !== "linux") return undefined;
+	try {
+		// Field 22 is the kernel start-time tick; unlike a PID it cannot be reused.
+		return readFileSync(`/proc/${pid}/stat`, "utf8")
+			.split(") ")[1]
+			?.split(" ")[19];
+	} catch {
+		return undefined;
+	}
+}
+function readIdentity(
+	path: string,
+): { pid: number; startTime: string } | undefined {
+	try {
+		const value = JSON.parse(readFileSync(path, "utf8")) as {
+			pid?: unknown;
+			startTime?: unknown;
+		};
+		return typeof value.pid === "number" && typeof value.startTime === "string"
+			? { pid: value.pid, startTime: value.startTime }
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** Git worktrees plus detached, clean-environment processes; no Orca dependency. */
 export class GitProcessDispatcher implements WorkerDispatcher {
 	readonly name = "git-process" as const;
@@ -76,7 +103,7 @@ export class GitProcessDispatcher implements WorkerDispatcher {
 	async hostProcess(spec: ProcessSpec): Promise<HostedProcess> {
 		const existing = this.processes.get(spec.id);
 		if (existing) return existing;
-		const log = join(spec.workspace.path, `.durable-${spec.id}.log`);
+		const log = join(this.root, `.durable-${spec.id}.log`);
 		const pid = `${log}.pid`;
 		const child = execa(spec.command, spec.args ?? [], {
 			cwd: spec.workspace.path,
@@ -90,12 +117,19 @@ export class GitProcessDispatcher implements WorkerDispatcher {
 		});
 		child.stdout?.pipe(createWriteStream(log, { flags: "a", mode: 0o600 }));
 		child.stderr?.pipe(createWriteStream(log, { flags: "a", mode: 0o600 }));
-		writeFileSync(pid, String(child.pid), { mode: 0o600 });
+		const startTime = processStartTime(child.pid);
+		if (!startTime) throw Error("worker process identity unavailable");
+		writeFileSync(pid, JSON.stringify({ pid: child.pid, startTime }), {
+			mode: 0o600,
+		});
 		return rememberProcess(this.processes, spec, pid);
 	}
 	async processStatus(process: HostedProcess): Promise<ProcessStatus> {
 		try {
-			globalThis.process.kill(Number(readFileSync(process.handle, "utf8")), 0);
+			const identity = readIdentity(process.handle);
+			if (!identity || processStartTime(identity.pid) !== identity.startTime)
+				return "exited";
+			globalThis.process.kill(identity.pid, 0);
 			return "running";
 		} catch {
 			return existsSync(process.handle) ? "exited" : "unknown";
@@ -106,8 +140,11 @@ export class GitProcessDispatcher implements WorkerDispatcher {
 		mode: "soft" | "hard",
 	): Promise<void> {
 		try {
+			const identity = readIdentity(process.handle);
+			if (!identity || processStartTime(identity.pid) !== identity.startTime)
+				return;
 			globalThis.process.kill(
-				-Number(readFileSync(process.handle, "utf8")),
+				-identity.pid,
 				mode === "soft" ? "SIGINT" : "SIGKILL",
 			);
 		} catch {
