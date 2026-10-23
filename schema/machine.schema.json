@@ -209,6 +209,15 @@
     "workers": {
       "type": "object",
       "properties": {
+        "dispatcher": {
+          "enum": [
+            "orca",
+            "git-process"
+          ]
+        },
+        "fallback": {
+          "type": "boolean"
+        },
         "roles": {
           "type": "object",
           "additionalProperties": {
