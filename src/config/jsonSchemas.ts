@@ -71,6 +71,14 @@ const connector = object(
 	},
 	["id", "provider", "connection", "tools"],
 );
+const organizationConnector = object(
+	{
+		id: { type: "string", pattern: "^[A-Za-z0-9._-]+$" },
+		provider: { const: "fake" },
+		tools: { type: "array", items: connectorTool, minItems: 1 },
+	},
+	["id", "provider", "tools"],
+);
 const pipeline = object({
 	stages: {
 		type: "array",
@@ -82,6 +90,64 @@ const pipeline = object({
 		complexityThreshold: { enum: ["medium", "large"] },
 	}),
 });
+export const organizationSchema = object(
+	{
+		name: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+		memberAgents: {
+			type: "array",
+			items: { type: "string", pattern: "^[A-Za-z0-9._-]+$" },
+			minItems: 1,
+			uniqueItems: true,
+		},
+		scope: object({
+			repos: {
+				type: "array",
+				items: {
+					type: "string",
+					pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+				},
+				uniqueItems: true,
+			},
+		}),
+		limits: object({
+			maxConcurrentWorkers: positive,
+			maxWorkersPerDay: positive,
+			maxAttemptsPerItem: positive,
+			itemMinutes: positive,
+			maxTurns: positive,
+			maxToolCalls: positive,
+			tokenBudget: positive,
+			maxMergesPerDay: positive,
+			dailyDollars: { type: "number", minimum: 0 },
+			dailyTokens: { type: "integer", minimum: 0 },
+		}),
+		schedule: object({ quietHours: text }),
+		notify: {
+			type: "object",
+			additionalProperties: {
+				anyOf: [
+					strings,
+					object(
+						{
+							channels: strings,
+							priority: { enum: ["low", "normal", "high"] },
+						},
+						["channels"],
+					),
+				],
+			},
+		},
+		tools: {
+			type: "array",
+			items: { type: "string", pattern: "^[A-Za-z0-9._-]+$" },
+			uniqueItems: true,
+		},
+		connectors: { type: "array", items: organizationConnector },
+		pipeline,
+		maxStaleAge: positive,
+	},
+	["name", "memberAgents"],
+);
 export const agentSchema = object(
 	{
 		version: { const: 1 },
@@ -135,6 +201,7 @@ export const agentSchema = object(
 			),
 		},
 		id: { type: "string", pattern: "^[A-Za-z0-9._-]+$" },
+		organization: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
 		profile: { type: "string", pattern: "^(?!\\.\\.?$)[A-Za-z0-9._-]+$" },
 		peers: { type: "array", maxItems: 0 },
 		scope: object({

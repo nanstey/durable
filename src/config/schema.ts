@@ -1,10 +1,16 @@
 import { Ajv } from "ajv";
-import { agentSchema, machineSchema, manifestSchema } from "./jsonSchemas.ts";
+import {
+	agentSchema,
+	machineSchema,
+	manifestSchema,
+	organizationSchema,
+} from "./jsonSchemas.ts";
 
 const ajv = new Ajv({ allErrors: true, useDefaults: true });
 const agentValidator = ajv.compile(agentSchema);
 const machineValidator = ajv.compile(machineSchema);
 const manifestValidator = ajv.compile(manifestSchema);
+const organizationValidator = ajv.compile(organizationSchema);
 
 export const PROFILE_NAME = /^[A-Za-z0-9._-]+$/;
 export type WorkerKindName = "pi-session" | "durable-conversation";
@@ -59,6 +65,7 @@ export type AgentDef = {
 		checkout?: string;
 	}>;
 	id?: string;
+	organization?: string;
 	profile: string;
 	peers?: never[];
 	models?: {
@@ -120,6 +127,31 @@ export type AgentDef = {
 				};
 		  }
 	>;
+};
+export type OrganizationConnector = {
+	id: string;
+	provider: "fake";
+	tools: Array<{
+		id: string;
+		access: "read" | "write";
+		write?: boolean;
+		maxCalls?: number;
+		maxCost?: number;
+	}>;
+};
+export type OrganizationDef = {
+	name: string;
+	memberAgents: string[];
+	scope?: { repos?: string[] };
+	limits?: Record<string, number>;
+	schedule?: { quietHours?: string };
+	notify?: Record<string, string[] | { channels: string[]; priority?: string }>;
+	tools?: string[];
+	connectors?: OrganizationConnector[];
+	pipeline?: {
+		stages?: Array<"scout" | "spec" | "build" | "review" | "gate" | "handoff">;
+	};
+	maxStaleAge?: number;
 };
 export type MachineCfg = {
 	version?: 1;
@@ -212,6 +244,19 @@ export function validateAgent(value: unknown): AgentDef {
 	)
 		throw new Error("maxConcurrent must be positive");
 	return x;
+}
+export function validateOrganization(value: unknown): OrganizationDef {
+	if (!organizationValidator(value))
+		throw new Error(
+			`invalid organization: ${ajv.errorsText(organizationValidator.errors)}`,
+		);
+	const org = value as OrganizationDef;
+	if (org.name === "default")
+		throw new Error(
+			"default organization is implicit and cannot have a document",
+		);
+	for (const member of org.memberAgents) assertProfileName(member);
+	return org;
 }
 export function validateMachine(value: unknown): MachineCfg {
 	checkBind(value);

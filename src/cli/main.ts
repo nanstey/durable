@@ -8,6 +8,12 @@ import {
 } from "../api/tokens.ts";
 import { DurableClient } from "../client/client.ts";
 import { loadAgent, loadMachine } from "../config/load.ts";
+import {
+	applyOrganization,
+	listOrganizations,
+	loadOrganization,
+	releaseFor,
+} from "../config/organizations.ts";
 import { durableHome } from "../config/paths.ts";
 import { startConsole } from "../console/main.ts";
 import {
@@ -107,6 +113,68 @@ subCommands.inbox = defineCommand({
 						`/v1/inbox/${encodeURIComponent(args.id)}/ack`,
 						{ method: "POST" },
 					),
+					args.json,
+				);
+			},
+		}),
+	},
+});
+subCommands.org = defineCommand({
+	meta: { name: "org" },
+	subCommands: {
+		list: defineCommand({
+			meta: { name: "list" },
+			args: { json: { type: "boolean", default: false } },
+			run({ args }) {
+				print(
+					listOrganizations().map((name) => ({
+						name,
+						release: releaseFor(name)?.contentHash ?? null,
+					})),
+					args.json,
+				);
+			},
+		}),
+		show: defineCommand({
+			meta: { name: "show" },
+			args: {
+				name: { type: "positional", required: true },
+				json: { type: "boolean", default: false },
+			},
+			run({ args }) {
+				print(
+					{
+						organization: loadOrganization(args.name),
+						release: releaseFor(args.name) ?? null,
+					},
+					args.json,
+				);
+			},
+		}),
+		apply: defineCommand({
+			meta: { name: "apply" },
+			args: {
+				name: { type: "positional", required: true },
+				code: { type: "string", required: true },
+				json: { type: "boolean", default: false },
+			},
+			run({ args }) {
+				print(applyOrganization(args.name, args.code), args.json);
+			},
+		}),
+		sync: defineCommand({
+			meta: { name: "sync" },
+			args: {
+				name: { type: "positional", required: true },
+				json: { type: "boolean", default: false },
+			},
+			run({ args }) {
+				print(
+					{
+						name: args.name,
+						state: "operator-managed",
+						release: releaseFor(args.name) ?? null,
+					},
 					args.json,
 				);
 			},
