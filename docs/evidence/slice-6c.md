@@ -89,9 +89,22 @@ enforced one. Sandbox hardening remains deferred.
 | 8 | `NativeDurableAnchor` counts unreported, non-terminal durable children inside its storage transaction and refuses starts past `maxConcurrent`. `steward/harness.ts` supplies definition value or Linux default 2 / Android default 1. | Faux-model cap test starts two children and rejects the third with `capacity_exceeded`. |
 | 9 | The steward opens the harness model runtime through `createModelsFor(resolveProfile(def.profile), providersOf(def))`; child configuration selects its declared provider/model from that profile-scoped runtime. The plain model-auth implementation rejects Anthropic OAuth shaping; doctor reports it unsupported until the explicit `modelAuth` implementation option exists. | Existing model-auth and doctor contracts cover profile provider selection and OAuth refusal; durable child capability reports `anthropicOAuth: modelAuth-option`. |
 
-Items 10–12 remain for the later PR: viewer integration, reviewer verdicts, full
-operator docs and live pilot. The full five-minute responsiveness benchmark and
-Linux cgroup/`setsid` SIGKILL matrix remain validation boundaries for item 8/6;
-the focused faux-model restart and cap contracts above prove the implemented
-policy. Reviewer launch explicitly refuses rather than exposing write tools. No
-live GitHub writes, provider requests or operator credentials were used.
+## Items 10–12 tree, reviewer, and operator documentation
+
+| Spec item | Implementation | Executed evidence |
+| --- | --- | --- |
+| 10 | Native child metadata records `worker-durable` or `reviewer-durable`; both appear below the steward in the shared tree. The typed `/open` path uses `durable attach <agent>/<conversation>`. `workers.durable.viewer: on-start` asks the dispatcher to open the viewer and retains the command fallback. | Focused faux-model tree contract verifies a reviewer leaf below the steward; dispatcher contracts cover Orca terminal creation and command fallback. |
+| 11 | Durable reviewers expose only read, search, `pr_diff`, and `report_verdict`. The final verdict validates its shape, reviewed SHA, single-call rule, and opposite model family; it stores kind-neutral `ReviewResult` plus durable-entry `ModelProvenance`. | Faux model plus fake GitHub diff records a `changes` verdict with provenance. The exposed-tool snapshot has no shell or write tool; malformed/wrong-SHA/same-family calls are refused by the code-owned tool. |
+| 12 | `docs/workers.md` now documents kinds, roles, capabilities, viewer behavior, lifecycle, limits, Pi-session-only workflows, and the advisory guardrail boundary with known limits. | Documentation reviewed alongside the focused contracts. |
+
+## Pending operator validation
+
+The live pilot remains **pending operator**: run one low-risk issue with each
+kind on the same repository, kill the steward mid-run, hold and release, and
+compare results. No live GitHub writes, provider requests, or operator
+credentials were used here.
+
+The full five-minute responsiveness benchmark also remains **pending operator**.
+The Linux cgroup/`setsid` SIGKILL matrix is retained as a validation boundary:
+existing containment contracts cover the gated launch and cleanup path, but the
+faux process fixture is not a Linux cgroup probe.

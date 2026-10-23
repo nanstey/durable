@@ -129,6 +129,7 @@ async function dispatchItem(
 			limits: deps.definition.limits ?? {},
 			env: deps.env,
 			piDir: deps.piDir,
+			viewer: deps.definition.workers?.durable?.viewer,
 			skills:
 				kind.name === "durable-conversation"
 					? (deps.definition.workers?.durable?.skills ?? [])

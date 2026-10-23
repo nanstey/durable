@@ -167,7 +167,11 @@ export class WorkRuntime {
 		const result = await worker.kind.result(worker.handle);
 		if (!result.outcome || attempt.endedAt) return false;
 		if (result.outcome !== "held")
-			await this.cancel(state, item, result.outcome);
+			await this.cancel(
+				state,
+				item,
+				result.outcome === "failed" ? "interrupted" : result.outcome,
+			);
 		return true;
 	}
 	private inactive(item: WorkItem, task: WorkItemTask, paused: boolean) {

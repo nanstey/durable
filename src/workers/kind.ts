@@ -8,6 +8,9 @@ export type JobSpec = {
 	repo?: string;
 	baseRef?: string;
 	baseSha?: string;
+	reviewedHeadSha?: string;
+	reviewedFamily?: string;
+	viewer?: "on-start" | "on-demand" | "never";
 	role: "worker" | "reviewer";
 	briefText: string;
 	workspace: Workspace;
@@ -46,6 +49,8 @@ export interface WorkerKind {
 		status: string;
 		cost?: number;
 		outcome?: import("./durable/anchor.ts").WorkerStop;
+		review?: import("./durable/review.ts").ReviewResult;
+		provenance?: import("./durable/review.ts").ModelProvenance;
 	}>;
 	interrupt(
 		handle: WorkerHandle,

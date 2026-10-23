@@ -34,9 +34,12 @@ export class DurableConversationKind implements WorkerKind {
 				: "unknown";
 	}
 	async result(handle: WorkerHandle) {
+		const conversation = await this.anchor.find(handle.id);
 		return {
 			status: await this.status(handle),
-			outcome: (await this.anchor.find(handle.id))?.outcome,
+			outcome: conversation?.outcome,
+			review: conversation?.review?.result,
+			provenance: conversation?.review?.provenance,
 		};
 	}
 	async interrupt(
