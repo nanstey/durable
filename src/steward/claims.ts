@@ -3,6 +3,8 @@ export type ClaimComment = {
 	body: string;
 	login?: string;
 	authorAssociation?: string;
+	/** GitHub server timestamp, used to bound a marker's holder-supplied lease. */
+	updatedAt?: string;
 };
 
 /** Injectable GitHub surface. Production code can adapt gh or Octokit; tests never write GitHub. */
@@ -57,9 +59,21 @@ function trustedComment(comment: ClaimComment, login?: string) {
 		)
 	);
 }
-function activeLease(lease: string, now: number, graceMs: number) {
-	const expiresAt = Date.parse(lease);
-	return Number.isFinite(expiresAt) && expiresAt + graceMs > now;
+function activeLease(
+	lease: string,
+	comment: ClaimComment,
+	now: number,
+	policy: ClaimLeasePolicy,
+) {
+	const requestedExpiry = Date.parse(lease);
+	if (!Number.isFinite(requestedExpiry)) return false;
+	const updatedAt = Date.parse(comment.updatedAt ?? "");
+	// A marker is untrusted input. When GitHub supplies its server timestamp, it
+	// cannot extend a lease past one configured duration from that timestamp.
+	const expiresAt = Number.isFinite(updatedAt)
+		? Math.min(requestedExpiry, updatedAt + policy.durationMs)
+		: requestedExpiry;
+	return expiresAt + policy.graceMs > now;
 }
 function ownsClaim(
 	claim: { agent: string; owner?: string },
@@ -105,7 +119,7 @@ export async function readClaim(
 	now = Date.now(),
 	policy?: Partial<ClaimLeasePolicy>,
 ): Promise<ClaimResult> {
-	const { graceMs } = policyWithDefaults(policy);
+	const options = policyWithDefaults(policy);
 	const winner = (await github.listComments(target.repo, target.issue))
 		.map((comment) => ({ comment, marker: parseClaim(comment.body) }))
 		.filter(
@@ -118,7 +132,7 @@ export async function readClaim(
 				Boolean(
 					entry.marker &&
 						trustedComment(entry.comment, target.login) &&
-						activeLease(entry.marker.lease, now, graceMs),
+						activeLease(entry.marker.lease, entry.comment, now, options),
 				),
 		)
 		.sort((a, b) => a.comment.id - b.comment.id)[0];
@@ -164,7 +178,13 @@ export async function claim(
 		await github.addLabel(target.repo, target.issue, "durable/claimed");
 		return after;
 	}
-	await github.deleteComment?.(target.repo, own.id, target.item);
+	if (github.deleteComment)
+		try {
+			await github.deleteComment(target.repo, own.id, target.item);
+		} catch {
+			// A transient delete must not leave a competing marker for a full lease.
+			await github.deleteComment(target.repo, own.id, target.item);
+		}
 	return { state: "lost", commentId: own.id, winner: after.winner };
 }
 

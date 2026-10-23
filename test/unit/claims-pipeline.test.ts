@@ -162,6 +162,55 @@ test("expiry takeover waits through grace and the returning holder loses on a wo
 		winner: "linux-b",
 	});
 });
+test("a losing claimant retries a transient comment delete", async () => {
+	const github = new FakeGithub();
+	let deletes = 0;
+	const deleteComment = github.deleteComment.bind(github);
+	github.deleteComment = async (...args) => {
+		deletes++;
+		if (deletes === 1) throw Error("transient");
+		return deleteComment(...args);
+	};
+	await claim(github, {
+		repo: "acme/repo",
+		issue: 1,
+		agent: "winner",
+		lease: "2999-01-01T00:00:00.000Z",
+	});
+	const result = await claim(github, {
+		repo: "acme/repo",
+		issue: 1,
+		agent: "loser",
+		lease: "2999-01-01T00:00:00.000Z",
+	});
+	assert.equal(result.state, "lost");
+	assert.equal(deletes, 2);
+	assert.equal(github.comments.length, 1);
+});
+test("a foreign marker cannot extend its lease beyond GitHub's updated timestamp", async () => {
+	const github = new FakeGithub();
+	github.comments.push({
+		id: 1,
+		body: "<!-- durable-claim agent=other lease=2999-01-01T00:00:00.000Z -->",
+		login: "durable-bot",
+		updatedAt: new Date(0).toISOString(),
+	});
+	assert.deepEqual(
+		await readClaim(
+			github,
+			{
+				repo: "acme/repo",
+				issue: 1,
+				agent: "agent",
+				lease: new Date(0).toISOString(),
+				login: "durable-bot",
+			},
+			1101,
+			{ durationMs: 1000, graceMs: 100 },
+		),
+		{ state: "lost" },
+	);
+});
 test("a killed worker is replaced once, on a fresh takeover attempt, for both worker kinds", async () => {
 	const policy = { durationMs: 1000, graceMs: 100 };
 	const target = { repo: "acme/repo", issue: 1 };

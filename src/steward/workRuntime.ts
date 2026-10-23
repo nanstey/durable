@@ -5,9 +5,10 @@ import { monitorWorker } from "../dispatch/monitor.ts";
 import type { AttachInfo, WorkerDispatcher } from "../dispatch/types.ts";
 import { autoConstraintReasons, selectedMergeMethod } from "../gate/auto.ts";
 import { decide } from "../gate/decide.ts";
-import { collectFacts } from "../gate/facts.ts";
+import { collectFacts, type GateFacts } from "../gate/facts.ts";
 import { mergeWhenSafe } from "../gate/merge.ts";
 import { effectivePolicy } from "../gate/tighten.ts";
+import type { EffectivePolicy, Risk } from "../gate/policy.ts";
 import { sourceFor, type FixturePolicyScript } from "../gate/policySource.ts";
 import { shadowReport } from "../gate/shadow.ts";
 import {
@@ -353,11 +354,14 @@ export class WorkRuntime {
 				const registered = await this.options.workers.get(task.review.id);
 				if ((await registered.kind.status(registered.handle)) === "running")
 					return;
-				item.review = await collectReview(
-					task.review as unknown as RunningReview,
-					this.options.workers,
-					this.options.definition,
-				);
+				item.review = {
+					...(await collectReview(
+						task.review as unknown as RunningReview,
+						this.options.workers,
+						this.options.definition,
+					)),
+					reviewedAt: this.now(),
+				};
 			} catch (error) {
 				const failures = (task.reviewFailures?.[sha] ?? 0) + 1;
 				task.reviewFailures ??= {};
@@ -397,6 +401,7 @@ export class WorkRuntime {
 		}
 		if (!item.review || item.review.failed) return;
 		const review = item.review;
+		if (item.gate?.mergeFailure) return;
 		if (review.result.verdict !== "approve") {
 			// A reviewer verdict is feedback, not a terminal approval state. Requeue
 			// the producer with the SHA-bound review text and review the new head.
@@ -439,23 +444,14 @@ export class WorkRuntime {
 			},
 			sha,
 		);
-		// A configured cooling-off period has no persisted review timestamp yet.
-		// Fail closed rather than fabricate that elapsed time.
-		const riskRank = { low: 0, medium: 1, high: 2 } as const;
-		const facts = githubFacts && {
-			...githubFacts,
-			// collectReview verifies the reviewer provenance before this point.
-			crossFamilyReview: policy.requireCrossFamilyReview ? true : true,
-			riskAcceptable:
-				policy.maxRisk === undefined ||
-				riskRank[review.result.risk] <= riskRank[policy.maxRisk],
-			// No daily-cap policy exists in the accepted policy schema.
-			dailyCapAvailable: true,
-			coolingOffElapsed:
-				policy.coolingOffMinutes === undefined ||
-				policy.coolingOffMinutes === 0,
-			killSwitchOff: true,
-		};
+		const facts =
+			githubFacts &&
+			(await this.gateFacts(
+				githubFacts,
+				policy,
+				review.result.risk,
+				review.reviewedAt,
+			));
 		let decision = decide(policy, facts);
 		if (facts && decision.action === "merge") {
 			const constraints = autoConstraintReasons(policy, facts, {
@@ -508,25 +504,88 @@ export class WorkRuntime {
 				finalResolution.policy?.enabled !== true ||
 				finalResolution.fingerprint !== resolution.fingerprint
 			)
-				throw Error("policy changed before merge");
-			await this.options.check();
-			const method = selectedMergeMethod(
-				policy,
-				(await this.options.github.allowedMergeMethods?.(item.repo)) ?? [],
-			);
-			if (!method) throw Error("no allowed merge method before merge");
-			await mergeWhenSafe(
-				this.options.github as Required<
-					Pick<import("../gate/merge.ts").MergeGithub, "readPr" | "runGh">
-				>,
+				return this.recordMergeFailure(
+					state,
+					item,
+					"policy changed before merge",
+				);
+			// Re-read all GitHub-computed facts immediately before merge; head pinning
+			// alone does not protect against a changed base, draft state or checks.
+			const finalGithubFacts = await collectFacts(
 				{
 					repo: item.repo,
 					number: pr.number,
-					sha,
-					method,
-					item: item.id,
+					profileLogin: this.options.login,
+					protectedLocations: source.protectedLocations({
+						slug: item.repo,
+						base: repoDefinition?.base,
+					}),
 				},
+				sha,
 			);
+			if (!finalGithubFacts)
+				return this.recordMergeFailure(
+					state,
+					item,
+					"unable to refresh merge facts",
+				);
+			const finalFacts = await this.gateFacts(
+				finalGithubFacts,
+				policy,
+				review.result.risk,
+				review.reviewedAt,
+			);
+			let finalDecision = decide(policy, finalFacts);
+			const availableMethods =
+				(await this.options.github.allowedMergeMethods?.(item.repo)) ?? [];
+			if (finalDecision.action === "merge") {
+				const constraints = autoConstraintReasons(policy, finalFacts, {
+					profileLogin: this.options.login,
+					baseBranch: finalFacts.baseBranch,
+					changedLines: finalFacts.changedLines,
+					fileCount: finalFacts.fileCount,
+					availableMethods,
+					baseProtected: await this.options.github.baseProtected?.(
+						item.repo,
+						finalFacts.baseBranch ?? "",
+					),
+				});
+				if (constraints.length)
+					finalDecision = { action: "wait-human", reasons: constraints };
+			}
+			if (finalDecision.action !== "merge")
+				return this.recordMergeFailure(
+					state,
+					item,
+					finalDecision.reasons.join(", "),
+				);
+			const method = selectedMergeMethod(policy, availableMethods);
+			if (!method)
+				return this.recordMergeFailure(
+					state,
+					item,
+					"no allowed merge method before merge",
+				);
+			try {
+				await mergeWhenSafe(
+					this.options.github as Required<
+						Pick<import("../gate/merge.ts").MergeGithub, "readPr" | "runGh">
+					>,
+					{
+						repo: item.repo,
+						number: pr.number,
+						sha,
+						method,
+						item: item.id,
+					},
+				);
+			} catch (error) {
+				return this.recordMergeFailure(
+					state,
+					item,
+					error instanceof Error ? error.message : "merge failed",
+				);
+			}
 			item.gate.state = "wait-human";
 			item.gate.reasons = ["merge-requested"];
 			audit(this.options.agent, { event: "gate-merged", item: item.id, sha });
@@ -728,6 +787,54 @@ export class WorkRuntime {
 				await this.store.save(state);
 			},
 		};
+	}
+	private async gateFacts(
+		githubFacts: GateFacts,
+		policy: EffectivePolicy,
+		risk: Risk,
+		reviewedAt: number,
+	): Promise<GateFacts> {
+		const riskRank = { low: 0, medium: 1, high: 2 } as const;
+		return {
+			...githubFacts,
+			// collectReview verifies the reviewer provenance before this point.
+			crossFamilyReview: true,
+			riskAcceptable:
+				policy.maxRisk === undefined ||
+				riskRank[risk] <= riskRank[policy.maxRisk],
+			// No daily-cap policy exists in the accepted policy schema.
+			dailyCapAvailable: true,
+			coolingOffElapsed:
+				policy.coolingOffMinutes === undefined ||
+				this.now() - reviewedAt >= policy.coolingOffMinutes * 60_000,
+			// check() is the single kill-switch authority. Probe it so decide emits
+			// its fail-closed reason instead of fabricating an affirmative fact.
+			killSwitchOff: await this.killSwitchOff(),
+		};
+	}
+	private async killSwitchOff() {
+		try {
+			await this.options.check();
+			return true;
+		} catch {
+			return false;
+		}
+	}
+	private async recordMergeFailure(
+		state: WorkState,
+		item: WorkItem,
+		reason: string,
+	) {
+		if (!item.gate) return;
+		item.gate.state = "wait-human";
+		item.gate.reasons = ["merge-failed", reason];
+		item.gate.mergeFailure = {
+			count: (item.gate.mergeFailure?.count ?? 0) + 1,
+			reason,
+			failedAt: this.now(),
+		};
+		audit(this.options.agent, { event: "gate-merge-failed", item: item.id });
+		await this.store.save(state);
 	}
 	private leasePolicy() {
 		return {

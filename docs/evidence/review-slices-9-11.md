@@ -121,11 +121,11 @@ Status reflects the current mainline plus the follow-up hardening in this branch
 | Finding | Status | Evidence |
 | --- | --- | --- |
 | H1 | fixed | `src/console/guard.ts`; `test/unit/console.test.ts` spoofed-loopback-host test |
-| H2 | partial | `src/steward/workRuntime.ts` enforces risk and fails closed for nonzero cooling-off; daily cap, kill-switch fact, required checks and cross-family provenance remain open |
-| M1 | partial | `src/gate/facts.ts` rejects an empty rollup; merge-time complete fact refresh remains open |
+| H2 | partial | `src/steward/workRuntime.ts` persists review time, enforces cooling-off and risk, and derives the kill-switch fact from `check`; daily-cap policy/schema remains open |
+| M1 | fixed | `src/gate/facts.ts` rejects an empty rollup and `src/steward/workRuntime.ts` refreshes facts, `decide`, and auto constraints immediately before merge |
 | M2 | fixed | `src/gate/auto.ts` requires `pathAllow`; gate test covers fail-closed facts |
-| M3 | open | lease expiry still compares wall clocks; no bounded foreign lease or server-clock test exists |
-| M4 | open | takeover uses the same branch and external writes lack a write-time claim fence |
+| M3 | partial | `src/steward/claims.ts` bounds marker leases by GitHub `updated_at` plus configured duration; cross-machine expiry still relies on local time |
+| M4 | open | takeover still uses the same branch and external writes lack a write-time claim fence |
 | M5 | fixed | `src/api/tokens.ts` lists short ids and refuses ambiguous client revocation |
 | M6 | fixed | `src/api/net.ts` has a five-second `whois` timeout and production TTL cache |
 | M7 | fixed | `src/console/guard.ts` requires allowed Serve identity for all methods |
@@ -134,9 +134,9 @@ Status reflects the current mainline plus the follow-up hardening in this branch
 | L1 | fixed | `src/api/net.ts`; `test/unit/net.test.ts` rejects malformed/public `100/8` addresses |
 | L2 | fixed | `src/console/mux.ts` generation fencing and write-error containment |
 | L3 | fixed | `src/gate/tighten.ts` defaults auto mode to shadow and runtime deep-merges `tighten` |
-| L4 | open | merge failures are not persisted with retry/backoff state |
-| L5 | partial | `src/steward/workRuntime.ts` only removes the label while holding the winning claim; loser comment-delete retry remains open |
+| L4 | fixed | `src/steward/workRuntime.ts` persists merge failure reason/count and stops automatic retries pending human action |
+| L5 | fixed | `src/steward/workRuntime.ts` only removes the label while holding the winning claim; `src/steward/claims.ts` retries a transient losing-comment delete |
 | L6 | fixed | `src/gate/policySource.ts` requires the explicit fixture environment opt-in |
 | L7 | fixed | `src/console/registry.ts` migrates old inline tokens to 0600 token files |
-| L8 | open | approval-nonce requests do not yet have a per-item rate limit |
+| L8 | fixed | `src/api/routes.ts` rate-limits approval-nonce requests per item and audits the token client |
 

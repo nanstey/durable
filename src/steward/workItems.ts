@@ -54,6 +54,7 @@ export type WorkItem = {
 					source: "durable-entries" | "pi-session-log";
 				};
 				failed?: false;
+				reviewedAt: number;
 		  }
 		| { sha: string; failed: true; reason: string };
 	spec?: {
@@ -70,6 +71,7 @@ export type WorkItem = {
 		approvedAt?: number;
 		notified?: boolean;
 		report?: import("../gate/shadow.ts").ShadowReport;
+		mergeFailure?: { count: number; reason: string; failedAt: number };
 	};
 	outcome?: WorkItemOutcome;
 	createdAt: number;
