@@ -17,7 +17,7 @@
 ## Slices
 | # | Slice | Spec | PR | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Feasibility spike (evidence only; Anthropic options, Tailscale, passkeys/PWA, GitHub self-notification, token reads of repo policy/rules, Orca steer) | [01-feasibility-spike](./specs/01-feasibility-spike.md) | | |
+| 1 | Feasibility spike (evidence only; Anthropic options, Tailscale, passkeys/PWA, GitHub self-notification, token reads of repo policy/rules, Orca steer) | [01-feasibility-spike](./specs/01-feasibility-spike.md) | #2 | evidence recorded ([spike.md](../evidence/spike.md)); operator items pending (Serve/HTTPS, phone, live Anthropic request, PAT, Android) |
 | 2 | **Durable repo:** scaffold, CI + hygiene scan, profiles, definitions, machine file and identity `doctor` | [02-agent-file-and-identity-doctor](./specs/02-agent-file-and-identity-doctor.md) | | |
 | 2b | **Skills repo:** thin integration (pinned durable clone, installer step, thin skill, catalog and contract rows) | [02b-skills-repo-integration](./specs/02b-skills-repo-integration.md) | | |
 | 3 | Steward process and remote-ready daemon API v1 (with chat guardrails) | [03-steward-process](./specs/03-steward-process.md) | | |
@@ -76,6 +76,38 @@ Repos: every slice is a durable-repo slice except **2b** and **13** (skills repo
 
 - 2026-10-23 (rev 6, U5) — **The engine moves to its own public repo, `nanstey/durable`** (public, MIT, package `@nanstey/durable`, Node >= 22, `main` protected: PRs required, squash-only). Rationale: the engine is an **application** with its own dependencies (pi-durable, WebAuthn verifier, `web-push`), tests, CI and release cadence, not portable harness **config**; the skills repo's rules (config copied into runtime dirs, one skill per commit) do not fit it; Android installs the engine without cloning every skill; public-repo hygiene is enforced by CI on one purpose-built repo. Everything formerly under `harness/durable/` is now at the durable repo root: `bin/`, `src/` (including `src/console/`), `web/`, `schema/`, `examples/`, `units/`, `termux/`, `templates/`, `pi-extension/` (worker guard), `test/`, `scripts/` (hygiene scan), `docs/`, `docs/plan/` (this plan), `docs/evidence/`, `spike/` (layout stated once in program design §1.1). **Skills repo keeps only a thin integration (new spec 02b):** a `vendor-git`-style pin manifest `harness/durable/vendor/nanstey-durable.txt` (same `<url> <40-char commit>` format as `harness/pi/vendor/*.txt`, mirroring the installer's clone-at-pinned-commit and `ok|cloned|updated` behaviour), an `install.sh` step (deps with the clone's lockfile, `durable` on PATH), `harness/durable/bump-pin.sh` for the pin-update flow, a thin `durable` skill, a README catalog row, a `harness/durable/README.md` managed-file table, one `harness/pi/README.md` contract row (derived per-agent Pi dirs symlink `auth-profiles/`, `secrets/`, `profile-meta/`, `extensions/`, `skills/`, `agents/`, `prompts/`), and the skills/agent profiles workers reuse plus Pi settings and patches (slice 13). **Not in the skills repo any more:** the engine, console, client, TUI, API, schemas, tests, units, Termux bootstrap, examples, docs, the worker guard extension (loaded through the generated per-agent Pi settings, so no skills-repo install), the spike, and the plan. Spec 02b is separate (not folded into slice 2/3) because it targets a different repo with a different commit cadence and needs a first durable commit to pin; it is "2b", not "0". **Slice 1** code and evidence live in the durable repo (`spike/`, `docs/evidence/`) and need no skills-repo change. **Cross-repo coordination:** durable first, then the skills-repo pin bump; durable keeps reading older formats (additive within `version: 1`; breaking changes bump the schema version and ship a migration before the pin bump); pi-durable, pi-ai and pi-coding-agent are pinned exactly in durable's `package.json` and committed lockfile and never in the skills repo; the required-skills list is a contract (`docs/skills-contract.md`, checked by `doctor`). **Android:** the Termux bootstrap lives in the durable repo and clones and pins it directly; the skills repo is an optional, separately pinned input used only for worker dispatch (steward, scout and chat need none; `doctor` disables worker dispatch when required skills are missing). **Public-repo hygiene** was applied to every plan file (see the hygiene note below) and is enforced from slice 2 by `scripts/hygiene-scan.sh` in CI over the whole repo including `docs/plan/`.
 - 2026-10-23 (rev 6, hygiene) — **Public-repo hygiene sweep of the plan** (this plan is now published in a public repo). Fixed: 1 personal name (replaced with "the operator"); 1 local-clone path (`/tmp/pi-github-repos/...`, replaced by the upstream name github.com/disler/durable-pi) plus its `(/tmp/...)` parentheticals in specs; 2 references to the skills repo's plan folder (`.plans/...`, now `docs/plan/`) and 8 relative `evidence/...` references (now `docs/evidence/...`); 16 `harness/durable/...` engine paths re-rooted to the durable repo root. Scanned for and **not found**: real host or tailnet names (the console host is the placeholder `<console-host>`), emails, tokens, private repo names, home-directory paths. Placeholders kept on purpose: `acme/api`, `<operator-login>`, `operator@example.invalid`, token prefixes (`ghp_`, `github_pat_`, `sk-`) named only as prefixes. Rule added to the plan (program design §1.1, architecture D18) and a CI check (slice 2).
+
+- 2026-10-23 (slice 1) — **Feasibility spike: go, with plan corrections** ([evidence](../evidence/spike.md), PR #2).
+  - **Go:**
+    - pi-durable 1.4.0 runs on Node 26 with `node:sqlite`. After kill -9 mid-tool, the model gets an interrupted tool result and the turn finishes.
+    - Generic profile reuse works inside a Harness, with credentials read only from profile-file copies: OpenAI-Codex OAuth, OpenRouter, and an `api_key` credential via both `createModels` and `ModelRuntime.create({ authPath })`. The env-key TypeSafe call is separate evidence (no Harness, no profile).
+    - Derived `PI_CODING_AGENT_DIR` workers: profile isolation, `--continue`, tail-able session JSONL.
+    - Orca: create/list/read/send-input/interrupt with `--json`; steer capable.
+    - Desktop WebAuthn with `@simplewebauthn/server` 14.0.3 (MIT); PWA + VAPID mechanics (`web-push` 3.6.7 is MPL-2.0).
+    - Credential screening tuned to 1/30 false positives.
+  - **Slice 2 must first update the design docs (architecture D2/D3, program design) and spec 02 for:**
+    - `ModelRuntime` (or an own pi-ai `CredentialStore`), not `AuthStorage`. pi-coding-agent has not exported it since 0.80.8.
+    - Named profiles only for agents. No file-symlinked `auth.json`: it lost updates (45/405, 2/405, 22/405) because the lock is per path (`realpath: false`). Doctor rejects `default`, or requires an explicit opt-in. Directory symlinks are safe (405/405).
+    - Credential files use "lock + in-place write" (`proper-lockfile` + `writeFileSync`). There is no atomic rename.
+    - `engines.node` `>=22.19.0`.
+    - Exact pins `@earendil-works/pi-durable`, `pi-ai`, `pi-coding-agent` at `1.4.0`, plus `@earendil-works/chord@1.4.0` as a direct dependency.
+    - Conversation model changes go through `configure()`: `harness.root(ctx, { agent })` applies the agent only on creation.
+  - **Slice 3:** the unit keeps `KillMode=control-group`, plus a no-orphan test. kill -9 left the tool's `bash`/`sleep` children running.
+  - **Slice 6:** worker launch always passes `--provider/--model` and stdin `/dev/null`. pi-auth-profiles' `defaultProfile` applies after startup model resolution, and `pi -p` blocks on a piped stdin.
+  - **Anthropic:** spec 02a (shaped auth, option 1: provider override; jiti 2.7.0 loads pi-anthropic-auth 3.4.2 without vendoring; pi-durable has no per-request `onPayload`/`fetch`, and `beforeRequest` only replaces messages) is **deferred until one consented live request passes**, run through a separate redacting live-test harness, not the stub. Option 3 (Anthropic only in workers/reviewers) is the interim default.
+  - **Blocked / pending operator:**
+    - Tailscale Serve and HTTPS certificates are not enabled on the tailnet. The identity-header, cert and tagged-source checks gate slices 11/12a.
+    - Phone passkeys and push.
+    - GitHub notifications UI and a second account.
+    - Fine-grained PAT (`gh api user` probe included).
+    - Live Anthropic request.
+    - Android checklist.
+  - **GitHub facts:**
+    - A single account gets no notification for its own mentions or assignments (confirms U1).
+    - Private free-plan repos return 403 for rules and branch protection.
+    - Classic protection is invisible to the rules endpoint, so a rules fingerprint needs both reads.
+  - **Passkey ladder:** GitHub merge or the CLI nonce until the phone checks pass; Web Push best effort.
+  - A private `<sandbox-repo>` owned by the operator is left for the operator to delete.
 
 ## Open questions (each has a default)
 Resolved in revision 5: Q19 (no phone-specific rules), Q20 (no default chat rate limits), Q21-Q23 (Android defaults accepted). Q18 is **deferred by the user** (see below). Earlier: Q1-Q17 resolved or reframed; Q11 removed; Q9 superseded by Q18.
