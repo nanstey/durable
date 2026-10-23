@@ -206,7 +206,7 @@ From revision 7:
 26. `durable attach` is a conversation-**tree** TUI (steward, chat, scout, workers, nested children) that Orca can show in a terminal beside the user's normal sessions; the console shows the same tree.
 27. Safety rule: a worktree marked `human-held` is never resumed or written to by the daemon until a human releases it (release is a guarded action).
 28. A named work item follows eligible intake through merge confirmation, cancellation or parking; queue entries, claims and attempts are its records, not competing identities.
-29. Per-project pipeline config selects Durable stages and gate conditions; code enforces every selected gate. The default pipeline remains the current flow. A complexity-triggered spec stage produces a draft PR and requires human approval before dispatch.
+29. Per-project pipeline config selects Durable stages and gate conditions; code enforces every selected gate. The default pipeline remains the current flow. A complexity-triggered spec stage produces a draft PR and, when `specApproval` is true, requires human approval before dispatch.
 30. Metrics land in slice 15; slice 16 uses their outcomes to make PR-only self-improvement proposals. GitHub is the first intake adapter; future adapters share code-owned, fail-closed eligibility.
 
 ## Assumptions (labelled; confirm or correct)

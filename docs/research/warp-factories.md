@@ -62,7 +62,7 @@ Warp is far more complete. Durable has stronger identity isolation, crash-safety
 ## Recommendations
 
 1. **Adopt the work-item entity.** Name one record that follows an item from claim to merge, and use it in the API, notifications and metrics. Define completion as merged (or cancelled), not handed off.
-2. **Add an optional spec stage.** For items above a complexity threshold, code (`pipeline/spec.ts`) opens a draft spec PR from the read-only scout's text and the gate waits for human approval before the worker starts. Enforce it in code, not in a prompt.
+2. **Add an optional spec stage.** For items above a complexity threshold, code (`pipeline/spec.ts`) opens a draft spec PR from the read-only scout's text and the gate (when `specApproval` is set) waits for human approval before the worker starts. Enforce it in code, not in a prompt.
 3. **Make the pipeline configurable per project, with gates enforced in code.** Let each project's config file compose the stages (scout, spec, build, review, gate, handoff) from Durable primitives, so the exact pipeline is a per-project choice. Warp expresses its pause points as prompt policy, which is bypassable. In Durable the config selects stages and gate conditions, and code enforces them. Record this contrast in `docs/plan/2-system-architecture.md`.
 4. **Ship the steward loop before widening scope.** Polling, queue, claims, then scout and worker. Warp's value comes from the end-to-end path, and Durable cannot demonstrate it yet.
 5. **Add intake adapters later, behind one interface.** Start with GitHub (issues, labels, comments). Add webhooks and chat only after the poll path works. Keep the code-owned eligibility check on every adapter, and fail closed on filters as Warp does.
