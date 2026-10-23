@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { DeviceMonitor } from "../../src/console/monitor.ts";
 import { StreamMux } from "../../src/console/mux.ts";
-import { allowedDaemonRoute } from "../../src/console/proxy.ts";
+import { allowedDaemonRoute, proxyDaemon } from "../../src/console/proxy.ts";
 import { createConsoleApp } from "../../src/console/routes.ts";
 
 test("console guard adds CSP and refuses cross-origin writes", async () => {
@@ -36,6 +36,28 @@ test("proxy allowlist excludes files, shells and arbitrary paths", () => {
 	assert.equal(allowedDaemonRoute("GET", "/v1/files"), false);
 	assert.equal(allowedDaemonRoute("POST", "/v1/shell"), false);
 	assert.equal(allowedDaemonRoute("GET", "/v1/anything"), false);
+});
+
+test("proxy injects the daemon token and does not forward browser credentials", async () => {
+	const original = globalThis.fetch;
+	let authorization = "";
+	globalThis.fetch = async (_input, init) => {
+		authorization = new Headers(init?.headers).get("authorization") ?? "";
+		return Response.json({ ok: true });
+	};
+	try {
+		const response = await proxyDaemon(
+			{ id: "local", url: "http://127.0.0.1:7330", token: "private" },
+			new Request("http://127.0.0.1:4319/api/devices/local/v1/queue", {
+				headers: { authorization: "Bearer browser" },
+			}),
+			"/v1/queue",
+		);
+		assert.equal(response.status, 200);
+		assert.equal(authorization, "Bearer private");
+	} finally {
+		globalThis.fetch = original;
+	}
 });
 
 test("monitor distinguishes daemon device states", async () => {

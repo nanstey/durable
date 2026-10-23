@@ -45,7 +45,7 @@ export function createConsoleApp(
 	const csrf = options.csrf ?? randomBytes(32).toString("base64url");
 	const deviceMap = new Map(devices.map((device) => [device.id, device]));
 	const monitor = new DeviceMonitor(devices);
-	const mux = new StreamMux();
+	const mux = new StreamMux(deviceMap);
 	const app = new Hono();
 	app.use("*", consoleGuard(csrf));
 	app.get("/api/bootstrap", async (c) =>
