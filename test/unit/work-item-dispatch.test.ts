@@ -76,6 +76,42 @@ test("monitor only resumes unintentional exit without a draft PR", async () => {
 	);
 	assert.equal(resumed, 1);
 });
+test("capacity refusal remains queued without consuming a work attempt", async () => {
+	const work = item();
+	const kinds = new WorkerKindRegistry();
+	kinds.register({
+		name: "pi-session",
+		start: async () => {
+			throw Object.assign(Error("full"), { code: "capacity_exceeded" });
+		},
+	} as never);
+	await assert.rejects(
+		advanceWorkItem({ phase: "dispatch", itemId: work.id }, work, {
+			agent: "agent",
+			lease: "lease",
+			github: {
+				addLabel: async () => {},
+				removeLabel: async () => {},
+				createComment: async () => ({ id: 1, body: "" }),
+				listComments: async () => [],
+			},
+			brief: async () => "brief",
+			dispatcher: new FakeDispatcher(),
+			workers: new WorkerRegistry(),
+			kinds,
+			definition: {
+				profile: "profile",
+				models: { worker: { provider: "faux", model: "model" } },
+			},
+			machine: { name: "machine", agents: ["agent"] },
+			model: { provider: "faux", model: "model" },
+			env: {},
+		}),
+		{ code: "capacity_exceeded" },
+	);
+	assert.equal(work.attempts.length, 0);
+});
+
 test("work-item task creates workspace before starting selected Pi worker", async () => {
 	const skillsRoot = mkdtempSync(join(tmpdir(), "durable-skills-"));
 	for (const skill of ["idea-to-pr", "pr", "build"]) {

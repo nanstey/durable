@@ -94,7 +94,7 @@ Fix: call `notifier.due()` from the steward loop tick (and on `notify`), and add
 | M5 | Fixed | Steward loop invokes `Notifier.due()` through production wiring. |
 | G1 | Fixed | Scout queue evaluation calls `applyJudgment` when `models.judge` is configured. |
 | G2 | Fixed | Queue evaluation supplies claim, block-list, attempt, size and age eligibility inputs. |
-| G3 | Fixed (partial) | Invalid source timestamps are ineligible. Poll backoff remains follow-up work. |
+| G3 | Fixed | Invalid source timestamps are ineligible; GitHub issue polls use capped exponential backoff with jitter after failures and reset after success. `scout.test.ts`. |
 | G4 | Fixed | Worker result costs are persisted on attempts and added to the steward budget. |
 | L2 | Fixed | Failed worker launches close their attempt before rethrowing. |
 | L3-L8 | Not fixed | Outside this remediation slice. |
