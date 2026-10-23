@@ -10,6 +10,9 @@ import { loadMachine } from "../config/load.ts";
 import { DurableClient } from "../client/client.ts";
 import { attachTui } from "../tui/main.ts";
 import { durableHome } from "../config/paths.ts";
+import { startConsole } from "../console/main.ts";
+import { ensureConsoleConfig } from "../console/registry.ts";
+import { ConsoleServiceManager } from "../platform/service/console.ts";
 import { SystemdUserServiceManager } from "../platform/service/systemdUser.ts";
 import { resumeLocal } from "../steward/killswitch.ts";
 import { assignedPort, run } from "../steward/main.ts";
@@ -275,6 +278,42 @@ for (const action of ["init", "bind-github", "show", "list", "check"])
 subCommands.profile = defineCommand({
 	meta: { name: "profile" },
 	subCommands: profileCommands,
+});
+subCommands.console = defineCommand({
+	meta: { name: "console" },
+	subCommands: {
+		run: defineCommand({
+			meta: { name: "run" },
+			async run() {
+				startConsole();
+				await new Promise<void>(() => {});
+			},
+		}),
+		enable: defineCommand({
+			meta: { name: "enable" },
+			args: { "dry-run": { type: "boolean", default: false } },
+			async run({ args }) {
+				const config = ensureConsoleConfig();
+				if (args["dry-run"]) {
+					console.log(`console enable (port ${config.port})`);
+					return;
+				}
+				await new ConsoleServiceManager().enable();
+			},
+		}),
+		disable: defineCommand({
+			meta: { name: "disable" },
+			async run() {
+				await new ConsoleServiceManager().disable();
+			},
+		}),
+		status: defineCommand({
+			meta: { name: "status" },
+			async run() {
+				console.log(await new ConsoleServiceManager().status());
+			},
+		}),
+	},
 });
 subCommands.notify = defineCommand({
 	meta: { name: "notify" },

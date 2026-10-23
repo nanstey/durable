@@ -2,7 +2,7 @@
   "$schema": "./node_modules/fallow/schema.json",
   "entry": ["bin/durable.ts", "scripts/hygiene-scan.mjs", "test/fixtures/*.ts"],
   // Exploratory spikes are intentionally standalone and are not production code.
-  "ignorePatterns": ["spike/**"],
+  "ignorePatterns": ["spike/**", "web/**"],
   // The provider factory is intentionally exported for the runtime integration surface.
   "ignoreFindings": ["src/identity/modelAuth.ts"],
   // These helpers and packages are public or reserved for the runtime integration surface.
@@ -10,13 +10,16 @@
     { "file": "src/config/load.ts", "exports": ["loadYaml"] },
     { "file": "src/config/schema.ts", "exports": ["PROFILE_NAME"] },
     { "file": "src/identity/pidir.ts", "exports": ["createDerivedPiDir"] },
-    { "file": "src/api/types.ts", "exports": ["ErrorCode", "ErrorResponse"] }
+    { "file": "src/api/types.ts", "exports": ["ErrorCode", "ErrorResponse"] },
+    { "file": "src/console/registry.ts", "exports": ["consoleDir", "devicesPath", "consoleConfigPath", "vapidPath", "subscriptionsPath", "loadConsoleConfig", "saveDevices"] }
   ],
   "ignoreDependencies": [
     "@earendil-works/chord",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-durable",
     "proper-lockfile",
-    "typebox"
+    "typebox",
+    "preact",
+    "htm"
   ]
 }

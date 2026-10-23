@@ -1,0 +1,12 @@
+[Unit]
+Description=Durable local web console
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/durable console run
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
