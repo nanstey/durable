@@ -1,11 +1,11 @@
 import type { HostedProcess } from "../dispatch/types.ts";
+import type { DurableAnchor } from "./durable/anchor.ts";
 import type {
 	JobSpec,
 	WorkerCapabilities,
 	WorkerHandle,
 	WorkerKind,
 } from "./kind.ts";
-import type { DurableAnchor } from "./durable/anchor.ts";
 
 /** In-process pi-durable worker. Its background anchor, not the steward main turn, owns the child. */
 export class DurableConversationKind implements WorkerKind {
@@ -16,8 +16,7 @@ export class DurableConversationKind implements WorkerKind {
 	}
 	async start(job: JobSpec): Promise<WorkerHandle> {
 		const existing = await this.anchor.find(job.id);
-		const conversation =
-			existing ?? (await this.anchor.create({ ownerTaskId: job.id, job }));
+		const conversation = existing ?? (await this.anchor.create(job));
 		const process: HostedProcess = {
 			id: job.id,
 			handle: `durable:${conversation.id}`,
@@ -35,11 +34,20 @@ export class DurableConversationKind implements WorkerKind {
 				: "unknown";
 	}
 	async result(handle: WorkerHandle) {
-		return { status: await this.status(handle) };
+		return {
+			status: await this.status(handle),
+			outcome: (await this.anchor.find(handle.id))?.outcome,
+		};
 	}
-	async interrupt(handle: WorkerHandle, mode: "soft" | "hard") {
-		if (mode === "hard") await this.anchor.abort(handle.id);
+	async interrupt(
+		handle: WorkerHandle,
+		mode: "soft" | "hard",
+		reason?: import("./durable/anchor.ts").WorkerStop,
+	) {
+		if (mode === "hard") await this.anchor.abort(handle.id, reason);
+		else await this.anchor.soft(handle.id);
 	}
+	// Invoked through WorkerKind by WorkerRegistry.
 	// fallow-ignore-next-line unused-class-member
 	async steer(handle: WorkerHandle, text: string) {
 		const conversation = await this.anchor.find(handle.id);

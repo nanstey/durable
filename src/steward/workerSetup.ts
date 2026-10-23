@@ -9,9 +9,11 @@ import { createDerivedPiDir } from "../identity/pidir.ts";
 import { resolveProfile } from "../identity/profiles.ts";
 import { workerToolEnv } from "../identity/workerTools.ts";
 import { Notifier } from "../notify/notifier.ts";
+import {
+	HardenedWorkerGit,
+	WorkerGithubCli,
+} from "../workers/durable/gitops.ts";
 import { type JobSpec, WorkerKindRegistry } from "../workers/kind.ts";
-import { MemoryDurableAnchor } from "../workers/durable/anchor.ts";
-import { DurableConversationKind } from "../workers/durableConversation.ts";
 import { PiSessionKind } from "../workers/piSession.ts";
 import { WorkerRegistry } from "../workers/registry.ts";
 import { agentDir } from "./files.ts";
@@ -108,7 +110,6 @@ export function setupWorkers(options: SetupOptions) {
 			throw Error("dispatch paused");
 	};
 	const kinds = new WorkerKindRegistry();
-	kinds.register(new DurableConversationKind(new MemoryDurableAnchor()));
 	kinds.register(
 		new PiSessionKind(dispatcher, join(agentDir(agent), "launchers"), {
 			check: async (item) => {
@@ -134,6 +135,22 @@ export function setupWorkers(options: SetupOptions) {
 				agent,
 				definition,
 				machine,
+				durable: {
+					verifyIdentity: options.checkIdentity,
+					git: new HardenedWorkerGit({
+						root: join(agentDir(agent), "git"),
+						identity: identity.manifest.git,
+						token: identity.stewardEnv.GH_TOKEN!,
+						env: identity.stewardEnv,
+						processes,
+					}),
+					github: new WorkerGithubCli({ env: identity.stewardEnv, processes }),
+					shellEnv: (job) =>
+						buildAgentEnv(identity.profile, "durable-shell", {
+							agent,
+							item: job.item,
+						}),
+				},
 				dispatcher,
 				workers,
 				kinds,

@@ -74,9 +74,13 @@ export class WorkerRegistry {
 			});
 		await worker.kind.steer(worker.handle, text);
 	}
-	async interrupt(id: string, mode: "soft" | "hard"): Promise<void> {
+	async interrupt(
+		id: string,
+		mode: "soft" | "hard",
+		reason?: import("./durable/anchor.ts").WorkerStop,
+	): Promise<void> {
 		const worker = await this.get(id);
-		await worker.kind.interrupt(worker.handle, mode);
+		await worker.kind.interrupt(worker.handle, mode, reason);
 	}
 	async tree(parentId: string | null): Promise<TreeNode[]> {
 		return (await this.list()).map((worker) => ({

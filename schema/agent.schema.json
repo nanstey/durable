@@ -50,6 +50,18 @@
           "type": "integer",
           "minimum": 1
         },
+        "maxTurns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxToolCalls": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tokenBudget": {
+          "type": "integer",
+          "minimum": 1
+        },
         "maxMergesPerDay": {
           "type": "integer",
           "minimum": 1

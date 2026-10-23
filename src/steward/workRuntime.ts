@@ -2,6 +2,7 @@ import type { AgentDef, MachineCfg } from "../config/schema.ts";
 import { monitorWorker } from "../dispatch/monitor.ts";
 import type { AttachInfo, WorkerDispatcher } from "../dispatch/types.ts";
 import { assembleWorkerBrief, createScoutBrief } from "../scout/brief.ts";
+import { eligibility } from "../sources/eligibility.ts";
 import { readLocalBody } from "../sources/localFiles.ts";
 import type { WorkerHandle, WorkerKindRegistry } from "../workers/kind.ts";
 import type { WorkerRegistry } from "../workers/registry.ts";
@@ -12,7 +13,6 @@ import { quietHours } from "./killswitch.ts";
 import { canDispatch, itemTimedOut } from "./limits.ts";
 import type { ProcessManager } from "./procs.ts";
 import type { Queue, QueueItem } from "./queue.ts";
-import { eligibility } from "../sources/eligibility.ts";
 import {
 	emptyWorkItems,
 	reconcilePrs,
@@ -54,6 +54,10 @@ export type WorkRuntimeOptions = {
 	check: () => Promise<void>;
 	now?: () => number;
 	drainMs?: number;
+	durable?: Pick<
+		import("../workers/durable/anchor.ts").NativeAnchorOptions,
+		"git" | "github" | "shellEnv" | "verifyIdentity"
+	>;
 	recordCost?: (cost: number) => Promise<void>;
 };
 export type WorkStore = {
@@ -121,8 +125,7 @@ export class WorkRuntime {
 			phase: "claim" as const,
 		};
 		state.tasks[item.id] = task;
-		const attempt = item.attempts.at(-1);
-		if (attempt?.worker) this.restore(item, task);
+		if (await this.restoreOutcome(state, item, task)) return;
 		if (item.outcome === "merged" || item.outcome === "parked") {
 			if (!o.processes.fenced(item.id) && !paused)
 				await this.finish(state, item, task);
@@ -130,18 +133,42 @@ export class WorkRuntime {
 			return;
 		}
 		if (o.processes.fenced(item.id)) return;
-		if (queueItem && queueItem.state !== "eligible") {
-			item.outcome = "needs-human";
-			await this.store.save(state);
-			return;
-		}
-		if (queueItem) item.candidate = queueItem;
+		if (!(await this.refreshCandidate(state, item, queueItem))) return;
 		if (await this.stopIfLimited(state, item, paused, budgetStopped)) return;
 		if (this.inactive(item, task, paused)) return;
 		await this.renew(state, item);
 		if (task.phase === "await-pr") await this.monitor(state, item, task);
 		task = state.tasks[item.id];
 		if (task.phase !== "await-pr") await this.runPhases(state, item, task);
+	}
+	private async refreshCandidate(
+		state: WorkState,
+		item: WorkItem,
+		candidate?: QueueItem,
+	) {
+		if (!candidate) return true;
+		if (candidate.state !== "eligible") {
+			item.outcome = "needs-human";
+			await this.store.save(state);
+			return false;
+		}
+		item.candidate = candidate;
+		return true;
+	}
+	private async restoreOutcome(
+		state: WorkState,
+		item: WorkItem,
+		task: WorkItemTask,
+	) {
+		const attempt = item.attempts.at(-1);
+		if (!attempt?.worker) return false;
+		this.restore(item, task);
+		const worker = await this.options.workers.get(attempt.id);
+		const result = await worker.kind.result(worker.handle);
+		if (!result.outcome || attempt.endedAt) return false;
+		if (result.outcome !== "held")
+			await this.cancel(state, item, result.outcome);
+		return true;
 	}
 	private inactive(item: WorkItem, task: WorkItemTask, paused: boolean) {
 		return (
@@ -402,6 +429,10 @@ export class WorkRuntime {
 			job: {
 				id: attempt.id,
 				item: item.id,
+				repo: item.repo,
+				baseRef: o.definition.scope?.repos?.find(
+					(repo) => repo.slug === item.repo,
+				)?.base,
 				agent: o.agent,
 				role: "worker",
 				briefText: task.briefText ?? "",
@@ -424,20 +455,26 @@ export class WorkRuntime {
 	) {
 		const attempt = item.attempts.at(-1);
 		if (!attempt) return;
-		attempt.cancelledBy = reason;
+		// Native soft cancellation belongs to the open turn, not the attempt.
+		if (reason !== "soft" || attempt.worker?.kind !== "durable-conversation")
+			attempt.cancelledBy = reason;
 		if (reason !== "soft") {
 			attempt.endedAt = this.now();
 			attempt.outcome = reason;
-			item.outcome =
-				reason === "stopped" || reason === "interrupted"
-					? "needs-human"
-					: reason;
+			item.outcome = this.terminalOutcome(
+				reason,
+				attempt.worker?.kind === "durable-conversation",
+			);
 		}
 		await this.store.save(state);
 		if (attempt.worker) {
 			this.restore(item, state.tasks[item.id]);
 			await this.options.workers
-				.interrupt(attempt.id, reason === "soft" ? "soft" : "hard")
+				.interrupt(
+					attempt.id,
+					reason === "soft" ? "soft" : "hard",
+					reason === "soft" ? undefined : reason,
+				)
 				.catch(() =>
 					audit(this.options.agent, {
 						event: "worker-interrupt-failed",
@@ -453,6 +490,18 @@ export class WorkRuntime {
 				.catch(() =>
 					audit(this.options.agent, { event: "notify-failed", item: item.id }),
 				);
+	}
+	private terminalOutcome(
+		reason: "paused" | "limit" | "stopped" | "interrupted",
+		durable: boolean,
+	) {
+		if (
+			reason === "stopped" ||
+			reason === "interrupted" ||
+			(reason === "limit" && durable)
+		)
+			return "needs-human";
+		return reason;
 	}
 	async requestWork(id: string, queue: Queue, modelRequested = false) {
 		return this.enqueue(async () => {
@@ -535,7 +584,7 @@ export class WorkRuntime {
 					setTimeout(resolve, this.options.drainMs ?? 10000),
 				);
 				await this.options.workers
-					.interrupt(attempt.id, "hard")
+					.interrupt(attempt.id, "hard", "held")
 					.catch(() => {});
 			}
 			const result = await this.options.processes.finishHold(item);

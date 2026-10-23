@@ -1,6 +1,6 @@
 /** Shared worker guardrail command policy. It is deliberately not a sandbox. */
 export const blockedWorkerCommandPatterns: ReadonlyArray<RegExp> = [
-	/(?:^|[;&|]\s*)cd\s+(?:\/|~)/i,
+	/(?:^|[;&|]\s*)cd\s+(?:--\s+)?(?:['"]?(?:\/|~|\.\.(?:\/|\s|$)))/i,
 ];
 
 const ghGlobalOptions = new Set([
@@ -71,7 +71,8 @@ function gitBlocked(args: string[]) {
 		["push", "merge", "rebase", "worktree", "switch", "checkout"].includes(
 			operation,
 		) ||
-		(operation === "reset" && args.slice(index + 1).includes("--hard"))
+		(operation === "reset" && args.slice(index + 1).includes("--hard")) ||
+		args.some((arg) => /^(?:--admin|--force(?:-with-lease)?)(?:=|$)/.test(arg))
 	);
 }
 
