@@ -145,15 +145,6 @@ test("selected native kind: claim -> fake workspace -> faux model fixed tools ->
 			tokenInShell: false,
 			viewable: "durable-attach",
 		});
-		await assert.rejects(
-			() =>
-				kind.start({
-					...handle.job,
-					id: "unsupported-reviewer",
-					role: "reviewer",
-				}),
-			{ code: "not_supported", status: 501 },
-		);
 		await eventually(async () => (await rig.items())[0].prs.length === 1);
 		const before = (await rig.harness.tree()).filter(
 			(node) => node.kind === "worker-durable",
@@ -176,6 +167,86 @@ test("selected native kind: claim -> fake workspace -> faux model fixed tools ->
 		assert.equal(rig.drafts.length, 1);
 	} finally {
 		process.env = parent;
+		await rig.harness.close();
+	}
+});
+
+test("on-start durable viewer opens through the dispatcher with an attach command", async () => {
+	const rig = await durableRig();
+	const opened: Array<{ title: string; command: string }> = [];
+	rig.config.definition.workers!.durable!.viewer = "on-start";
+	rig.deps.dispatcher.openViewer = async (_workspace, viewer) => {
+		opened.push(viewer);
+		return { kind: "command", command: viewer.command };
+	};
+	try {
+		rig.harness.start();
+		await worker(rig);
+		await eventually(() => opened.length === 1);
+		assert.match(opened[0].title, /^durable:agent\/\d+$/);
+		assert.match(opened[0].command, /^durable attach agent\/\d+$/);
+	} finally {
+		await rig.harness.close();
+	}
+});
+
+test("durable reviewer records a validated verdict with provenance and exposes only read tools", async () => {
+	const rig = await durableRig();
+	try {
+		rig.harness.start();
+		const { kind, handle } = await worker(rig);
+		await kind.interrupt(handle, "hard");
+		rig.faux.setResponses([
+			call("pr_diff"),
+			call("report_verdict", {
+				verdict: "changes",
+				risk: "medium",
+				summary: "Tests need coverage.",
+				headSha: "reviewed-head",
+			}),
+		]);
+		const reviewer = await kind.start({
+			...handle.job,
+			id: "review-attempt",
+			role: "reviewer",
+			model: { provider: "faux", model: "one", family: "reviewer" },
+			reviewedFamily: "worker",
+			reviewedHeadSha: "reviewed-head",
+			briefText: "Review the pull request.",
+		});
+		await eventually(async () => (await kind.status(reviewer)) === "exited");
+		const result = await kind.result(reviewer);
+		assert.deepEqual(result.review, {
+			verdict: "changes",
+			risk: "medium",
+			summary: "Tests need coverage.",
+			headSha: "reviewed-head",
+		});
+		assert.deepEqual(result.provenance, {
+			provider: "faux",
+			model: "one",
+			family: "reviewer",
+			entries: 2,
+			source: "durable-entries",
+		});
+		const conversation = await rig.harness.native.conversation(
+			Number(reviewer.process.handle.replace("durable:", "")) as ConversationId,
+			rig.harness.context,
+		);
+		assert.deepEqual(
+			(await conversation!.agent(rig.harness.context)).tools
+				.map((tool) => tool.name)
+				.sort(),
+			["pr_diff", "read", "report_verdict", "search"],
+		);
+		const nodes = await rig.harness.tree();
+		const node = nodes.find((entry) => entry.kind === "reviewer-durable");
+		assert.equal(node?.kind, "reviewer-durable");
+		assert.equal(
+			node?.parentId,
+			nodes.find((entry) => entry.kind === "steward")?.id,
+		);
+	} finally {
 		await rig.harness.close();
 	}
 });

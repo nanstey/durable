@@ -18,7 +18,7 @@ import {
 	UsageDoc,
 } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
-import { providerFor } from "../../config/agent.ts";
+import { familyFor, providerFor } from "../../config/agent.ts";
 import type { ProcessManager } from "../../steward/procs.ts";
 import type { JobSpec } from "../kind.ts";
 import {
@@ -30,6 +30,12 @@ import {
 import { durableLimitStop } from "./limits.ts";
 import { withWorkerOperation } from "./operation.ts";
 import { interruptedToolPlaybook } from "./playbook.ts";
+import {
+	parseReviewResult,
+	ReviewResultSchema,
+	type ModelProvenance,
+	type ReviewResult,
+} from "./review.ts";
 import { durableSkillSections } from "./skills.ts";
 import {
 	assertCommand,
@@ -43,7 +49,8 @@ export type WorkerStop =
 	| "held"
 	| "stopped"
 	| "limit"
-	| "interrupted";
+	| "interrupted"
+	| "failed";
 type StoredJob = Omit<JobSpec, "env">;
 type WorkerRecord = {
 	job: StoredJob;
@@ -54,6 +61,7 @@ type WorkerRecord = {
 	toolCalls: number;
 	outcome?: WorkerStop;
 	reported?: string;
+	review?: { result: ReviewResult; provenance: ModelProvenance };
 };
 const WorkersDoc = defineDoc<{
 	workers: Record<string, WorkerRecord>;
@@ -70,6 +78,7 @@ export type DurableConversation = {
 	ownerTaskId: string;
 	state: "running" | "waiting" | "done" | "aborted";
 	outcome?: WorkerStop;
+	review?: { result: ReviewResult; provenance: ModelProvenance };
 };
 export interface DurableAnchor {
 	find(attemptId: string): Promise<DurableConversation | undefined>;
@@ -94,6 +103,7 @@ export type NativeAnchorOptions = {
 	check: () => Promise<void>;
 	budgetStopped: () => Promise<boolean>;
 	account: (usage: Usage) => Promise<void>;
+	prDiff?: (job: JobSpec) => Promise<string>;
 	verifyIdentity?: () => Promise<void>;
 	/** All durable children share this harness storage and must be admitted here. */
 	maxConcurrent?: number;
@@ -156,7 +166,7 @@ export class NativeDurableAnchor implements DurableAnchor {
 						);
 						return;
 					}
-					if (record.reported !== undefined) {
+					if (record.reported !== undefined || record.review !== undefined) {
 						await runtime.commit(
 							() => ({
 								status: "terminal",
@@ -284,6 +294,49 @@ export class NativeDurableAnchor implements DurableAnchor {
 					return { ...text("reported"), control: { terminate: true } };
 				},
 			}),
+			defineTool({
+				name: "pr_diff",
+				description: "Read the code-owned diff for the reviewed pull request.",
+				parameters: Type.Object({}),
+				replay: "safe",
+				execute: async (_args, api) => {
+					const job = await this.jobFor(api.conversationId);
+					if (job.role !== "reviewer") throw Error("reviewer tool required");
+					if (!o.prDiff) throw Error("review diff source is unavailable");
+					return text(await o.prDiff(job));
+				},
+			}),
+			defineTool({
+				name: "report_verdict",
+				description:
+					"Record one final structured verdict for the reviewed head.",
+				parameters: ReviewResultSchema,
+				execute: async (value, api, ctx) => {
+					const job = await this.jobFor(api.conversationId);
+					if (job.role !== "reviewer") throw Error("reviewer tool required");
+					const result = parseReviewResult(value);
+					if (result.headSha !== job.reviewedHeadSha)
+						throw Error("review verdict head SHA does not match reviewed head");
+					await api.commit(async (tx) => {
+						const record = (await tx.doc(WorkersDoc)).workers[job.id];
+						if (record.review) throw Error("review verdict already reported");
+						const family = familyFor(job.model);
+						if (!job.reviewedFamily || family === job.reviewedFamily)
+							throw Error("reviewer model family is not independent");
+						record.review = {
+							result,
+							provenance: {
+								provider: providerFor(job.model),
+								model: job.model.model,
+								family,
+								entries: record.turns,
+								source: "durable-entries",
+							},
+						};
+					}, ctx);
+					return { ...text("verdict recorded"), control: { terminate: true } };
+				},
+			}),
 		];
 	}
 	private async runOperation<T>(
@@ -342,7 +395,11 @@ export class NativeDurableAnchor implements DurableAnchor {
 						.snapshot(ProviderDoc, api.conversationId, context);
 					if (!provider) throw Error("worker provider session missing");
 					const stop = record.outcome ?? (await this.limit(record));
-					if (stop || record.reported !== undefined) {
+					if (
+						stop ||
+						record.reported !== undefined ||
+						record.review !== undefined
+					) {
 						this.blockedSessions.add(provider.sessionId);
 						if (stop) await this.stopRecord(record.job.id, stop);
 					} else this.blockedSessions.delete(provider.sessionId);
@@ -354,7 +411,15 @@ export class NativeDurableAnchor implements DurableAnchor {
 						const record = Object.values(doc.workers).find(
 							(r) => r.conversation === api.conversationId,
 						);
-						if (record) record.turns++;
+						if (record) {
+							record.turns++;
+							if (
+								record.job.role === "reviewer" &&
+								!record.review &&
+								!message.content.some((part) => part.type === "toolCall")
+							)
+								record.outcome = "failed";
+						}
 					}, ctx);
 				},
 			}),
@@ -442,17 +507,22 @@ export class NativeDurableAnchor implements DurableAnchor {
 			ownerTaskId: String(record.owner),
 			state: record.outcome
 				? "aborted"
-				: record.reported !== undefined
+				: record.reported !== undefined || record.review !== undefined
 					? "done"
 					: "running",
 			outcome: record.outcome,
+			review: record.review,
 		};
 	}
 	async create(job: JobSpec) {
-		if (job.role !== "worker")
-			throw Object.assign(
-				Error("durable reviewer is not enabled in this slice"),
-				{ code: "not_supported", status: 501 },
+		if (
+			job.role === "reviewer" &&
+			(!job.reviewedHeadSha ||
+				!job.reviewedFamily ||
+				familyFor(job.model) === job.reviewedFamily)
+		)
+			throw Error(
+				"durable reviewer requires an opposite-family model and reviewed head",
 			);
 		await this.options.check();
 		await this.options.verifyIdentity?.();
@@ -490,7 +560,13 @@ export class NativeDurableAnchor implements DurableAnchor {
 			await configure(tx, child.id, {
 				cwd: job.workspace.path,
 				extensions: [this.extension],
-				tools: this.extension.tools,
+				tools: this.extension.tools!.filter((tool) =>
+					job.role === "reviewer"
+						? ["read", "search", "pr_diff", "report_verdict"].includes(
+								tool.name,
+							)
+						: !["pr_diff", "report_verdict"].includes(tool.name),
+				),
 				model: {
 					provider,
 					modelId: job.model.provider
@@ -499,9 +575,11 @@ export class NativeDurableAnchor implements DurableAnchor {
 				},
 				thinkingLevel: job.model.thinking as ModelThinkingLevel | undefined,
 				instructions:
-					"Use only the fixed code-owned tools. Commit, push_branch, open_draft_pr, then report. Bash is not a sandbox. No user skills, extensions, prompts, or packages are loaded." +
-					interruptedToolPlaybook +
-					skillSections,
+					job.role === "reviewer"
+						? "Use only read, search, pr_diff, and report_verdict. Review the requested head and make exactly one final verdict. No shell or write tools are available."
+						: "Use only the fixed code-owned tools. Commit, push_branch, open_draft_pr, then report. Bash is not a sandbox. No user skills, extensions, prompts, or packages are loaded." +
+							interruptedToolPlaybook +
+							skillSections,
 			});
 			const { env: _env, ...stored } = job;
 			doc.workers[job.id] = {

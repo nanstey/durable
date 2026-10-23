@@ -33,6 +33,11 @@ export class WorkerRegistry {
 		this.check(job.item);
 		const handle = await kind.start({ ...job, workspace });
 		this.register(kind, handle, dispatcher);
+		if (kind.name === "durable-conversation" && job.viewer === "on-start")
+			await dispatcher.openViewer(workspace, {
+				title: `durable:${job.agent}/${handle.process.handle.replace("durable:", "")}`,
+				command: `durable attach ${job.agent}/${handle.process.handle.replace("durable:", "")}`,
+			});
 		return handle;
 	}
 	async list() {

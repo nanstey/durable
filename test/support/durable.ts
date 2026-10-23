@@ -117,7 +117,7 @@ export async function durableRig(
 		sources: [{ kind: "github-issues", repo: "acme/repo" }],
 		workers: {
 			kind: "durable-conversation",
-			durable: { enabledRoles: ["worker"] },
+			durable: { enabledRoles: ["worker", "reviewer"] },
 		},
 		schedule: { pollSeconds: 1 },
 		limits: { itemMinutes: 60, maxAttemptsPerItem: 2, ...limits },
@@ -189,6 +189,7 @@ export async function durableRig(
 			notify: async () => {},
 			drainMs: 0,
 			durable: {
+				prDiff: async () => "diff --git a/file.txt b/file.txt\n",
 				shellEnv: () =>
 					buildAgentEnv(profile, "durable-shell", {
 						agent: "agent",

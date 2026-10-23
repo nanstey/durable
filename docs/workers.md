@@ -6,6 +6,33 @@ brief, create an isolated worktree, start the selected kind, and monitor GitHub.
 The default kind is `pi-session`. Selecting an unavailable or disabled kind
 refuses dispatch; it never silently switches kinds.
 
+## Kinds and roles
+
+Kind selection is per role: machine override, agent role override, agent default,
+then the platform default. On Linux, `pi-session` is the default. Selecting
+`durable-conversation` also requires that role in
+`workers.durable.enabledRoles`; enablement never selects a kind. Durable reviewers
+are read-only and are the safest first durable role. Code-writing durable workers
+are opt-in per agent.
+
+| Kind | Roles | Attach/viewer | Tools | Crash resume | Shell token |
+| --- | --- | --- | --- | --- | --- |
+| `pi-session` | worker, reviewer | dispatcher terminal | Pi session and approved skills | no | present |
+| `durable-conversation` worker | opt-in worker | `durable attach <agent>/<conversation>` | read, search, edit, write, bash, commit, push_branch, open_draft_pr, report | yes | absent |
+| `durable-conversation` reviewer | enabled reviewer | `durable attach <agent>/<conversation>` | read, search, code-owned `pr_diff`, code-owned `report_verdict` | yes | absent |
+
+A durable reviewer has no shell, edit/write, commit, push, or PR-create tool.
+`report_verdict` accepts one final `{ verdict, risk, summary, headSha }`, checks
+that the SHA is the reviewed head, and records model provider, model, family, and
+successful assistant-entry count. The reviewer model family must differ from the
+reviewed worker family. A reviewer without a verdict fails; a malformed, wrong-SHA,
+second, or same-family verdict is refused.
+
+Set `workers.durable.viewer: on-start` to ask an Orca dispatcher to open a
+viewer terminal when a durable child starts. If Orca is unavailable, the API
+returns the `durable attach ...` command instead. `on-demand` and `never` do not
+open a terminal automatically. Closing a viewer never affects the worker.
+
 ## Dispatch and recovery
 
 Configure `models.worker`, the repository checkout in the machine file, and the
@@ -49,18 +76,6 @@ writes with profile and login. Daemon GitHub writes use the same item fence and
 an audited injectable adapter. PRs have label `durable/agent:<agent>`, an item
 marker, and the operator-identity footer.
 
-The repository's `pi-extension/durable-worker-guard.ts` loads through generated Pi
-settings; no user extension installation is needed. When `DURABLE_WORKER=1`, its
-`tool_call` hook rejects tools while holding/held and blocks merge, force-push,
-default-branch push, merge API and admin command forms. The shared policy and
-actual Pi extension loader are tested offline.
-
-These are guardrails, not an OS sandbox: Pi-session workers have the profile's
-GitHub token and share the operator's filesystem permissions. Explicitly bypassing
-the supported shims can bypass their audit and attribution. Use repository rules
-and a fine-grained, repository-limited token without administration or workflows
-write permission.
-
 ## Durable-conversation workers
 
 The opt-in `durable-conversation` kind runs headlessly in the steward process.
@@ -77,5 +92,32 @@ the storage from another process. After a crash, replay-safe tools rerun. A
 non-replay-safe tool can report `interrupted`; the worker playbook requires
 checking `git status`, files, the remote branch, and any draft PR before retrying.
 
+### Limits and lifecycle
+
+Before every tool call Durable checks the kill switch, hold fence, wall-clock,
+turn, tool-call and token budgets. Pause, stop, hard interrupt, hold, and a limit
+abort the native worker and its containment unit. A soft interrupt or tree abort
+ends only the current turn; the worker waits for a follow-up. A hold fences the
+item before cancellation and remains fenced until an approval-class release.
+After a crash, shutdown, or steward restart, an unfinished child reattaches; no
+human- or policy-initiated stop restarts without its explicit release, resume, or
+new work action.
+
+### Guardrails are not a boundary
+
+The durable file tools resolve paths inside the worktree and reject `.git`,
+symlinks, absolute paths, and traversal. `bash` starts in that worktree under a
+minimal `durable-shell` environment, and the shared command guard blocks common
+push, merge, rebase, force, worktree, and outside-`cd` forms. This is advisory,
+not a sandbox. The model runs as the operator's OS user, so an interpreter or a
+script can read or write files available to that user outside the worktree,
+including credential files; variable-built paths can bypass the command denylist;
+and a credential read from disk can enable a direct push. The known-limits suite
+proves these cases remain possible. The guarantee is only that `GH_TOKEN`,
+`GITHUB_TOKEN`, profile secrets, provider keys, connector settings, and the SSH
+agent are absent from the shell environment. Code-owned GitHub tools are the
+supported guarded path, not an enforced boundary. Sandbox hardening is a deferred
+follow-up.
+
 See [operator controls](operator.md#work-items-and-workers), the
-[API reference](api.md), and [integration evidence](evidence/slice-6b.md).
+[API reference](api.md), and [slice 6c evidence](evidence/slice-6c.md).

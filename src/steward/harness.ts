@@ -656,7 +656,8 @@ export async function openHarness(options: HarnessConfig) {
 			},
 			mark: async (tx, id, job) => {
 				const meta = (await tx.doc(StateDoc)).conversations[String(id)];
-				meta.kind = "worker-durable";
+				meta.kind =
+					job.role === "reviewer" ? "reviewer-durable" : "worker-durable";
 				meta.item = job.item;
 			},
 			turn: async (tx, id, waiting) => {
@@ -1124,7 +1125,9 @@ export async function openHarness(options: HarnessConfig) {
 					{ code: "unavailable" },
 				);
 			if (
-				state.conversations[String(conversationId)]?.kind === "worker-durable"
+				["worker-durable", "reviewer-durable"].includes(
+					state.conversations[String(conversationId)]?.kind ?? "",
+				)
 			)
 				await durableWorkers?.assertSubmission(conversationId);
 			const key = `${id}:${requestId}`;
