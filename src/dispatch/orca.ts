@@ -66,6 +66,15 @@ export class OrcaDispatcher implements WorkerDispatcher {
 	async createWorkspace(spec: WorkspaceSpec): Promise<Workspace> {
 		const existing = this.workspaces.get(spec.id);
 		if (existing) return existing;
+		const listed = JSON.parse(
+			(await this.run(["worktree", "list"], spec.repo)).stdout,
+		) as
+			| Array<{ name?: string; path?: string }>
+			| { worktrees?: Array<{ name?: string; path?: string }> };
+		const entries = Array.isArray(listed) ? listed : (listed.worktrees ?? []);
+		const found = entries.find((entry) => entry.name === spec.id);
+		if (found?.path)
+			return rememberWorkspace(this.workspaces, spec, found.path);
 		const result = await this.run(
 			["worktree", "create", "--name", spec.id, "--no-parent"],
 			spec.repo,
@@ -120,7 +129,17 @@ export class OrcaDispatcher implements WorkerDispatcher {
 								"--title",
 								title,
 								"--command",
-								[spec.command, ...(spec.args ?? [])].join(" "),
+								[
+									"env",
+									"-i",
+									...Object.entries(spec.env)
+										.filter((entry) => entry[1] !== undefined)
+										.map(([key, value]) => `${key}=${value}`),
+									spec.command,
+									...(spec.args ?? []),
+								]
+									.map((value) => `'${value.replaceAll("'", "'\\''")}'`)
+									.join(" "),
 							])
 						).stdout,
 					),

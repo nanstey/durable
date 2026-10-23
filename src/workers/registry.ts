@@ -10,24 +10,41 @@ export type PendingJobSpec = Omit<JobSpec, "workspace"> & {
 export class WorkerRegistry {
 	private readonly workers = new Map<
 		string,
-		{ kind: WorkerKind; handle: WorkerHandle }
+		{ kind: WorkerKind; handle: WorkerHandle; dispatcher?: WorkerDispatcher }
 	>();
-	register(kind: WorkerKind, handle: WorkerHandle): void {
-		this.workers.set(handle.id, { kind, handle });
+	private readonly check: (item: string) => void;
+	constructor(check: (item: string) => void = () => {}) {
+		this.check = check;
+	}
+	register(
+		kind: WorkerKind,
+		handle: WorkerHandle,
+		dispatcher?: WorkerDispatcher,
+	): void {
+		this.workers.set(handle.id, { kind, handle, dispatcher });
 	}
 	async launch(
 		dispatcher: WorkerDispatcher,
 		kind: WorkerKind,
 		job: PendingJobSpec,
 	): Promise<WorkerHandle> {
+		this.check(job.item);
 		const workspace = await dispatcher.createWorkspace(job.workspace);
+		this.check(job.item);
 		const handle = await kind.start({ ...job, workspace });
-		this.register(kind, handle);
+		this.register(kind, handle, dispatcher);
 		return handle;
 	}
 	async list() {
 		return Promise.all(
-			[...this.workers.values()].map(async ({ kind, handle }) => ({
+			[...this.workers.values()].map(async ({ kind, handle, dispatcher }) => ({
+				suspectedHumanSession: dispatcher?.workspaceTerminals
+					? (await dispatcher.workspaceTerminals(handle.job.workspace)).some(
+							(terminal) =>
+								terminal.handle !== handle.process.handle &&
+								!terminal.title?.startsWith(`durable:${handle.job.agent}/`),
+						)
+					: false,
 				...kind.describe(handle),
 				kind: kind.name,
 				status: await kind.status(handle),
@@ -50,6 +67,7 @@ export class WorkerRegistry {
 	}
 	async steer(id: string, text: string): Promise<void> {
 		const worker = await this.get(id);
+		this.check(worker.handle.job.item);
 		if (!worker.kind.capabilities().steer || !worker.kind.steer)
 			throw Object.assign(Error("steer not supported"), {
 				code: "not_supported",

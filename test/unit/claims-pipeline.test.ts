@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-	claim,
-	type ClaimComment,
-	type ClaimGithub,
-} from "../../src/steward/claims.ts";
-import {
 	defaultPipeline,
 	pipelineDoctorErrors,
 	selectPipeline,
 } from "../../src/pipeline/select.ts";
+import {
+	type ClaimComment,
+	type ClaimGithub,
+	claim,
+} from "../../src/steward/claims.ts";
 import {
 	emptyWorkItems,
 	migrateEligible,
@@ -33,6 +33,9 @@ class FakeGithub implements ClaimGithub {
 	async listComments() {
 		return [...this.comments];
 	}
+	async deleteComment(_repo: string, id: number) {
+		this.comments = this.comments.filter((comment) => comment.id !== id);
+	}
 }
 test("claim uses read-after-write and the lowest marker wins", async () => {
 	const github = new FakeGithub();
@@ -40,16 +43,76 @@ test("claim uses read-after-write and the lowest marker wins", async () => {
 		repo: "acme/repo",
 		issue: 1,
 		agent: "a",
-		lease: "x",
+		lease: "2999-01-01T00:00:00.000Z",
 	});
 	const second = await claim(github, {
 		repo: "acme/repo",
 		issue: 1,
 		agent: "b",
-		lease: "x",
+		lease: "2999-01-01T00:00:00.000Z",
 	});
 	assert.equal(first.state, "won");
 	assert.deepEqual(second, { state: "lost", commentId: 2, winner: "a" });
+});
+test("concurrent claimants elect the lowest comment, retain its label and replay without another comment", async () => {
+	const github = new FakeGithub();
+	const target = {
+		repo: "acme/repo",
+		issue: 1,
+		lease: "2999-01-01T00:00:00.000Z",
+	};
+	const results = await Promise.all([
+		claim(github, { ...target, agent: "a" }),
+		claim(github, { ...target, agent: "b" }),
+	]);
+	assert.deepEqual(
+		results.map((result) => result.state),
+		["won", "lost"],
+	);
+	assert.equal(github.comments.length, 1);
+	assert.ok(github.labels.has("durable/claimed"));
+	await claim(github, { ...target, agent: "a" });
+	assert.equal(github.comments.length, 1);
+});
+test("two installations of the same agent cannot reuse each other's claim", async () => {
+	const github = new FakeGithub();
+	const target = {
+		repo: "acme/repo",
+		issue: 1,
+		agent: "agent",
+		lease: "2999-01-01T00:00:00.000Z",
+	};
+	assert.equal(
+		(await claim(github, { ...target, owner: "installation-a" })).state,
+		"won",
+	);
+	assert.equal(
+		(await claim(github, { ...target, owner: "installation-b" })).state,
+		"lost",
+	);
+	assert.equal(
+		(await claim(github, { ...target, owner: "installation-a" })).state,
+		"won",
+	);
+	assert.equal(github.comments.length, 1);
+});
+test("expired claims cannot win arbitration", async () => {
+	const github = new FakeGithub();
+	github.comments.push({
+		id: 1,
+		body: "<!-- durable-claim agent=old lease=2000-01-01T00:00:00.000Z -->",
+	});
+	assert.equal(
+		(
+			await claim(github, {
+				repo: "acme/repo",
+				issue: 1,
+				agent: "new",
+				lease: "2999-01-01T00:00:00.000Z",
+			})
+		).state,
+		"won",
+	);
 });
 test("pipeline defaults and rejects missing mandatory stages", () => {
 	assert.deepEqual(selectPipeline(), defaultPipeline);

@@ -1,6 +1,5 @@
-// fallow-ignore-file unused-file
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Candidate } from "../sources/types.ts";
 
 export type ScoutBrief = { text: string; trusted: boolean };
@@ -21,14 +20,18 @@ export function assembleWorkerBrief(values: {
 	branch: string;
 	agent: string;
 	login: string;
+	item?: string;
 	templatePath?: string;
 }): string {
 	if (!values.brief.trusted)
 		throw Error("worker brief requires trusted scout output");
-	const path = values.templatePath ?? resolve("templates/worker-brief.md");
+	const path =
+		values.templatePath ??
+		fileURLToPath(new URL("../../templates/worker-brief.md", import.meta.url));
 	return readFileSync(path, "utf8")
 		.replaceAll("{{brief}}", values.brief.text)
 		.replaceAll("{{branch}}", values.branch)
 		.replaceAll("{{agent}}", values.agent)
-		.replaceAll("{{login}}", values.login);
+		.replaceAll("{{login}}", values.login)
+		.replaceAll("{{item}}", values.item ?? "");
 }

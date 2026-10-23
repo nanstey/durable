@@ -38,16 +38,22 @@ export class GitProcessDispatcher implements WorkerDispatcher {
 		const existing = this.workspaces.get(spec.id);
 		if (existing) return existing;
 		const path = spec.path ?? join(this.root, spec.id);
-		if (!existsSync(path))
+		if (!existsSync(path)) {
+			const exists = await execa(
+				"git",
+				["-C", spec.repo, "show-ref", "--verify", `refs/heads/${spec.branch}`],
+				{ reject: false },
+			);
 			await execa("git", [
 				"-C",
 				spec.repo,
 				"worktree",
 				"add",
-				"--detach",
-				path,
-				spec.base ?? "HEAD",
+				...(exists.exitCode === 0
+					? [path, spec.branch]
+					: ["-b", spec.branch, path, spec.base ?? "HEAD"]),
 			]);
+		}
 		return rememberWorkspace(this.workspaces, spec, path);
 	}
 	async removeWorkspace(

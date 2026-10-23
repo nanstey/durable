@@ -1,9 +1,65 @@
 # Workers
 
-Durable's default worker is a Pi session in an isolated worktree. The worker receives an assembled scout brief and the `idea-to-pr` workflow. It may create a draft PR, but it must not merge, force-push, or push a protected branch.
+An eligible queue entry becomes one persistent work item and a loop-owned native
+`steward.work-item` task. Its phases claim the intake, obtain a read-only scout
+brief, create an isolated worktree, start the selected kind, and monitor GitHub.
+The default kind is `pi-session`. Selecting an unavailable or disabled kind
+refuses dispatch; it never silently switches kinds.
 
-The generated worker launcher uses a private, derived Pi directory and an allowlisted environment. It passes provider and model as separate Pi flags. Detached (`git-process`) sessions have standard input connected to `/dev/null`.
+## Dispatch and recovery
 
-`pi-extension/durable-worker-guard.ts` is enabled only when `DURABLE_WORKER=1`. It blocks merge, force-push, protected-branch push, GitHub merge API, and `--admin` command forms. This is a guardrail; repository rules and token scope remain the security boundary.
+Configure `models.worker`, the repository checkout in the machine file, and the
+required worker skills. `workers.dispatcher` selects Orca or git-process. Orca
+hosts an interactive Pi terminal; git-process hosts a detached process and log.
+Both create the workspace before starting Pi. `templates/worker-brief.md` loads
+`idea-to-pr`, explains isolation, and forbids merges, protected-branch pushes,
+force pushes and secret disclosure.
 
-Dispatchers are `orca` (interactive terminal) and `git-process` (detached process with a log). Both create a worktree first. Use `durable open <agent>/<conversation>` where supported to open a viewer; the git-process fallback is a command to run locally.
+Every phase commits its intent before effects. Claim comments use read-after-write
+arbitration; the lowest active comment wins. Replay reuses the claim, workspace,
+job identity and scout submission. Worker handles and attempt counts survive
+restart, but credentials are reconstructed from the profile rather than stored in
+the work-item document. An exited worker without a PR gets a bounded continuation
+attempt; exhaustion records an escalation and one intake comment. Human- or
+policy-cancelled work is never automatically retried.
+
+A detected draft PR moves the item to review, not completion. The mandatory
+review and gate stages cannot be skipped. Only the primary PR merging completes
+the item; closing it without merging parks the item. PR state is reconciled after
+restart. Spec stages and spec-approval gates are refused until their implementation
+is available.
+
+## Identity and containment
+
+The generated launcher uses a private derived Pi directory and an allowlisted
+environment. It references supplied environment variables without embedding their
+secret values in the launcher file. Initial and continued launches pass provider
+and model as separate flags. Headless launches use stdin `/dev/null`; Orca keeps
+terminal input.
+
+A terminal-hosted gate records the process identity before its release token is
+written. On Linux the gate and Pi run inside the attempt's systemd slice. Holds,
+hard interruption, limits, pause, shutdown and startup recovery terminate that
+containment, including descendants that use `setsid`.
+
+Git author and committer identity come from the profile manifest. Supported worker
+`git`/`gh` shims add `Durable-Agent: <agent>`, restrict pushes to the explicit
+`durable/<agent>/<item>` branch, require draft PR attribution, and audit GitHub
+writes with profile and login. Daemon GitHub writes use the same item fence and
+an audited injectable adapter. PRs have label `durable/agent:<agent>`, an item
+marker, and the operator-identity footer.
+
+The repository's `pi-extension/durable-worker-guard.ts` loads through generated Pi
+settings; no user extension installation is needed. When `DURABLE_WORKER=1`, its
+`tool_call` hook rejects tools while holding/held and blocks merge, force-push,
+default-branch push, merge API and admin command forms. The shared policy and
+actual Pi extension loader are tested offline.
+
+These are guardrails, not an OS sandbox: Pi-session workers have the profile's
+GitHub token and share the operator's filesystem permissions. Explicitly bypassing
+the supported shims can bypass their audit and attribution. Use repository rules
+and a fine-grained, repository-limited token without administration or workflows
+write permission.
+
+See [operator controls](operator.md#work-items-and-workers), the
+[API reference](api.md), and [integration evidence](evidence/slice-6b.md).

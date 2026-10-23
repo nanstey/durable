@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Candidate } from "../sources/types.ts";
 import type { Queue, QueueItem } from "./queue.ts";
 
@@ -15,6 +16,11 @@ export type WorkAttempt = {
 	endedAt?: number;
 	cost?: number;
 	cancelledBy?: string;
+	outcome?: "interrupted" | "limit" | "paused" | "stopped" | "held";
+	worker?: {
+		kind: "pi-session" | "durable-conversation";
+		process: import("../dispatch/types.ts").HostedProcess;
+	};
 };
 export type WorkItem = {
 	id: string;
@@ -32,6 +38,7 @@ export type WorkItem = {
 	outcome?: WorkItemOutcome;
 	createdAt: number;
 	updatedAt: number;
+	stage?: import("../pipeline/select.ts").PipelineStage;
 };
 export type WorkItems = {
 	items: Record<string, WorkItem>;
@@ -42,9 +49,8 @@ export function emptyWorkItems(): WorkItems {
 	return { items: {}, byIntakeRef: {} };
 }
 /** Stable, filesystem-safe id. The intake ref remains the authoritative external identity. */
-// fallow-ignore-next-line unused-export
 export function workItemId(candidate: Pick<Candidate, "repo" | "ref">): string {
-	return `${candidate.repo}:${candidate.ref}`.replace(/[^A-Za-z0-9._:-]/g, "_");
+	return `item-${createHash("sha256").update(`${candidate.repo}:${candidate.ref}`).digest("hex").slice(0, 20)}`;
 }
 
 /** The only mutation entry point for named work items. Ineligible queue entries never migrate. */
@@ -73,19 +79,21 @@ export function migrateEligible(
 }
 
 /** Queue is a projection: it retains eligibility reasons and adds migrated work state without owning it. */
-// fallow-ignore-next-line unused-export
 export function projectQueue(queue: Queue, workItems: WorkItems): Queue {
 	const items: Record<string, QueueItem> = {};
 	for (const [ref, entry] of Object.entries(queue.items)) {
 		const item = workItems.items[workItems.byIntakeRef[ref]];
 		items[ref] = item
-			? { ...entry, reasons: [...entry.reasons, `work-item:${item.id}`] }
+			? {
+					...entry,
+					workItem: item.id,
+					reasons: [...entry.reasons, `work-item:${item.id}`],
+				}
 			: { ...entry, reasons: [...entry.reasons] };
 	}
 	return { items };
 }
 
-// fallow-ignore-next-line unused-export
 export function recordPrimaryPr(
 	item: WorkItem,
 	pr: { number: number; url?: string; state?: "open" | "merged" | "closed" },

@@ -1,5 +1,9 @@
+import {
+	reconcilePrs,
+	recordPrimaryPr,
+	type WorkItem,
+} from "../steward/workItems.ts";
 import type { WorkerKind } from "../workers/kind.ts";
-import type { WorkItem } from "../steward/workItems.ts";
 
 export interface PrMonitorGithub {
 	findDraftPr(input: {
@@ -25,6 +29,8 @@ export async function monitorWorker(input: {
 	handle: Parameters<WorkerKind["status"]>[0];
 	github: PrMonitorGithub;
 	maxAttempts: number;
+	fenced?: boolean;
+	resume?: () => Promise<void>;
 }): Promise<"waiting" | "resumed" | "needs-human" | "complete"> {
 	const pr = await input.github.findDraftPr({
 		repo: input.item.repo,
@@ -32,25 +38,17 @@ export async function monitorWorker(input: {
 		marker: input.marker,
 	});
 	if (pr) {
-		const known = input.item.prs.find((entry) => entry.number === pr.number);
-		if (known) known.state = pr.state;
-		else
-			input.item.prs.push({
-				number: pr.number,
-				primary: input.item.prs.length === 0,
-				state: pr.state,
-			});
-		if (pr.state === "merged") {
-			input.item.outcome = "merged";
+		recordPrimaryPr(input.item, pr, Date.now());
+		reconcilePrs(input.item, [pr], Date.now());
+		if (input.item.outcome === "merged" || input.item.outcome === "parked")
 			return "complete";
-		}
-		if (pr.state === "closed") input.item.outcome = "parked";
 		return "waiting";
 	}
 	const status = await input.kind.status(input.handle);
 	if (status === "running") return "waiting";
 	const attempt = input.item.attempts.at(-1);
 	if (
+		input.fenced ||
 		attempt?.cancelledBy ||
 		input.item.outcome === "held" ||
 		input.item.outcome === "paused"
@@ -65,6 +63,15 @@ export async function monitorWorker(input: {
 		});
 		return "needs-human";
 	}
-	await input.kind.resume(input.handle);
+	if (input.resume) await input.resume();
+	else {
+		const handle = await input.kind.resume(input.handle);
+		if (attempt) attempt.endedAt = Date.now();
+		input.item.attempts.push({
+			id: handle.id,
+			startedAt: Date.now(),
+			worker: { kind: input.kind.name, process: handle.process },
+		});
+	}
 	return "resumed";
 }

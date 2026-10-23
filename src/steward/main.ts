@@ -3,11 +3,8 @@ import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { startApi } from "../api/server.ts";
-import { selectDispatcher } from "../dispatch/select.ts";
-import { WorkerKindRegistry } from "../workers/kind.ts";
-import { PiSessionKind } from "../workers/piSession.ts";
-import { WorkerRegistry } from "../workers/registry.ts";
 import { localToken } from "../api/tokens.ts";
+import { ApprovalNonces } from "../approval/nonce.ts";
 import { loadAgent, loadMachine } from "../config/load.ts";
 import { loadManifest } from "../config/manifest.ts";
 import type { AgentDef, MachineCfg } from "../config/schema.ts";
@@ -21,6 +18,7 @@ import { agentDir } from "./files.ts";
 import { type HarnessConfig, openHarness } from "./harness.ts";
 import { queueInbox } from "./inbox.ts";
 import { ProcessManager } from "./procs.ts";
+import { checkoutFor, setupWorkers } from "./workerSetup.ts";
 
 export function assignedPort(agent: string, machine = loadMachine()) {
 	const index = machine.agents.findIndex(
@@ -168,9 +166,19 @@ export async function run(
 			agent,
 			containmentFor(caps),
 			undefined,
-			definition.schedule?.quietHours,
 		);
-		if (!(await processes.sweep()))
+		const swept = await processes.sweep();
+		const journal = processes.snapshot();
+		if (
+			!swept &&
+			journal.invocations.some(
+				(record) =>
+					!record.item ||
+					!["holding", "held"].includes(
+						journal.holds[record.item]?.state ?? "",
+					),
+			)
+		)
 			throw Error(
 				"recovery containment unconfirmed; records and recovery fences retained; inspect containment before restart",
 			);
@@ -185,18 +193,24 @@ export async function run(
 				processes,
 			),
 		);
-		const dispatcher = selectDispatcher({
+		const { dispatcher, workers, notifier, work } = setupWorkers({
+			agent,
 			definition,
 			machine,
-			root: join(agentDir(agent), "workspaces"),
+			processes,
 			orcaAvailable: caps.orca,
+			checkIdentity: async () =>
+				requireHealthy(
+					agent,
+					await (dependencies.preflight ?? preflight)(
+						agent,
+						definition,
+						machine,
+						caps,
+						processes,
+					),
+				),
 		});
-		const workers = new WorkerRegistry();
-		const kinds = new WorkerKindRegistry();
-		kinds.register(
-			new PiSessionKind(dispatcher, join(agentDir(agent), "launchers")),
-		);
-		kinds.get("pi-session");
 		const harness = await openHarness({
 			agent,
 			definition,
@@ -204,13 +218,14 @@ export async function run(
 			processes,
 			models: dependencies.models,
 			extensions: dependencies.extensions,
-			checkoutFor: (repo) =>
-				machine.checkouts?.overrides?.[repo] ??
-				(machine.checkouts?.root
-					? join(machine.checkouts.root, repo)
-					: undefined),
+			work,
+			checkoutFor: (repo) => checkoutFor(machine, repo),
 		});
 		localToken(agent);
+		const viewerRepo = definition.scope?.repos?.[0]?.slug;
+		const viewerPath = viewerRepo
+			? checkoutFor(machine, viewerRepo)
+			: undefined;
 		const server = startApi({
 			agent,
 			machine: machine.name,
@@ -219,6 +234,13 @@ export async function run(
 			definition,
 			harness,
 			workers,
+			processes,
+			dispatcher,
+			viewerWorkspace: viewerPath
+				? { id: "viewer", path: viewerPath, branch: "" }
+				: undefined,
+			nonces: new ApprovalNonces(agent),
+			deliverNonce: (item, code) => notifier.approvalNonce(item, code),
 			bind: definition.network?.bind ?? machine.network?.bind,
 		});
 		let closing = false;

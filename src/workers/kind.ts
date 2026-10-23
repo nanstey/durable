@@ -13,6 +13,7 @@ export type JobSpec = {
 	skills?: string[];
 	env: Record<string, string | undefined>;
 	piDir?: string;
+	resume?: boolean;
 };
 export type WorkerCapabilities = {
 	attach: "interactive" | "read";

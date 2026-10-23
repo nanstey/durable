@@ -142,6 +142,28 @@ export class Notifier {
 		this.save(state);
 		return "sent";
 	}
+	/** Approval secrets bypass inbox, GitHub, persistence, quiet-hour queues and dedup. */
+	async approvalNonce(target: string, nonce: string): Promise<boolean> {
+		const event: NotifyEvent = {
+			agent: this.options.agent,
+			event: "approval-needed",
+			target,
+			title: "Durable release approval",
+		};
+		const configured = rule(this.definition, event);
+		let delivered = false;
+		for (const name of configured?.channels ?? []) {
+			const channel = this.machine.channels?.[name];
+			if (channel?.kind === "desktop" && this.desktop.nonceSafe) {
+				await deliverDesktop(this.desktop, event, { ...event, nonce });
+				delivered = true;
+			} else if (channel?.kind === "command") {
+				await deliverCommand(channel.argv ?? [], event, { ...event, nonce });
+				delivered = true;
+			}
+		}
+		return delivered;
+	}
 	async due(): Promise<void> {
 		const now = this.now();
 		const state = this.state();

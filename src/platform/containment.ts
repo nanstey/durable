@@ -28,6 +28,9 @@ export type Launch = {
 };
 export interface Containment {
 	readonly confirmed: boolean;
+	/** Terminal-hosted equivalent of spawn: the command still runs behind a registered gate. */
+	hostedArgv?(record: Invocation, argv: string[]): string[];
+	hostedEnv?(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 	spawn(
 		record: Invocation,
 		hash: string,

@@ -65,7 +65,6 @@ export function pipelineDoctorErrors(pipeline: ProjectPipeline): string[] {
 	return errors;
 }
 
-// fallow-ignore-next-line unused-export
 export function nextStage(
 	pipeline: ProjectPipeline,
 	current?: PipelineStage,

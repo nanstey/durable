@@ -1,0 +1,25 @@
+#!/usr/bin/env node
+// File-backed gate for terminal hosts, which cannot pass extra pipe descriptors.
+import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync, writeFileSync, renameSync } from "node:fs";
+
+const [directory, expected, executable, ...args] = process.argv.slice(2);
+const fail = () => process.exit(97);
+if (!directory || !/^[a-f0-9]{64}$/.test(expected ?? "") || !executable || !process.execve) fail();
+try {
+	const text = readFileSync(`/proc/${process.pid}/stat`, "utf8");
+	const stat = text.slice(text.lastIndexOf(")") + 2).split(" ");
+	const cgroup = /^0::(.+)$/m.exec(readFileSync(`/proc/${process.pid}/cgroup`, "utf8"))?.[1];
+	writeFileSync(`${directory}/identity.tmp`, JSON.stringify({ pid: process.pid, pgid: Number(stat[2]), startTime: stat[19], cgroup }), { mode: 0o600, flag: "wx" });
+	renameSync(`${directory}/identity.tmp`, `${directory}/identity.json`);
+} catch { fail(); }
+const deadline = Date.now() + 60000;
+const timer = setInterval(() => {
+	if (Date.now() > deadline) fail();
+	let token;
+	try { token = readFileSync(`${directory}/release`, "utf8"); }
+	catch (error) { if (error.code === "ENOENT") return; fail(); }
+	if (!token || !timingSafeEqual(createHash("sha256").update(token).digest(), Buffer.from(expected, "hex"))) fail();
+	clearInterval(timer);
+	try { process.execve(executable, [executable, ...args], process.env); } catch { fail(); }
+}, 25);

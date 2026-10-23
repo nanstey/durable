@@ -66,8 +66,10 @@ export function buildAgentEnv(
 	privateDirectory(gh);
 	const git = join(home, "gitconfig");
 	let identity = "[user]\n\tname = Durable Worker\n";
+	let gitAuthor: { name: string; email: string } | undefined;
 	try {
 		const manifest = loadManifest(profile.manifestFile);
+		gitAuthor = manifest.git;
 		identity = `[user]\n\tname = ${gitValue(manifest.git.name)}\n\temail = ${gitValue(manifest.git.email)}\n`;
 	} catch (error) {
 		// A shell needs no credential or manifest. Other roles fail closed.
@@ -102,6 +104,10 @@ export function buildAgentEnv(
 		...common,
 		GH_TOKEN: token,
 		GITHUB_TOKEN: token,
+		GIT_AUTHOR_NAME: gitAuthor?.name,
+		GIT_AUTHOR_EMAIL: gitAuthor?.email,
+		GIT_COMMITTER_NAME: gitAuthor?.name,
+		GIT_COMMITTER_EMAIL: gitAuthor?.email,
 		PI_CODING_AGENT_DIR: join(state, "pi"),
 	};
 }
