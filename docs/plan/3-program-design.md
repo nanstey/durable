@@ -83,7 +83,7 @@ type MachineCfg = Static<typeof MachineSchema>;
 type ProfileManifest = Static<typeof ManifestSchema>;
 type PipelineStage = "scout" | "spec" | "build" | "review" | "gate" | "handoff";
 type ProjectPipeline = { stages: PipelineStage[]; gates: { specApproval?: boolean; complexityThreshold?: "medium" | "large" } };
-// Pipeline lives at scope.repos[].pipeline, is validated with AgentDefSchema and defaults to scout/build/review/gate/handoff. It selects only known stages; pipeline/select.ts, not prompts, enforces transitions.
+// Pipeline lives at scope.repos[].pipeline, is validated with AgentDefSchema and defaults to scout/build/review/gate/handoff. Only scout/spec are optional; build/review/gate/handoff are mandatory in order and handoff is last. pipeline/select.ts, not prompts, enforces transitions and rejects spec/specApproval with a doctor error until slice 7.
 
 // identity/profiles.ts — mirrors @nanstey/pi-auth-profiles + pi-secret name regex ^[A-Za-z0-9._-]+$ (not "." or "..")
 resolveProfile(name): { authFile: string; secretsFile: string; manifestFile: string; isDefault: boolean }
@@ -194,8 +194,8 @@ isHardPath(path, protectedLocations): boolean                                   
 // INVARIANT P6: shadow mode first; never --admin or any bypass; policy state, kill switch and daily cap are re-checked immediately before any merge call (G5).
 // INVARIANT G8: reviewDecision REVIEW_REQUIRED from GitHub rules => wait-human with reason github-requires-approval-from-other-account; no override exists.
 
-// approval/* — credential classes (D15). Bearer tokens (scopes read|chat|pause) NEVER approve, resume an agent, enroll, verify a policy or release a hold. Actions: approve | resume | enroll | verify-policy | release.
-issueNonce(action, item, binding): string          // CLI path (release from slice 6b; approve/resume/verify-policy from slice 7). binding = headSha (approve), holdEpoch (release), fingerprint (verify-policy). Returned to the notifier for nonce-safe desktop/command ONLY; steward stores sha256(nonce+agent+action+item+binding)+expiry; never logged, never in any file, GitHub object, inbox or API response
+// approval/* — credential classes (D15). Bearer tokens (scopes read|chat|pause) NEVER approve, approve a spec, resume an agent, enroll, verify a policy or release a hold. Actions: approve | approve-spec | resume | enroll | verify-policy | release.
+issueNonce(action, item, binding): string          // CLI path (release from slice 6b; approve/approve-spec/resume/verify-policy from slice 7). binding = headSha (approve), {specPrNumber, headSha} (approve-spec), holdEpoch (release), fingerprint (verify-policy). Returned to the notifier for nonce-safe desktop/command ONLY; steward stores sha256(nonce+agent+action+item+binding)+expiry; never logged, never in any file, GitHub object, inbox or API response
 verifyNonce(action, item, binding, code): boolean  // constant-time; single use; expires; a nonce for another action, item or binding fails
 issueChallenge(action, item, binding): Challenge   // console path; public, single use, short expiry, bound to {agent,action,item,binding}; returns display data from daemon state
 verifyAssertion(challengeId, assertion): Verified | Rejected   // WebAuthn: signature over the stored challenge, origin + rpId from machine.yaml, counter, enrolled public key, head SHA unchanged
@@ -330,7 +330,7 @@ step()
 ```
 phase claim        intent → claims.claim → lost? release, end
 phase brief        scout child conversation (read-only) → brief document
-phase spec         when pipeline selects spec and complexity reaches its threshold: draft-PR spec → code-owned human approval wait; denied/expired → parked
+phase spec         pipeline/spec.ts opens intent-first idempotent draft spec PR from read-only scout text, keyed by work-item id; when code-owned eligibility size reaches complexityThreshold: code-owned human approval wait. Missing size/judge disabled: skip when specApproval=false, else needs-human; denied/expired → parked
 phase dispatch     intent → dispatcher.createWorkspace(spec) → kind = workers/select(def, role) → kind.start(ws, JobSpec{env=buildAgentEnv(...,"worker"), limits, skills})
                      [durable kind: create run-worker (background task) → child conversation in the steward; dispatcher.openViewer when workers.durable.viewer=on-start]
 phase await-pr     loop: sleep → dispatch/monitor: kind.status + GitHub PR lookup + hold/kill-switch/limits watch
@@ -344,7 +344,7 @@ phase gate         facts.collect(head SHA) → decide(policy, facts)
    │                 (a) PR merged by someone else  (b) approving review from another account → re-run gate  (c) `durable approve --code` or a console passkey assertion (slice 12a) → attempt merge within GitHub rules
    │                 reminders per cadence; stale → park
    └─ block        comment + requeue to worker or human
-phase finish       GitHub merge confirmation → work-item outcome merged (or cancelled/parked), release claim, queue projection, notify(merged), dispatcher.removeWorkspace only if merged/closed and clean
+phase finish       read GitHub state every tick and on restart: primary PR merged → outcome merged; primary PR closed unmerged → parked/needs-human; other PRs never complete the item. Release claim, update queue projection, notify(merged), dispatcher.removeWorkspace only if merged/closed and clean
 ```
 New commits after review invalidate the verdict and the nonce; the item returns to `review`.
 

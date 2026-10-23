@@ -1,6 +1,6 @@
 # Warp Factories versus Durable
 
-Status: research report. Sources: Warp docs under `docs.warp.dev/factories/` (Early Access, schema `v1alpha1`) and this repo's plan in `docs/plan/` and code in `src/`.
+Status: research report. Status as of plan rev 8: slice 4 attach TUI shipped; the spec gate, metrics and self-improvement are planned in slices 7, 15 and 16. Sources: Warp docs under `docs.warp.dev/factories/` (Early Access, schema `v1alpha1`) and this repo's plan in `docs/plan/` and code in `src/`.
 
 ## Bottom line
 
@@ -44,10 +44,10 @@ Warp is far more complete. Durable has stronger identity isolation, crash-safety
 
 1. **Hosting.** Warp is a SaaS control plane. Even self-hosted workers send prompts and transcripts through Warp. Durable has no hub and works offline except for GitHub.
 2. **Intake.** Warp is event-driven across seven systems. Durable polls GitHub and local task files only.
-3. **Human conversation.** Warp has a single foreman as the human contact, with an inbox for questions, spec approvals and PR reviews. Durable has notifications and an attach TUI (planned), but no equivalent of a conversational foreman.
-4. **Spec stage.** Warp has an explicit spec agent and a human spec approval. Durable's plan has a scout brief but no approved spec gate.
+3. **Human conversation.** Warp has a single foreman as the human contact, with an inbox for questions, spec approvals and PR reviews. Durable has notifications and the shipped slice-4 attach TUI, but no equivalent of a conversational foreman.
+4. **Spec stage.** Warp has an explicit spec agent and a human spec approval. Durable plans a code-owned spec gate in slice 7.
 5. **Soft versus hard gates.** Warp admits only merge is enforced. Spec approval lives in the foreman's prompt, so it is bypassable. Durable puts gates in code.
-6. **Observability and learning.** Warp has scorers, benchmarks and self-improvement PRs. Durable has none planned.
+6. **Observability and learning.** Warp has scorers, benchmarks and self-improvement PRs. Durable plans minimal metrics in slice 15 and PR-only self-improvement in slice 16; scorers and benchmarks remain out of scope.
 7. **Maturity.** Warp is in Early Access with an alpha schema. Durable has the steward, API v1, recovery and notifier. The README states that dispatch and merge-policy enforcement are not implemented, and `src/steward/loop.ts` is a heartbeat only.
 
 ## Observations

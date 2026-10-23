@@ -507,7 +507,7 @@ where `kind` is `steward | chat | scout | worker-durable | reviewer-durable | wo
 
 Durable is a personal tool for one operator and uses **pi-durable only**; Claude Code, Codex and other worker harnesses are out of scope. A **work item** is the named record from an eligible intake candidate through claim, attempts, PRs and final outcome. It completes only when GitHub confirms merge, or when it is cancelled or parked; handoff is a state, never completion.
 
-Each project may declare a pipeline that composes Durable primitives: `scout`, optional `spec`, `build`, `review`, `gate`, `handoff`. The default is the existing scout -> build -> review -> gate -> handoff flow. Configuration selects stages and gate conditions; code enforces eligibility, the spec-approval wait and every selected gate. Unlike Warp's prompt-policy pause points, no configured Durable gate is bypassable by a worker prompt; only GitHub rules enforce merge. GitHub is the first intake adapter. Later adapters implement the same interface and fail-closed, code-owned eligibility filters.
+Each project may declare a pipeline that composes Durable primitives: optional `scout` and `spec`, then mandatory `build`, `review`, `gate`, `handoff` in that order, with `handoff` last. The default is scout -> build -> review -> gate -> handoff. Configuration selects stages and gate conditions; code enforces eligibility, the spec-approval wait and every selected gate. Unlike Warp's prompt-policy pause points, no configured Durable gate is bypassable by a worker prompt; only GitHub rules enforce merge. The code-owned `pipeline/spec.ts` step, not the read-only scout, opens an intent-first idempotent draft spec PR from scout text keyed by work-item id. GitHub is the first intake adapter. Later adapters implement the same interface and fail-closed, code-owned eligibility filters.
 
 ## 3. Contracts
 
@@ -528,7 +528,7 @@ scope:
     - slug: acme/api # checkout path comes from machine.yaml
       pipeline: # optional; default is scout -> build -> review -> gate -> handoff
         stages: [scout, build, review, gate, handoff]
-        gates: { specApproval: false }
+        gates: { specApproval: false, complexityThreshold: large }
       base: main
       policySource: { kind: none } # none (default; auto-merge off) | fixture (tests) | <kinds chosen per repo later, D8)
       merge: # CEILING + tighten-only overrides (D8); the policy itself comes from the policy source
@@ -676,7 +676,7 @@ No file name, path, format or trust-pin layout is specified. The invariants P1-P
 
 ### 3.4 Documents and audit
 
-`steward.workItems` is the canonical typed record keyed by a stable intake reference: `{id, source, candidate, queueState, claim?, attempts[], pr?, outcome?}`. `outcome` is `merged` only after GitHub confirms merge, or `cancelled`/`parked`; a handoff remains an active state. The existing `steward.queue` stays the intake projection until slice 6b migrates it.
+`steward.workItems` is the canonical typed record keyed by a stable intake reference: `{id, source, candidate, queueState, claim?, attempts: {cost?: number}[], pr?, outcome?}`. `outcome` is `merged` only after GitHub confirms merge, or `cancelled`/`parked`; a handoff remains an active state. Until slice 6b, `steward.queue` is the intake projection; after 6b, `workItems` is the only writer and `queue` is a derived read view. Ineligible entries are not migrated, so their reasons remain in that view.
 
 `steward.queue`, `steward.budget`, `steward.gate` (decisions: facts, reasons, sha, action), `steward.reviews` (verdict, family, sha), `steward.notify` (dedup keys, reminder state, nonce hashes), `steward.inbox` (events, ack state; never secrets), `steward.approval` (enrolled public keys, challenge hashes and expiry; no secrets), `steward.policy` (per repo policy source summary and verification record), `steward.chat` (conversation index; rate-limit counters only if the opt-in is on).
 Startup containment and hold/recovery fences use an atomic fsynced `procs.json` journal readable before the harness opens. Failed cleanup keeps its records and refuses startup. The model budget document has UTC-day usage and configurable `limits.dailyDollars` / `limits.dailyTokens` ceilings (defaults 10 / 1000000); an in-flight response can overshoot, but the next request/tool is blocked.
@@ -688,10 +688,10 @@ Audit: `$DURABLE_HOME/agents/<id>/audit.jsonl`, append-only: `{ts, agent, profil
 1. `steward-loop` tick (durable timer). Kill switch/quiet-hours/budget checked.
 2. Sources poll -> candidates -> eligibility -> optional Jev judgment (tighten-only) -> work-item intake/queue projection.
 3. Dispatch while `maxConcurrentWorkers` allows. **Intent first**: commit an intent entry; claim on GitHub; `dispatcher.createWorkspace` then `launch`. Each effect has a deterministic name.
-4. The configured pipeline runs: scout writes the brief; for complexity above its configured threshold, spec writes a draft-PR spec and code waits for human approval; then worker runs `idea-to-pr` on the brief with the clean profile env and opens a draft PR.
+4. The configured pipeline runs: the read-only scout writes the brief; `pipeline/spec.ts` opens an intent-first idempotent draft spec PR from its text when the code-owned eligibility size reaches `complexityThreshold`, then code waits for human approval; then worker runs `idea-to-pr` on the brief with the clean profile env and opens a draft PR.
 5. Steward sees the PR (poll), launches a reviewer on that head SHA (opposite family), records the verdict in its own store, mirrors it to GitHub.
 6. Gate decides. `wait-human` -> approval task + `approval-needed` notification with the PR URL. `merge` (auto, per-repo opt-in) -> `gh pr merge --match-head-commit`. `block` -> comment + back to worker or human.
-7. After merge or close: release claim, record outcome, remove workspace only if clean and merged.
+7. Each tick reads GitHub PR state. After the primary PR merges, release claim, record `merged`, remove workspace only if clean; if it closes unmerged, record `parked`/`needs-human`. With several PRs, only the primary PR merging completes the item; this also reconciles restarts.
 
 ## 5. Failure paths
 
