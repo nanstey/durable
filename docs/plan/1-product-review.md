@@ -1,7 +1,7 @@
 # Product review: durable, proactive agents as the base of the harness
 
 Planning only. No source, tests, config or dependencies are changed by this plan.
-Revision 1 (user comments C1-C7 applied). Revision 2 (U1: no ntfy; U2: multi-machine web console on one chosen machine). Revision 6 (U5: the engine and this plan move to the public `nanstey/durable` repo; the skills repo keeps only a thin integration; public-repo hygiene rules and a CI scan). Revision 5 (Q18-Q23: policy mechanism deferred behind a `RepoPolicySource` seam; the phone is just another browser client; no default chat rate limits; Android defaults accepted). Revision 4 (U3: dpi-* projects are inspiration only; U4: an Android/Termux daemon as an additional platform target). Revision 3 (Q5-Q17 answers: repo-committed human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet; see README Decision log).
+Revision 1 (user comments C1-C7 applied). Revision 2 (U1: no ntfy; U2: multi-machine web console on one chosen machine). Revision 7 (U6: durable-conversation workers as a second, opt-in worker kind; a durable conversation tree and `durable attach` TUI shown in Orca terminals; a human-held rule). Revision 6 (U5: the engine and this plan move to the public `nanstey/durable` repo; the skills repo keeps only a thin integration; public-repo hygiene rules and a CI scan). Revision 5 (Q18-Q23: policy mechanism deferred behind a `RepoPolicySource` seam; the phone is just another browser client; no default chat rate limits; Android defaults accepted). Revision 4 (U3: dpi-* projects are inspiration only; U4: an Android/Termux daemon as an additional platform target). Revision 3 (Q5-Q17 answers: repo-committed human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet; see README Decision log).
 
 ## Problem (user's terms)
 
@@ -29,7 +29,7 @@ Reframe (current -> desired):
 | Today | After |
 | --- | --- |
 | Human picks work and opens sessions | Steward polls sources, picks eligible work, dispatches workers |
-| Background work = interactive TUIs | Background work = dispatched worker sessions (Orca-visible) behind an adapter; one small process per steward |
+| Background work = interactive TUIs | Background work = dispatched workers behind an adapter: Pi sessions (default, Orca-visible) or headless durable child conversations (opt-in); one small process per steward |
 | Crash loses state | `kill -9` of a steward resumes from checkpoints; GitHub holds the truth |
 | Identity implicit (ambient `gh`, ambient Pi login) | Each agent names one **profile**; the profile is checked before every start |
 | "Is it safe to merge?" asked ad hoc | Code-owned gate with a recorded decision per PR; auto-merge off by default, per repo |
@@ -80,6 +80,7 @@ Single operator, several machines, Orca for session management, Tailscale betwee
 | W6 | **Stop**: pause one agent, or all agents on a machine, from a terminal or from GitHub. | No new side effect after the next check (seconds, not minutes) |
 | W7 | **Add a machine**: install, define the machine's profiles, assign agents, start. | Second steward works in parallel without double-claiming an item |
 | W9 | **Run an agent on an Android phone** (Termux): install with a documented bootstrap, define a conservative agent (steward, scout, chat, light workers on small repos), see it in the console; it may be asleep or killed and the system tolerates that. | Phone daemon works within its limits, shows `offline` when away, never auto-merges |
+| W10 | **View any durable conversation in Orca**: `durable attach` shows a live tree (steward, chat threads, scouts, workers, nested children) in an Orca terminal beside normal sessions, with steer, follow-up and abort where the node allows; take over a worker's worktree safely with `durable hold`. | Orca lists durable conversations; no two writers in one worktree |
 | W8 | **Use the console from any browser, including a phone**: open the web console (served on the operator's always-on console machine, reached over Tailscale), see every machine's agents, watch a conversation live, send follow-ups and steers, ask an agent or scout a question, start or resume a chat, abort a turn, pause an agent. A phone is just another browser client with the same capabilities and guardrails as a laptop. Approve, resume an agent after a kill, enroll a key and verify a repo policy require a passkey on **any** browser. | Interactive chat and pause from the console in any browser; high-risk actions only through the guarded flow; nothing needed on a phone but a browser (installable app and push come later) |
 
 ## Identity decision: the operator's own GitHub account (C2)
@@ -154,7 +155,6 @@ a thin skills-repo integration (pinned install, thin skill), retirement of inter
 - Android as part of the first fleet (it is an additional target after the second-machine and console slices, slice 14); proot-distro on Android; heavy builds on a phone.
 - Shell or file access through the console.
 - Push services such as ntfy (removed in revision 2).
-- Workers as durable conversations (evaluated later; the dispatcher seam keeps the door open).
 - Replacing Orca, `idea-to-pr`, `handoff` or `orchestration`.
 - Per-agent GitHub bot accounts or GitHub Apps.
 - An auto-merge canary repo. Auto-merge proof is shadow mode plus recorded-fixture tests.
@@ -200,6 +200,11 @@ From revision 6:
 23. The engine, console, client, TUI, schemas, tests, Termux bootstrap, examples, docs and this plan live in the public repo `nanstey/durable` (MIT, `@nanstey/durable`, Node >= 22, `main` protected). The skills repo keeps only a thin integration: a pinned clone, the CLI on PATH, a thin skill, a catalog row, a contract row, and the skills and Pi settings durable workers reuse (U5).
 24. Public-repo rules for durable: no secrets, machine-local state, absolute or personal paths, real host or tailnet names, emails or private repo names in committed files; enforced by a CI scan from slice 2.
 
+From revision 7:
+25. Two worker kinds behind the dispatcher (U6): **`pi-session` (default)** reuses the whole skills ecosystem; **`durable-conversation` (opt-in)** is a headless pi-durable child conversation confined to the worktree, stopped by the kill switch, resumed natively after a crash, with no token in its shell. Durable workers get no user skills or extensions (only an allowlisted skill-text mechanism, default empty), so workflows such as `idea-to-pr` stay on Pi-session workers. Android defaults to the durable kind.
+26. `durable attach` is a conversation-**tree** TUI (steward, chat, scout, workers, nested children) that Orca can show in a terminal beside the user's normal sessions; the console shows the same tree.
+27. Safety rule: a worktree marked `human-held` is never resumed or written to by the daemon until a human releases it (release is a guarded action).
+
 ## Assumptions (labelled; confirm or correct)
 
 - **A1** (replaces the dedicated-identity assumption) Agents use the operator's account through a fine-grained token per profile.
@@ -237,7 +242,10 @@ Still open (each has a default):
 | --- | --- | --- |
 | Q18 | Which `RepoPolicySource` kind does the first repo that wants auto-merge use (in-repo file, GitHub rules/rulesets only, agent-definition-only, out-of-repo store)? Deferred by the user; decided per repo then. | `none`: auto-merge stays off; shadow mode reports readiness only |
 | Q24 | Should the durable repo's CI checks (tests, `tsc`, hygiene scan) be required on `main`? | Yes: the owner marks them required when slice 2 merges (a repository setting, not a code change) |
+| Q25 | Which roles use the durable-conversation worker kind first? | Reviewers (read-only) and the Android agent's small workers; desktop code-writing workers stay on Pi sessions unless an agent opts in |
+| Q26 | Orca viewer terminal for durable workers: `on-start`, `on-demand` or `never`? | `on-start` (capped by `maxConcurrent`), falling back to printing the `durable attach` command when Orca cannot create the terminal |
+| Q27 | Does releasing a human hold need the guarded class (TTY + nonce, or passkey)? | Yes, the same class as agent resume, so an agent cannot lift a human's hold |
 
 ## Review status
 
-Revised after user comments (rounds 1-5). Not yet re-reviewed. No reviewer opted in.
+Revised after user comments (rounds 1-7). Not yet re-reviewed. No reviewer opted in.

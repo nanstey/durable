@@ -1,6 +1,6 @@
 # Program design
 
-Inputs: [1-product-review](./1-product-review.md), [2-system-architecture](./2-system-architecture.md). Revision 1 (C1-C7). Revision 2 (U1 no ntfy; U2 multi-machine console, remote-ready API, guarded approvals). Revision 3 (repo-committed, human-trusted merge policy; interactive chat; PWA-ready console; Linux only). Revision 4 (dpi-* inspiration only; platform abstraction for an Android/Termux target). Revision 5 (pluggable `RepoPolicySource` seam with mechanism-independent invariants P1-P6; no phone-specific capability gating; no default chat rate limits). Revision 6 (the engine lives in its own public repo `nanstey/durable`; the skills repo keeps only a thin integration; paths below are repo-root paths of the durable repo unless marked "skills repo").
+Inputs: [1-product-review](./1-product-review.md), [2-system-architecture](./2-system-architecture.md). Revision 1 (C1-C7). Revision 2 (U1 no ntfy; U2 multi-machine console, remote-ready API, guarded approvals). Revision 3 (repo-committed, human-trusted merge policy; interactive chat; PWA-ready console; Linux only). Revision 4 (dpi-* inspiration only; platform abstraction for an Android/Termux target). Revision 5 (pluggable `RepoPolicySource` seam with mechanism-independent invariants P1-P6; no phone-specific capability gating; no default chat rate limits). Revision 7 (U6: `WorkerDispatcher` split into workspace/process hosting plus a `WorkerKind` registry with `pi-session` (default) and `durable-conversation` kinds; conversation tree API and tree TUI; human-held rule; invariants DW1-DW9, T1-T3, H1-H3). Revision 6 (the engine lives in its own public repo `nanstey/durable`; the skills repo keeps only a thin integration; paths below are repo-root paths of the durable repo unless marked "skills repo").
 This document fixes code shape only where a wrong guess would be costly. Names are proposals bound by the invariants below.
 
 Evidence for conventions (in the skills repo, mirrored by the thin integration): `install/main.sh` (HARNESSES table, typed pairs `config|hoist|vendor-git|patch-*`), `install/modules/*.sh` (definitions only, `ok|copy|update` reports), `harness/pi/bin/pi-improve` (zero-dependency Node CLI: Orca resolution, locks, caps, kill switch, `PI_CODING_AGENT_DIR`, dry-run), `harness/pi/bin/pi-secret` and `extensions/profile-secrets.ts` (profile resolution, `secrets/<profile>.env`, same name regex), `@nanstey/pi-auth-profiles` (profile files), `@gotgenes/pi-anthropic-auth/src/{oauth-transport,host-transport}.ts` (transport wrapper), `harness/pi/tests/*` and `install/tests/install.test.sh` (offline, stubs), `.github/workflows/ci.yml`, reference `durable-pi` (`jobs.ts` `{again:{nextAt}}` repeat tasks, `extensions.ts` approval task + `beforeTool` guard).
@@ -22,12 +22,14 @@ src/
   steward/   conversations.ts  main.ts  harness.ts  loop.ts  audit.ts  limits.ts  killswitch.ts  claims.ts  inbox.ts
   sources/   types.ts  githubIssues.ts  githubPrs.ts  localFiles.ts  eligibility.ts
   scout/     judge.ts  brief.ts
-  dispatch/  types.ts  orca.ts  gitProcess.ts  fake.ts  select.ts  monitor.ts  launcher.ts
+  dispatch/  types.ts(WorkerDispatcher: workspace + process host)  orca.ts  gitProcess.ts  fake.ts  select.ts  monitor.ts  launcher.ts  hold.ts(human-held)
+  workers/   kind.ts(WorkerKind registry)  piSession.ts  durableConversation.ts  durable/{tools,confine,playbook,skills,limits,anchor}.ts   # durable worker kind (D19)
+  tree/      nodes.ts  build.ts  frames.ts            # conversation tree model + API/SSE frames (D20)
   notify/    types.ts  notifier.ts  channels/{inbox,desktop,command,github}.ts  dedup.ts  reminders.ts
   gate/      policy.ts  policySource.ts(+ sources/{none,fixture}.ts)  hardPaths.ts  tighten.ts  facts.ts  decide.ts  review.ts  merge.ts  approval.ts  shadow.ts
   approval/  nonce.ts  webauthn.ts  keys.ts  challenge.ts
   console/   main.ts  monitor.ts  proxy.ts  mux.ts  guard.ts  registry.ts  auth.ts  push.ts(stub: 501 until 12b)  routes.ts   # the console hub server (our own; dpi-* inspiration only)
-  tui/       main.ts  views.ts
+  tui/       main.ts  views.ts  tree.ts  transcript.ts  composer.ts   # `durable attach`: tree + transcript + capability-gated composer
   guard/     commands.ts
   cli/       (commands: doctor, profile, status, queue, inbox, audit, attach, ask, chat, approve, policy, stop, enable, token, notify, console, approval, ...)
 web/         console static front end, NO build step: index.html app.js views/*.js style.css sw.js manifest.webmanifest vendor/{preact,htm}.js + SHA256SUMS
@@ -93,28 +95,72 @@ createModelsFor(profile: ResolvedProfile, providers: string[]): Models   // plai
 doctor(def, machine, env): Promise<DoctorReport>   // { checks: {name, ok, detail, fix?}[]; ok }
 // INVARIANT I3: steward start and every dispatch call doctor-lite; false => refuse. A missing profile yields a fix string listing exact steps.
 
-// dispatch/types.ts — the WorkerDispatcher contract (C7)
+// dispatch/types.ts — WorkerDispatcher: WHERE work lives (C7, split in revision 7). Adapters: orca, git-process, fake.
 interface WorkerDispatcher {
-  readonly kind: string;                                   // "orca" | "git-process" | ...
-  capabilities(): { visible: boolean; resumable: boolean; headless: boolean;
-                    attach: "none" | "read" | "interactive"; steer: boolean; transcript: boolean };   // clients show exactly what the adapter reports
-  createWorkspace(spec: WorkspaceSpec): Promise<Workspace>;      // idempotent by spec.id; list-before-create
-  launch(ws: Workspace, job: JobSpec): Promise<JobHandle>;       // idempotent by job.id
-  status(h: JobHandle): Promise<JobStatus>;                      // { state: "running"|"exited"|"missing"|"unknown"; exitCode?; lastActivityAt? }
-  result(h: JobHandle): Promise<JobResult>;                      // exit info + log pointer; PR discovery is NOT here (GitHub via monitor)
-  list(filter: { agent: string; role?: Role }): Promise<JobHandle[]>;
-  interrupt(h: JobHandle, mode: "soft" | "hard"): Promise<void>;
-  steer?(h: JobHandle, text: string): Promise<void>;                // present only when capabilities().steer; chat-scope route returns 501 otherwise
-  transcript?(h: JobHandle, from?: Cursor): AsyncIterable<TranscriptFrame>;   // tails the worker's Pi session log
-  attachInfo(h: JobHandle): AttachInfo;                          // { kind: "orca-terminal", handle } | { kind: "command", command } for humans
-  removeWorkspace(ws: Workspace, opts: { force: false }): Promise<void>;  // refuses dirty or unpushed work
+  readonly kind: string;                                                  // "orca" | "git-process" | ...
+  capabilities(): { visible: boolean; processHost: boolean; viewer: boolean };   // processHost=false means durable-conversation workers only get a workspace
+  createWorkspace(spec: WorkspaceSpec): Promise<Workspace>;              // idempotent by spec.id; list-before-create
+  removeWorkspace(ws: Workspace, opts: { force: false }): Promise<void>; // refuses dirty, unpushed or human-held work
+  listWorkspaces(filter: { agent: string }): Promise<Workspace[]>;
+  hostProcess?(ws: Workspace, p: ProcessSpec): Promise<ProcHandle>;      // pi-session kind: a Pi process (Orca terminal or detached); idempotent by p.id
+  processStatus?(h: ProcHandle): Promise<{ state: "running"|"exited"|"missing"|"unknown"; exitCode?: number; lastActivityAt?: number }>;
+  interruptProcess?(h: ProcHandle, mode: "soft" | "hard"): Promise<void>;
+  sendInput?(h: ProcHandle, text: string): Promise<void>;                // orca: terminal send; present only if supported
+  readOutput?(h: ProcHandle, cursor?: Cursor): AsyncIterable<string>;
+  openViewer?(ws: Workspace, v: ViewerSpec): Promise<AttachInfo>;       // create a terminal running `durable attach ...`; may return {kind:"command"} when unsupported (D20)
+  workspaceTerminals?(ws: Workspace): Promise<TerminalInfo[]>;           // advisory: foreign-terminal detection for the human-held rule
 }
 type WorkspaceSpec = { id: string; repo: string; baseRef: string; name: string };           // deterministic id: durable-<agent>-<item>
-type JobSpec = { id: string; role: Role; profile: string; briefText: string;                  // by value, not a path
-                 model: string; thinking: string; env: Readonly<Record<string,string>> };     // env already built by identity/env
-// INVARIANT W1: adapters never read process.env for credentials or forward ambient env; they pass `env` (allowlist-built) only.
+type ProcessSpec  = { id: string; title: string; argv: string[]; env: Readonly<Record<string,string>> };   // env already built by identity/env
+type ViewerSpec   = { title: string; command: string };                                      // e.g. "durable attach <agent>/<conversation>"
+type AttachInfo   = { kind: "orca-terminal"; handle: string } | { kind: "command"; command: string; openIn?: "orca-terminal" };
+
+// workers/kind.ts — WorkerKind: WHAT runs in the workspace (revision 7). Registry keyed by "pi-session" (default) | "durable-conversation".
+interface WorkerKind {
+  readonly kind: "pi-session" | "durable-conversation";
+  capabilities(): KindCapabilities;                                      // { attach, steer, transcript, interrupt, resumeAfterCrash, skills, extensions, anthropicOAuth, headless, processIsolated, tokenInShell, viewable }
+  start(ws: Workspace, job: JobSpec): Promise<WorkerHandle>;            // idempotent by job.id; the kind obtains the workspace from the dispatcher first
+  status(h: WorkerHandle): Promise<WorkerStatus>;                       // { state: "running"|"done"|"failed"|"aborted"|"held"|"missing"; lastActivityAt? }
+  result(h: WorkerHandle): Promise<WorkerResult>;                       // PR discovery is NOT here (GitHub via monitor)
+  interrupt(h: WorkerHandle, mode: "soft" | "hard"): Promise<void>;
+  steer?(h: WorkerHandle, text: string): Promise<void>;                 // only when capabilities().steer; 501 not_supported otherwise
+  transcript(h: WorkerHandle, from?: Cursor): AsyncIterable<TranscriptFrame>;
+  resume(h: WorkerHandle): Promise<WorkerHandle>;                       // pi-session: re-launch `pi --continue`; durable: re-attach via the ownership index (pi-durable resumes it)
+  describe(h: WorkerHandle): TreeNodeInfo;                              // feeds the conversation tree (D20)
+}
+type JobSpec = { id: string; role: Role; profile: string; briefText: string; model: string; thinking: string;
+                 env: Readonly<Record<string,string>>; limits: { itemMinutes: number; maxTurns?: number; maxToolCalls?: number; tokenBudget?: number };
+                 skills?: string[] };                                  // skills only honoured by the durable kind (allowlisted prompt text)
+type KindCapabilities = { attach: "none"|"read"|"interactive"; steer: boolean; transcript: boolean; interrupt: boolean; resumeAfterCrash: boolean;
+                          skills: "full"|"allowlisted-text"; extensions: boolean; anthropicOAuth: "extension"|"modelAuth-option"; headless: boolean;
+                          processIsolated: boolean; tokenInShell: boolean; viewable: "terminal"|"durable-attach" };
+// kind x capability (defaults): pi-session = {attach: interactive(orca)|read(git), steer: orca only, transcript: jsonl tail, interrupt: true, resumeAfterCrash: false, skills: full, extensions: true, anthropicOAuth: extension, headless: false, processIsolated: true, tokenInShell: true, viewable: terminal}
+//                               durable-conversation = {attach: interactive via durable attach, steer: true, transcript: native, interrupt: true, resumeAfterCrash: true, skills: allowlisted-text, extensions: false, anthropicOAuth: modelAuth-option, headless: true, processIsolated: false, tokenInShell: false, viewable: durable-attach}
+
+// workers/durable/* — durable-conversation worker kind (architecture D19)
+// INVARIANT DW1 (ownership): the child conversation is created in a transaction with ownership {kind:"task", taskId: runWorkerTaskId}; run-worker is a BACKGROUND task owned by the item's WorkItemTask (loop-owned); the steward main conversation is only the logical tree parent. A rerun reuses the child through scanConversations({ownerTaskId}).
+// INVARIANT DW2 (kill switch beats background): every worker tool call passes beforeTool(killswitch, budgets, human-held); WorkItemTask watches kill switch, human-held, itemMinutes and explicitly aborts run-worker (explicit abort crosses the background boundary and writes a terminal outcome); `durable stop --workers` uses abort({background:true}); daemon close() writes no outcome so unfinished workers resume on restart unless already aborted.
+// INVARIANT DW3 (tool set is fixed in code): read, edit, write, bash, plus code-owned commit, push_branch, open_draft_pr, report. No subagent tool; no tool that reads secrets; outputs screened.
+// INVARIANT DW4 (confinement): file tools resolve realpath inside the worktree and outside .git/ (symlink and `..` escapes refused); bash cwd = worktree with env from buildAgentEnv(def,"worker") WITHOUT GH_TOKEN; the shared guard/commands.ts block-list (push, merge, rebase, reset --hard, branch switching, worktree, gh pr merge, --admin, --force, cd/absolute paths outside the worktree) runs in beforeTool. Not a sandbox (stated); an optional per-conversation container env is a hardening option.
+// INVARIANT DW5 (code-owned git/GitHub): push_branch pushes only durable/<id>/<item> with a fixed refspec after checking the remote head; open_draft_pr looks up an existing PR first; both are non-replay-safe tools made idempotent by deterministic names (S1).
+// INVARIANT DW6 (recovery): replay-safe tools rerun; non-replay-safe tools return `interrupted`; the playbook tells the model to inspect git status and files after an interrupted result; after restart the WorkItemTask re-attaches via the ownership index (no re-dispatch).
+// INVARIANT DW7 (skills): the kind loads no user skills, extensions, prompts or packages; `skills` allowlist entries are read as SKILL.md body text only, size-capped, inlined as prompt sections; an entry whose text requires subagent/codemode/scripts is rejected. Default empty.
+// INVARIANT DW8 (single owner): all durable worker conversations live in the agent's steward storage; maxConcurrent (default 2; Android 1) is enforced in code; no cross-process access to the storage; retention/export of finished worker conversations is configurable.
+// INVARIANT DW9 (model auth): the child uses createModelsFor(profile, providers); Anthropic OAuth only if the modelAuth option is on; a reviewer of the opposite family must be resolvable before launch or launch is refused.
+// workers/* + dispatch/hold.ts — human-held rule
+// INVARIANT H1: a workspace item with a human-held mark is never resumed, re-dispatched, written to, pushed from or cleaned up by the daemon, for either kind; the claim and lease are kept.
+// INVARIANT H2: `durable hold <item>` (scope pause) sets the mark and soft-interrupts the worker; `durable release <item>` is an approval-class action (same class as agent resume): no bearer scope can release.
+// INVARIANT H3: foreign terminals in a worker's workspace (workspaceTerminals) are reported as advisory `suspected human session`; they never block by themselves.
+// tree/* — conversation tree (architecture D20)
+type TreeNode = { id: string; parentId: string | null; kind: "steward"|"chat"|"scout"|"worker-durable"|"reviewer-durable"|"worker-pi"|"reviewer-pi"|"subagent";
+                  status: "idle"|"running"|"waiting"|"done"|"failed"|"aborted"|"held"; item?: string; ownerTaskId?: string; source: "durable"|"dispatcher";
+                  workspace?: string; startedAt: number; capabilities: { attach: string; steer: boolean; transcript: boolean; interrupt: boolean; resumeAfterCrash: boolean } };
+// INVARIANT T1: the tree is built from the durable ownership index and taskGraph for source "durable" and from the WorkerKind registry for source "dispatcher"; node ids are opaque; the same builder serves GET /v1/conversations?tree=true and the SSE `tree` frames for the CLI, TUI and console.
+// INVARIANT T2: a client sees a control (follow-up, steer, abort, interrupt) only if node.capabilities allows it AND its token scope permits it; nothing is hard-coded per client type.
+// INVARIANT T3: `durable attach` and every viewer terminal use only the typed client; closing a viewer never affects a worker.
+// INVARIANT W1: adapters and kinds never read process.env for credentials or forward ambient env; they pass `env` (allowlist-built) only.
 // INVARIANT W2: nothing in the contract assumes a local filesystem (a remote adapter can fit); secrets are resolved on the executing host via profile name.
-// INVARIANT W3: the contract test suite runs against every adapter with a fake `pi` binary (and the fake adapter) and asserts W1, idempotency, interrupt, dirty-refusal.
+// INVARIANT W3: a dispatcher contract suite runs against every adapter with a fake `pi` binary (and the fake adapter) and asserts W1, idempotency, interrupt, dirty- and human-held-refusal; a kind contract suite runs against both kinds (with a faux model for the durable kind) and asserts the same acceptance flow (claim -> workspace -> work -> draft PR), capability reporting, interrupt and resume.
 
 // gate/decide.ts — pure; no I/O; table-tested
 decide(policy: EffectivePolicy, facts: GateFacts): { action: "merge" | "wait-human" | "block"; reasons: string[]; shadow?: boolean }
@@ -192,7 +238,7 @@ claim(item): Promise<"won" | "lost">  // label + marker comment (agent id), read
 
 Durable-side invariants:
 - **S1 intent-first:** every external effect is preceded by a committed intent entry and uses a deterministic id (`durable/<agent>/<item>` for branch, workspace, job, label). On resume, code **re-derives** world state (GitHub/dispatcher) before acting.
-- **S2 tool replay classes:** read tools `replay: "safe"`. `claim`, `launchWorker`, `requestMerge`, `postComment`, `notify` are not replay-safe; "interrupted" is resolved by a world read (notify: dedup key), never by blind retry.
+- **S2 tool replay classes:** read tools `replay: "safe"`. `claim`, `startWorker`, `requestMerge`, `postComment`, `notify` and the durable worker's `commit`, `push_branch`, `open_draft_pr` are not replay-safe; "interrupted" is resolved by a world read (notify: dedup key), never by blind retry.
 - **S3 steward LLM tools are narrow:** list_queue, explain_item, status, set_priority (code-validated document write), pause, and request_merge / request_work (enqueue only). No bash, no GitHub write, no resume. Chat conversations use the same set (CH6).
 - **S4 kill switch** (`disabled` file, `DURABLE_DISABLED=1`, GitHub `durable/pause` (stop only), quiet hours) is checked at tick start and immediately before each side effect.
 
@@ -230,9 +276,12 @@ step()
 ```
 phase claim        intent → claims.claim → lost? release, end
 phase brief        scout child conversation (read-only) → brief document
-phase dispatch     intent → dispatcher.createWorkspace(spec) → dispatcher.launch(ws, JobSpec{env=buildAgentEnv(...,"worker")})
-phase await-pr     loop: sleep → dispatch/monitor: dispatcher.status + GitHub PR lookup
-                     exited && no PR → re-launch (resume brief, pi --continue) up to maxAttempts → else notify(escalation), park
+phase dispatch     intent → dispatcher.createWorkspace(spec) → kind = workers/select(def, role) → kind.start(ws, JobSpec{env=buildAgentEnv(...,"worker"), limits, skills})
+                     [durable kind: create run-worker (background task) → child conversation in the steward; dispatcher.openViewer when workers.durable.viewer=on-start]
+phase await-pr     loop: sleep → dispatch/monitor: kind.status + GitHub PR lookup + hold/kill-switch/limits watch
+                     pi-session exited && no PR → kind.resume (pi --continue) up to maxAttempts → else notify(escalation), park
+                     durable: pi-durable resumes the child after a restart; WorkItemTask re-attaches (DW6); failed/aborted && no PR → one fresh attempt up to maxAttempts → else escalate
+                     human-held → stop touching the workspace (H1) until released
 phase review       launch reviewer JobSpec{role:"reviewer", model=opposite family} → review.record(verdict, family, sha) in steward.reviews → mirror status+comment
 phase gate         facts.collect(head SHA) → decide(policy, facts)
    ├─ merge        (auto + not shadow + cooling-off elapsed) → merge.request(sha); re-read state first; interrupted → re-read
@@ -255,7 +304,14 @@ launch(ws, job)           (orca adapter)
 └─ ORCA terminal create --worktree path:ws --title … --command launcher --json
 (git-process adapter: same launcher, detached spawn + log file; attachInfo = `tail -f <log>`)
 ```
-Re-launch after a crash: `pi --continue` in the same workspace with a short resume brief.
+Re-launch after a crash: `pi --continue` in the same workspace with a short resume brief (pi-session kind only).
+
+```
+openViewer(ws, {title: "durable:<agent>/<item>", command: "durable attach <agent>/<conversation>"})   (orca adapter)
+├─ list-before-create: ORCA terminal list --worktree … ; reuse a viewer with the same title
+├─ ORCA terminal create --worktree path:ws --title … --command 'durable attach …' --json   → AttachInfo{kind:"orca-terminal"}
+└─ unsupported or failing → AttachInfo{kind:"command", command} (shown by CLI/console; no retry loop)
+```
 
 ### 3.5 CLI
 
@@ -275,7 +331,7 @@ Console startup: load `console.yaml` + `devices.yaml` → `monitor.checkAll()` (
 
 ### 3.7 TUI and CLI clients
 
-`tui/main.ts` and `cli/*` use `client/` (the same typed client the console hub uses). `durable attach <agent>` = transcript view + composer (follow-up default, steer when busy) + abort + queue/inbox side panels, over loopback with the local token.
+`tui/main.ts` and `cli/*` use `client/` (the same typed client the console hub uses). `durable attach <agent>[/<conversation|item>]` opens a **tree** (steward, chat threads, scout conversations, Pi-session workers, durable child conversations and nested subagents: parent -> child, live from `GET /v1/conversations?tree=true` and the SSE `tree` frames), a transcript pane for the selected node (`GET .../<id>/transcript` and `.../events`), a composer whose follow-up, steer and abort controls are enabled only where `node.capabilities` and the token scopes allow (T2), and queue/inbox side panels, over loopback with the local token. `durable open <conversation>` asks the Orca adapter for a viewer terminal; `durable hold|release <item>` implement the human-held rule.
 
 ### 3.8 Policy resolution (per repo, each tick and at gate time)
 
@@ -323,7 +379,11 @@ runit restarts the process if it dies; if Termux itself is killed nothing runs u
 | `identity/doctor` | stub `gh`: wrong login fails; missing profile fails with a fix string; missing reviewer-family provider fails; classic `ghp_` token warns; `admin:` scope warns. |
 | `identity/pidir` | tmp `PI_AGENT_DIR`; layout assertions; real `AuthStorage.modify` through the symlink (rotation test). |
 | `identity/modelAuth` | `plain` returns Models for an API-key profile; `anthropicShaped` selected only when the spike chose it; payload shaping unit-tested with the extension's own fixtures if option 1. |
-| `dispatch` | **contract suite** against `orca` (stub CLI recording args), `git-process` (fake `pi`) and `fake`: idempotent create/launch, no ambient env (W1), list-before-create, interrupt, dirty-refusal, attachInfo present. |
+| `dispatch` | **dispatcher contract suite** against `orca` (stub CLI recording args), `git-process` (fake `pi`) and `fake`: idempotent createWorkspace/hostProcess, no ambient env (W1), list-before-create, interrupt, dirty- and human-held-refusal, `openViewer` returns an `orca-terminal` or a `command` fallback. |
+| `workers/*` kinds | **kind contract suite** run for `pi-session` (fake `pi`) and `durable-conversation` (faux model): same acceptance flow, capability reporting matches the table, interrupt, resume, steer 501 when unsupported, no ambient env. |
+| `workers/durable` | DW1: ownership and background boundary (aborting the main conversation or a chat turn leaves the worker running); DW2: kill switch, hold, budget and wall-clock each stop a running worker and write a terminal outcome, `durable stop --workers` stops all, `close()` leaves workers resumable; DW3-DW5: tool-set snapshot, path/symlink/`..` escape attempts refused, blocked commands refused, `GH_TOKEN` absent from the bash env (hostile env test), `push_branch` refspec fixed and idempotent, `open_draft_pr` idempotent; DW6: `SIGKILL` mid-`bash`, restart, `interrupted` result, child continues, one worker/one PR; DW7: skill allowlist reads text only and rejects incompatible skills; DW8: `maxConcurrent` enforced; load test with N concurrent children while the API and SSE stay responsive. |
+| `tree/*` | tree from a fixture steward with chat, scout, durable worker, nested subagent and Pi-session leaf nodes: parent/child, status, capabilities; `tree` SSE deltas; a client without `chat` scope gets no steer controls (T2); `durable attach` rendering tests with a fake terminal. |
+| `hold` | `hold` sets the mark and soft-interrupts; resume, re-dispatch, writes, push and cleanup refused while held (both kinds); `release` impossible with any bearer scope; foreign-terminal advisory. |
 | `gate/decide` | full truth table; property test: flipping any required fact to false/null never yields `merge`; G6 test: forged label/comment inputs have no effect; G8 test over recorded `REVIEW_REQUIRED` fixtures. |
 | `gate/merge` | source lint: only module spawning `gh pr merge`; argv has `--match-head-commit`, never `--admin`. |
 | `gate/shadow` | real-shaped fixtures: shadow output logged with reasons, executor takes human path. |
@@ -348,7 +408,12 @@ runit restarts the process if it dies; if Termux itself is killed nothing runs u
 | --- | --- | --- |
 | Profile manifest as a separate non-secret JSON in `profile-meta/` | Put login/email in `secrets/<name>.env` or extend `auth.json` | Keeps pi-auth-profiles and pi-secret formats untouched; non-secret metadata is inspectable and diffable; the manifest pins the identity so drift is detectable. |
 | Definitions without paths/secrets + machine file for assignment, paths, channels | One per-agent file with everything | Satisfies AGENTS.md (no machine state in repo) and lets definitions live in a private repo or move between machines unchanged. |
-| `WorkerDispatcher` interface with `orca`, `git-process`, `fake` | Direct Orca calls in the steward | C7: swap later (durable conversations, remote); `git-process` doubles as the test double. |
+| `WorkerDispatcher` (workspace + process hosting) separated from `WorkerKind` (`pi-session` default, `durable-conversation` opt-in) | One dispatcher that launches only Pi sessions; durable workers as a third dispatcher adapter | A durable worker needs a workspace but no external process; separating the concerns lets either kind use either adapter and keeps `git-process` useful on Android (U6). `git-process` still doubles as the test double. |
+| Durable workers owned by a background `run-worker` task, stopped explicitly by the kill switch | Foreground ownership (parent aborts child) | A chat abort or loop tick must not lose worker progress; the kill switch, holds and limits abort explicitly and write terminal outcomes. |
+| Code-owned `push_branch`/`open_draft_pr` for durable workers; no token in their shell | Give the worker raw `git push`/`gh` | Removes the biggest weakness of the Pi-session kind (token in the model's shell); fixed refspec and idempotency. |
+| Minimal skill-prompt text mechanism, default empty; `idea-to-pr` stays on Pi sessions | Port the skills runtime | Skills depend on Pi extensions, scripts and subagents; a text-only allowlist is cheap and safe, and the gap is stated. |
+| `durable attach` tree + `openViewer` terminal in Orca | A bespoke Orca integration or a web-only view | One TUI serves terminals and Orca; Orca lists durable conversations beside normal sessions; falls back to printing the command. |
+| Human-held mark; release is approval-class | Auto-detect and auto-handoff | The minimal safe rule; a bearer-scope release would let an agent lift a human's hold. |
 | Approval nonce delivered out of band | GitHub label/comment approval | Shared identity makes labels/comments forgeable by the agent. |
 | Gate reads steward-internal review records, not the GitHub status/comment | Read the status/comment back | Same forgeability reason; the status/comment is display only. |
 | Native Node type stripping, no build | `tsx` or `tsc` build | Fewer deps; `erasableSyntaxOnly`. |
@@ -389,8 +454,10 @@ runit restarts the process if it dies; if Termux itself is killed nothing runs u
 - Whether the fine-grained token can read rulesets/branch rules for the fingerprint, and `gh api .../contents?ref=<commit>` works as assumed (slice 1, 9).
 - Orca CLI terminal-input/read commands for worker steer/attach (slice 6); if absent, workers are view + interrupt only.
 - Android/Termux (slice 1 checklist, slice 14): Node version and `node:sqlite` in Termux; pi-durable install and storage under `--ignore-scripts`; `os.networkInterfaces()` behaviour; whether the Tailscale app's address is bindable from Termux; whether a `tailscale`/`tailscaled` userspace option exists in Termux packages; `termux-services` + Termux:Boot + wake-lock + Doze/phantom-process behaviour; `termux-notification-list` readability; `gh` in Termux.
+- pi-durable subagent mechanics for our use (slice 1 addendum): child conversation inside the steward with cwd confined to a worktree; explicit abort of a background child by the kill switch; crash recovery of an interrupted tool; ownership-index re-attach; event-loop contention with N children; transcript growth/retention and pruning; per-conversation container env (example 29); inlining a `SKILL.md` as a prompt section; child model auth.
+- Orca viewer: a full-screen TUI rendering and taking input in a terminal created with `terminal create --command`; `terminal read --screen`; closing the terminal leaves the work running; one `terminal send` into a live Pi TUI (slice 1 addendum, slice 6).
 - Credential-screening patterns: false-positive rate on normal chat (slice 3/4).
 
 ## 8. Review status
 
-Revised after user comments (rounds 1-4). No reviewer opted in.
+Revised after user comments (rounds 1-7). No reviewer opted in.
