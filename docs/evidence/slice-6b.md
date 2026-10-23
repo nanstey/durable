@@ -51,9 +51,11 @@ All automated GitHub tests use fakes; no live issue or PR writes are part of the
 ### Checks
 
 - Frozen dependency installation succeeded.
-- 284 focused tests across 22 affected unit/contract files passed; four hosted-gate tests also passed (288 unique local tests). Focused reruns are not counted twice. The exhaustive suite is left to CI.
+- 284 focused tests across 22 affected unit/contract files passed; four hosted-gate tests and six stream/service tests also passed (294 unique local tests). Focused reruns are not counted twice. The exhaustive suite runs only in CI.
 - The real Linux hosted containment check passed, including descendants that leave their process group; no GitHub access was involved.
 - `pnpm pack` includes the worker template, repository guard, hosted gate and worker CLI shims.
 - `pnpm check` and `pnpm hygiene` passed. Biome reports advisory warnings, not errors; Fallow reports no unused code or duplication.
 - Complexity measurement drove extraction of phase, monitor, dependency and production-wiring helpers. No changed function remains in the refactor band; longer wiring functions remain review notes.
 - Independent cross-family source review is not claimed: this implementation session is a leaf worker and cannot dispatch reviewers.
+- CI initially found the platform command string in the core and the outdated worker-stop refusal assertion. Takeover instructions moved to `platform/holdAdvice.ts`; the CLI contract now checks the implemented worker-stop dry run.
+- Source head `e127cac47f3f29207a231b23558970aac491d35a`: [CI verification](https://github.com/nanstey/durable/actions/runs/40020412837) passed `pnpm check`, all 414 exhaustive tests (zero failures/skips), and hygiene. The push workflow also passed.
