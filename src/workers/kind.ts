@@ -9,6 +9,7 @@ export type JobSpec = {
 	baseRef?: string;
 	baseSha?: string;
 	reviewedHeadSha?: string;
+	reviewedPr?: number;
 	reviewedFamily?: string;
 	viewer?: "on-start" | "on-demand" | "never";
 	role: "worker" | "reviewer";

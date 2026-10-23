@@ -37,6 +37,25 @@ export type WorkItem = {
 		state?: "open" | "merged" | "closed";
 	}>;
 	/** Persisted gate state deliberately contains no approval secret. */
+	review?:
+		| {
+				sha: string;
+				result: {
+					verdict: "approve" | "changes" | "blocked";
+					risk: "low" | "medium" | "high";
+					summary: string;
+					headSha: string;
+				};
+				provenance: {
+					provider: string;
+					model: string;
+					family: string;
+					entries: number;
+					source: "durable-entries" | "pi-session-log";
+				};
+				failed?: false;
+		  }
+		| { sha: string; failed: true; reason: string };
 	gate?: {
 		pr: number;
 		sha: string;
@@ -134,8 +153,9 @@ export function reconcilePrs(
 	for (const observed of prs) {
 		const known = item.prs.find((entry) => entry.number === observed.number);
 		if (known) Object.assign(known, observed);
-		if (item.gate && known?.primary && known.headSha !== item.gate.sha)
-			delete item.gate;
+		if (known?.primary && known.headSha !== item.gate?.sha) delete item.gate;
+		if (known?.primary && known.headSha !== item.review?.sha)
+			delete item.review;
 	}
 	const primary = item.prs.find((entry) => entry.primary);
 	if (primary?.state === "merged") item.outcome = "merged";

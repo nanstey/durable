@@ -1,6 +1,14 @@
+import { join } from "node:path";
 import type { AgentDef, MachineCfg } from "../config/schema.ts";
 import { monitorWorker } from "../dispatch/monitor.ts";
 import type { AttachInfo, WorkerDispatcher } from "../dispatch/types.ts";
+import { decide } from "../gate/decide.ts";
+import { noPolicy } from "../gate/policy.ts";
+import {
+	collectReview,
+	launchReviewer,
+	type RunningReview,
+} from "../gate/review.ts";
 import { assembleWorkerBrief, createScoutBrief } from "../scout/brief.ts";
 import { eligibility } from "../sources/eligibility.ts";
 import { readLocalBody } from "../sources/localFiles.ts";
@@ -58,7 +66,7 @@ export type WorkRuntimeOptions = {
 	drainMs?: number;
 	durable?: Pick<
 		import("../workers/durable/anchor.ts").NativeAnchorOptions,
-		"git" | "github" | "shellEnv" | "verifyIdentity"
+		"git" | "github" | "shellEnv" | "prDiff" | "verifyIdentity"
 	>;
 	recordCost?: (cost: number) => Promise<void>;
 };
@@ -250,41 +258,8 @@ export class WorkRuntime {
 			// adapters without it remain safely parked at review.
 			const observed = await o.github.readPr(item.repo, primary.number);
 			Object.assign(primary, observed);
-			if (primary.headSha && item.gate?.sha !== primary.headSha) {
-				item.stage = "gate";
-				item.gate = {
-					pr: primary.number,
-					sha: primary.headSha,
-					state: "waiting-approval",
-					reasons: ["human-approval-required"],
-				};
-				// Commit the task before external delivery so a restart never makes a
-				// second task for the same item/SHA.
-				await this.store.save(state);
-			}
-			if (primary.headSha && item.gate && !item.gate.notified) {
-				await o.github.readyPr?.(item.repo, primary.number, item.id);
-				await o.github.mirrorGate?.(
-					item.repo,
-					primary.number,
-					primary.headSha,
-					"| Fact | Value |\n| --- | --- |\n| Head SHA | current |\n\nAction: human approval required.",
-					item.id,
-				);
-				await o.notifyApproval?.(item.id, primary.headSha);
-				if (!(await o.issueApproval?.(item.id, primary.headSha)))
-					audit(o.agent, {
-						event: "approval-nonce-unavailable",
-						item: item.id,
-					});
-				item.gate.notified = true;
-				audit(o.agent, {
-					event: "gate-decision",
-					item: item.id,
-					sha: primary.headSha,
-					action: "wait-human",
-				});
-			} else if (!primary.headSha) item.stage = "review";
+			if (primary.headSha) await this.reviewAndGate(state, item, task, primary);
+			else item.stage = "review";
 			if ((await kind.status(handle)) !== "running")
 				attempt.endedAt ??= this.now();
 		}
@@ -293,6 +268,146 @@ export class WorkRuntime {
 			await o
 				.notify("escalation", item.id)
 				.catch(() => audit(o.agent, { event: "notify-failed", item: item.id }));
+	}
+	/** Review is SHA-bound: a moved head discards the old result and launches anew. */
+	private async reviewAndGate(
+		state: WorkState,
+		item: WorkItem,
+		task: WorkItemTask,
+		pr: { number: number; headSha?: string },
+	) {
+		const sha = pr.headSha;
+		if (!sha) return;
+		if (task.review?.headSha !== sha) delete task.review;
+		if (item.review?.sha !== sha) delete item.review;
+		if (!item.review) {
+			item.stage = "review";
+			if (!task.review) {
+				const model = this.options.definition.models?.worker;
+				if (!model) throw Error("models.worker required for review");
+				const id = `durable-${this.options.agent}-${item.id}-review-${sha.slice(0, 12)}`;
+				const checkout = this.options.checkoutFor(item.repo) ?? item.repo;
+				const launched = await launchReviewer(
+					this.options.definition,
+					this.options.machine,
+					this.options.workers,
+					this.options.dispatcher,
+					this.options.kinds,
+					{
+						id,
+						agent: this.options.agent,
+						item: item.id,
+						repo: item.repo,
+						baseRef:
+							this.options.definition.scope?.repos?.find(
+								(repo) => repo.slug === item.repo,
+							)?.base ?? "main",
+						headSha: sha,
+						pr: pr.number,
+						producer: model,
+						workspace: { id, repo: checkout, branch: this.branch(item) },
+						briefText: `Review draft PR #${pr.number} at ${sha}. Use pr_diff, then report_verdict with this exact head SHA.`,
+						outputFile: join(checkout, `.durable-review-${id}.json`),
+						env: { ...this.options.env, DURABLE_ITEM: item.id },
+						limits: this.options.definition.limits ?? {},
+					},
+				);
+				task.review = {
+					id: launched.id,
+					kind: launched.kind,
+					headSha: launched.headSha,
+					pr: launched.pr,
+					producer: launched.producer,
+					outputFile: launched.outputFile,
+				};
+				await this.store.save(state);
+				return;
+			}
+			try {
+				const registered = await this.options.workers.get(task.review.id);
+				if ((await registered.kind.status(registered.handle)) === "running")
+					return;
+				item.review = await collectReview(
+					task.review as unknown as RunningReview,
+					this.options.workers,
+					this.options.definition,
+				);
+			} catch (error) {
+				item.review = {
+					sha,
+					failed: true,
+					reason: error instanceof Error ? error.message : "reviewer failed",
+				};
+				item.gate = {
+					pr: pr.number,
+					sha,
+					state: "wait-human",
+					reasons: ["review-failed"],
+				};
+				delete task.review;
+				await this.store.save(state);
+				return;
+			}
+			delete task.review;
+		}
+		if (!item.review || item.review.failed) return;
+		const review = item.review;
+		if (review.result.verdict !== "approve") {
+			item.gate = {
+				pr: pr.number,
+				sha,
+				state: "wait-human",
+				reasons: ["review-requested-changes"],
+			};
+			return;
+		}
+		const decision = decide(noPolicy(this.options.definition.merge), {
+			draft: false,
+			author: this.options.login,
+			headMatches: true,
+			mergeClean: true,
+			reviewRequired: false,
+			checksPassed: true,
+			paths: [],
+			hardPath: false,
+			crossFamilyReview: true,
+			riskAcceptable:
+				review.result.verdict === "approve" &&
+				(review.result.risk === "low" || review.result.risk === "medium"),
+			dailyCapAvailable: true,
+			coolingOffElapsed: true,
+			killSwitchOff: true,
+		});
+		item.stage = "gate";
+		item.gate ??= {
+			pr: pr.number,
+			sha,
+			state: decision.action === "block" ? "wait-human" : "waiting-approval",
+			reasons: decision.reasons,
+		};
+		if (item.gate.state !== "waiting-approval" || item.gate.notified) return;
+		await this.store.save(state);
+		await this.options.github.readyPr?.(item.repo, pr.number, item.id);
+		await this.options.github.mirrorGate?.(
+			item.repo,
+			pr.number,
+			sha,
+			"| Fact | Value |\n| --- | --- |\n| Head SHA | current |\n| Independent review | passed |\n\nAction: human approval required.",
+			item.id,
+		);
+		await this.options.notifyApproval?.(item.id, sha);
+		if (!(await this.options.issueApproval?.(item.id, sha)))
+			audit(this.options.agent, {
+				event: "approval-nonce-unavailable",
+				item: item.id,
+			});
+		item.gate.notified = true;
+		audit(this.options.agent, {
+			event: "gate-decision",
+			item: item.id,
+			sha,
+			action: decision.action,
+		});
 	}
 	private async runPhases(
 		state: WorkState,
@@ -615,7 +730,7 @@ export class WorkRuntime {
 		return this.enqueue(async () => {
 			const state = await this.store.load();
 			for (const item of Object.values(state.work.items))
-				if (item.attempts.at(-1) && !item.attempts.at(-1)!.endedAt)
+				if (item.attempts.at(-1) && !item.attempts.at(-1)?.endedAt)
 					await this.cancel(state, item, reason);
 		});
 	}
