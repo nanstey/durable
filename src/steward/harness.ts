@@ -72,7 +72,7 @@ type State = {
 			turnAborted?: boolean;
 		}
 	>;
-	requests: Record<string, { hash: string; id: number }>;
+	requests: Record<string, { hash: string; id: number | string }>;
 };
 function document<T extends JsonObject>(kind: string, initial: () => T) {
 	return defineDoc<T>({
@@ -233,6 +233,50 @@ export async function openHarness(options: HarnessConfig) {
 					{
 						type: "text",
 						text: JSON.stringify(await snapshot()),
+					},
+				],
+			}),
+		}),
+		defineTool({
+			name: "set_priority",
+			description:
+				"Request a queue priority change; eligibility remains enforced.",
+			parameters: Type.Object({
+				item: Type.String(),
+				priority: Type.Integer({ minimum: 0, maximum: 100 }),
+			}),
+			execute: async ({ item, priority }) => ({
+				output: [
+					{
+						type: "text",
+						text: JSON.stringify({ queued: "set_priority", item, priority }),
+					},
+				],
+			}),
+		}),
+		defineTool({
+			name: "request_merge",
+			description: "Enqueue a merge request for gate evaluation.",
+			parameters: Type.Object({ target: Type.String() }),
+			execute: async ({ target }) => ({
+				output: [
+					{
+						type: "text",
+						text: JSON.stringify({ queued: "request_merge", target }),
+					},
+				],
+			}),
+		}),
+		defineTool({
+			name: "request_work",
+			description:
+				"Enqueue a work request for policy and eligibility evaluation.",
+			parameters: Type.Object({ item: Type.String() }),
+			execute: async ({ item }) => ({
+				output: [
+					{
+						type: "text",
+						text: JSON.stringify({ queued: "request_work", item }),
 					},
 				],
 			}),
@@ -767,7 +811,28 @@ export async function openHarness(options: HarnessConfig) {
 				return 0;
 			}, context);
 		},
-		async create(kind: "chat" | "scout") {
+		async create(
+			kind: "chat" | "scout",
+			idempotencyKey?: string,
+			item?: string,
+			idempotencyHash: string = kind,
+		) {
+			const requestKey = idempotencyKey
+				? `conversation:${idempotencyKey}`
+				: undefined;
+			const existing = requestKey
+				? (await snapshot()).requests[requestKey]
+				: undefined;
+			if (existing) {
+				if (existing.hash !== idempotencyHash)
+					throw Object.assign(
+						Error("Idempotency-Key reused with different kind"),
+						{
+							code: "conflict",
+						},
+					);
+				return String(existing.id);
+			}
 			const conversation = await harness.commit(async (tx) => {
 				const anchor = await tx.createTask(Anchor, null, {
 					conversationId: root.id,
@@ -779,10 +844,21 @@ export async function openHarness(options: HarnessConfig) {
 				});
 			}, context);
 			await harness.commit(async (tx) => {
-				(await tx.doc(StateDoc)).conversations[String(conversation.id)].kind =
-					kind;
+				const metadata = (await tx.doc(StateDoc)).conversations[
+					String(conversation.id)
+				];
+				metadata.kind = kind;
+				metadata.item = item;
 			}, context);
-			return (await snapshot()).conversations[String(conversation.id)].id;
+			const id = (await snapshot()).conversations[String(conversation.id)].id;
+			if (requestKey)
+				await harness.commit(async (tx) => {
+					(await tx.doc(StateDoc)).requests[requestKey] = {
+						hash: idempotencyHash,
+						id,
+					};
+				}, context);
+			return id;
 		},
 		async addInbox(type: string, target = "") {
 			await harness.commit(async (tx) => {
