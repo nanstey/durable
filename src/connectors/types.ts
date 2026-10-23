@@ -1,5 +1,3 @@
-import type { AgentDef } from "../config/schema.ts";
-
 export type ConnectorAccess = "read" | "write";
 export type ConnectorTool = {
 	name: string;
@@ -32,6 +30,3 @@ export interface ConnectorProvider {
 	resolve(call: Omit<ConnectorCall, "input">): Promise<ResolvedConnection>;
 	invoke(call: ConnectorCall, signal: AbortSignal): Promise<ConnectorResult>;
 }
-
-export type ConnectorDefinition = NonNullable<AgentDef["connectors"]>[number];
-export type ConnectorToolDefinition = ConnectorDefinition["tools"][number];

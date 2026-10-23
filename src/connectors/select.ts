@@ -11,9 +11,6 @@ export class ConnectorProviders {
 	get(kind: string): ConnectorProvider | undefined {
 		return this.providers.get(kind);
 	}
-	available(kind: string): boolean {
-		return this.get(kind)?.available() === true;
-	}
 }
 
 export function connectorFor(def: AgentDef, id: string) {
