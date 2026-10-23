@@ -6,7 +6,8 @@ export function element(name, text, className) {
 }
 
 export function textBlock(value) {
-	return element("pre", value ?? "", "inert-text");
+	const text = typeof value === "string" ? value : JSON.stringify(value ?? "");
+	return element("pre", text, "inert-text");
 }
 
 export function githubOpen(url) {
