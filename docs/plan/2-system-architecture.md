@@ -1,7 +1,7 @@
 # System architecture
 
 Inputs: [1-product-review](./1-product-review.md). File placement, types and call stacks are in
-[3-program-design](./3-program-design.md). Revision 1 (user comments C1-C7). Revision 2 (U1: no ntfy; U2: multi-machine web console; remote-ready daemon API; guarded console approvals). Revision 3 (repo-committed, human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet). Revision 4 (dpi-* are inspiration only, no code reuse; Android/Termux daemon as an additional platform target behind a platform abstraction). Revision 6 (the engine moves to its own public repo `nanstey/durable`; the skills repo keeps a thin integration; D18). Revision 5 (repo policy mechanism undecided: a pluggable `RepoPolicySource` seam with mechanism-independent invariants; the phone is just another browser client with identical capabilities; no default chat rate limits).
+[3-program-design](./3-program-design.md). Revision 1 (user comments C1-C7). Revision 2 (U1: no ntfy; U2: multi-machine web console; remote-ready daemon API; guarded console approvals). Revision 3 (repo-committed, human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet). Revision 4 (dpi-* are inspiration only, no code reuse; Android/Termux daemon as an additional platform target behind a platform abstraction). Revision 7 (U6: a second worker kind, `durable-conversation`, alongside Pi-session workers; a conversation tree and `durable attach` TUI viewable in Orca terminals; a human-held rule; D4, D19, D20; revised after a cross-family review: `ModelRuntime` model auth, named profiles only, minimal durable-shell environment, fenced hold, advisory-only confinement, replay-safe push/PR, guarded release, kind selection precedence, one lifecycle table). Revision 6 (the engine moves to its own public repo `nanstey/durable`; the skills repo keeps a thin integration; D18). Revision 5 (repo policy mechanism undecided: a pluggable `RepoPolicySource` seam with mechanism-independent invariants; the phone is just another browser client with identical capabilities; no default chat rate limits).
 
 Evidence base (read for this plan):
 - `@earendil-works/pi-durable` spec and the `disler/durable-pi` reference (`apps/dpi-backend`,
@@ -32,7 +32,8 @@ Evidence base (read for this plan):
  └──────┬───────────────────────────────────────────────────────────────┬───────────────┘
         │ WorkerDispatcher                                               │ durable CLI/TUI · web console (optional, any machine)
         ▼                                                                ▼
-   Worker = standard Pi session in an Orca worktree                  human terminal / Orca terminal / phone via the console
+   Worker = Pi session in an Orca worktree (default) OR a durable        human terminal / Orca terminal / phone via the console
+            child conversation inside the steward (opt-in, D19)
    (clean env from the profile, idea-to-pr skill)
    Reviewer = Pi session, opposite model family, read-only checkout
 ```
@@ -65,8 +66,9 @@ No daemon talks to another daemon. If the console or its host is down, nothing i
 | --- | --- | --- | --- | --- |
 | Steward | durable process | queue, claims, budgets, audit, gate, notifications | read GitHub/files, claim, dispatch, comment, request merge via Gate | edit repo code itself, merge outside Gate, change its own definition or policy |
 | Scout | durable child conversation | a brief per item | read-only tools, `gh ... view` | any write |
-| Worker | Pi session in worktree | one item's branch and draft PR | edit, test, push its branch, open a draft PR | merge, push to the default branch, force-push, edit other repos |
-| Reviewer | Pi session, opposite family | a verdict on one head SHA | read PR checkout, write a verdict file | edit code, merge |
+| Worker (`pi-session`, default) | Pi session in worktree | one item's branch and draft PR | edit, test, push its branch, open a draft PR | merge, push to the default branch, force-push, edit other repos |
+| Worker (`durable-conversation`, opt-in) | durable child conversation inside the steward process, tools confined to the worktree | one item's branch and draft PR | edit, test, commit; push its own branch and open a draft PR through the **supported, guarded code-owned tools**; no token in its shell environment (credential files remain readable: advisory confinement, R47) | raw `git push`, merge, rebase, reset --hard, branch switching, anything outside the worktree, spawning subagents |
+| Reviewer | Pi session or durable child conversation (read-only), opposite family | a verdict on one head SHA | read PR checkout; report a structured `ReviewResult` (Pi session: verdict file; durable: code-owned `report_verdict`), model provenance recorded by the steward | edit code, merge |
 | Gate | pure code in steward | merge/wait/block decision | call `gh pr merge --match-head-commit` | anything with `--admin`, any bypass |
 | `durable` CLI/TUI | short process | none | read status, send messages, approve (with code), stop | act without the agent's token and definition |
 | Console | optional separate process on one chosen machine | device registry, UI state, push subscriptions | read, chat, pause (scoped tokens); relay a passkey assertion it cannot forge | approve or resume by itself, hold GitHub or model credentials, run shell or file operations |
@@ -84,17 +86,16 @@ No daemon talks to another daemon. If the console or its host is down, nothing i
 Findings (verified in installed code and docs):
 - pi-ai takes an injectable `CredentialStore` (`createModels({ credentials })`). OAuth refresh runs
   inside the store's serialized `modify()`.
-- `@earendil-works/pi-coding-agent` exports `AuthStorage.create(path)`, a file-backed store over Pi's
-  `auth.json` format with a lock. Pi's own experimental durable agent states "credentials are shared" with Pi.
+- `@earendil-works/pi-coding-agent` 1.4.0 exports `ModelRuntime.create({ authPath | credentials })`, which implements pi-ai `Models` over a file-backed store in Pi's `auth.json` format with Pi's lock (`proper-lockfile` on `<path>.lock`, then an in-place write; no atomic rename). `AuthStorage` is **no longer exported** (removed in 0.80.8; slice 1 row 2). Pi's own experimental durable agent states "credentials are shared" with Pi.
 - `@nanstey/pi-auth-profiles`: a profile is a separate file with the same schema as `auth.json`
   (`default` = `~/.pi/agent/auth.json`, `<name>` = `~/.pi/agent/auth-profiles/<name>.json`). Profiles are
   isolated on purpose; refresh-token rotation breaks if files are shared. Env vars and `models.json` keys
   apply in every profile.
 
 **Generic reuse (answer to C4):** the steward resolves `profile` to one file and calls
-`createModels({ credentials: AuthStorage.create(thatFile) })`. That store can hold OAuth for any provider
-pi-ai supports. OpenAI/Codex OAuth, OpenRouter and other API keys, and TypeSafe work without extra code.
-The process never opens a second store, so it cannot use another profile's credentials.
+`ModelRuntime.create({ authPath: thatFile })` (or wraps the file in an own pi-ai `CredentialStore` if `ModelRuntime` changes), then passes the result to `Harness.open({ models })`; slice 1 executed exactly this for OpenAI-Codex OAuth, OpenRouter and an `api_key` credential. That store can hold OAuth for any provider
+pi-ai supports. Refresh runs inside its lock-serialized `modify()`. Providers are enumerated by reading the profile file's top-level keys (read-only, values never resolved).
+The process never opens a second store, so it cannot use another profile's credentials. A conversation's model is changed only through `configure()` (`harness.root(ctx, { agent })` applies the agent only on creation).
 
 **Anthropic subscription OAuth** (`sk-ant-oat...`) additionally needs request shaping. Inspection of
 `@gotgenes/pi-anthropic-auth` 3.4.2: `src/oauth-transport.ts` exports
@@ -159,53 +160,65 @@ assigned agent whose definition and profile validate. An agent id on two machine
 
 | Concern | Mechanism |
 | --- | --- |
-| Pi model auth (steward) | `AuthStorage.create(<profile file>)` |
-| Pi model auth (workers) | derived `PI_CODING_AGENT_DIR=$DURABLE_HOME/agents/<id>/pi`: generated `settings.json`, `auth-profiles.json` pinning `defaultProfile`, symlinks to the canonical `auth-profiles/`, `secrets/`, `profile-meta/`, `extensions/`, `skills/`, `agents/`, `prompts/`, `npm/`, `vendor/`. **No `auth.json`** unless the profile is `default` (then a symlink to it), so no profile falls back to another. Own `sessions/`. |
+| Pi model auth (steward, durable workers) | `ModelRuntime.create({ authPath: <canonical profile file> })` |
+| Pi model auth (Pi-session workers) | derived `PI_CODING_AGENT_DIR=$DURABLE_HOME/agents/<id>/pi`: generated `settings.json`, `auth-profiles.json` pinning `defaultProfile`, **directory** symlinks to the canonical `auth-profiles/`, `secrets/`, `profile-meta/`, `extensions/`, `skills/`, `agents/`, `prompts/`, `npm/`, `vendor/`. The derived `auth.json` is absent or exactly `{}` (Pi creates `{}`); **no live credential file is ever symlinked** (a file-symlinked `auth.json` lost 45/405, 2/405 and 22/405 updates in slice 1 because the lock is per given path). Own `sessions/`. |
+| Profile choice | **Named profiles only** for agents; `profile: default` is a doctor error unless `machine.yaml` sets `profiles.allowDefault: true`, and then only in-process users (steward, durable workers) may use it, opening the same `auth.json` path string as the operator's Pi so they share one lock; Pi-session workers never get `default`. |
+| Durable worker shell | `buildAgentEnv(..., "durable-shell")`: a minimal allowlist (`PATH`, locale, `TERM`, `TZ`, scratch `HOME`/`TMPDIR`, credential-free gitconfig, empty `GH_CONFIG_DIR`); **no `GH_TOKEN`, no `GITHUB_TOKEN`, no `secrets/<profile>.env` entry, no provider key, no `PI_CODING_AGENT_DIR`** (D19). |
 | GitHub token | `GH_TOKEN`/`GITHUB_TOKEN` from `secrets/<profile>.env`, overriding anything ambient |
 | `gh` config | `GH_CONFIG_DIR=$DURABLE_HOME/agents/<id>/gh` (empty) |
 | git identity and creds | `GIT_CONFIG_GLOBAL=$DURABLE_HOME/agents/<id>/gitconfig` generated from the manifest (`user.name/email`, `credential.helper` -> `gh auth git-credential`, HTTPS rewrite of `git@github.com:`), `GIT_CONFIG_SYSTEM=/dev/null`, `GIT_TERMINAL_PROMPT=0`, `SSH_AUTH_SOCK` unset |
 | Other provider keys | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ... scrubbed; only `secrets/<profile>.env` entries are added |
 | Verification (every start and every worker launch) | profile exists on this machine; manifest present; `gh api user --jq .login` equals manifest login; `git` identity equals manifest; model auth present for every provider the agent's models need and for the reviewer family; token type check (see D6); no ambient credential variables survive in the built env. Any failure -> refuse, audit, notify. |
 
-Assumption to verify in slice 2: symlinked `auth-profiles/` survives the file lock + atomic rename in `FileAuthStorageBackend`.
+Settled by slice 1 (row 4): the store writes **lock + in-place write** (no atomic rename); a **directory**-symlinked `auth-profiles/` shares the lock and kept 405/405 updates; slice 2 repeats that concurrency test in CI with fabricated credentials.
 
-### D4. Worker approach: v1 = steward + Pi-session workers behind a `WorkerDispatcher` adapter
+### D4. Workers: two kinds behind a `WorkerDispatcher` (revised in revision 7, U6)
 
-Orca runs on every machine (C7), but dispatch is an interface so the choice stays swappable.
+Orca runs on every machine (C7), but dispatch is an interface so the choice stays swappable. Revision 7 separates two concerns that were one:
 
-`WorkerDispatcher` contract (types in program design):
-`createWorkspace` (idempotent), `launch` (prompt + profile + model + role), `status`, `result`, `list`,
-`interrupt`, `attachInfo` (how a human views it), `removeWorkspace` (refuses dirty or unpushed work), and `capabilities`
-(`visible`, `resumable`, `headless`). Adapters:
+1. **`WorkerDispatcher`** = *where work lives*: workspace (worktree) creation and removal, hosting an external process, viewing it. Adapters: `orca` (primary), `git-process` (second and test double), `fake`.
+2. **`WorkerKind`** = *what runs in the workspace*: **`pi-session`** (a standard Pi session, the **default**) or **`durable-conversation`** (a pi-durable child conversation inside the steward, opt-in, D19). A worker kind picks the workspace first (always through the dispatcher), then starts its session.
+
+Dispatcher contract (types in program design §2): `createWorkspace` (idempotent), `removeWorkspace` (refuses dirty or unpushed work), `listWorkspaces`, `hostProcess` / `processStatus` / `interruptProcess` / `sendInput` / `readOutput` (for process-hosted kinds), `openViewer` (returns `AttachInfo`: an Orca terminal running `durable attach ...` or the log tail, or a `command` fallback, D20), `workspaceTerminals` and `capabilities`. A kind contract: `start`, `status`, `result`, `interrupt`, `steer?`, `transcript`, `resume` (after a crash), `capabilities`.
 
 | Adapter | Role |
 | --- | --- |
-| `orca` | **Primary.** `ORCA worktree create --no-parent --json`, `ORCA terminal create --worktree path:<p> --command <launcher> --json`, `terminal list`. CLI resolution as in `handoff`. |
-| `git-process` | Second implementation and **test double**: `git worktree add` + detached `pi` with a log file (the `pi-improve` path). Selectable per agent. |
-| future | Durable-conversation worker (D-2), remote host over Tailscale. The contract passes the brief by value, the profile by name, and builds secrets on the executing host, so a remote adapter fits. |
+| `orca` | **Primary.** `ORCA worktree create --no-parent --json`, `ORCA terminal create --worktree path:<p> --title <t> --command <cmd> --json` (hosts a Pi session **or** a viewer running `durable attach`), `terminal list/read/send`. CLI resolution as in `handoff`. |
+| `git-process` | Second implementation and **test double**: `git worktree add` + detached process with a log file. Selectable per agent. The workspace provider for Android. |
+| future | Remote host over Tailscale (the contract passes the brief by value, the profile by name, and builds secrets on the executing host). |
 
-Capabilities are explicit so clients know what they can do with a worker: `attach` (`none | read | interactive`), `steer` (boolean), `interrupt` (all adapters), `transcript` (live view from the worker's Pi session log, which the daemon can tail for any adapter that exposes the per-agent sessions directory). Expected matrix (confirmed in slice 6): `orca` = view via transcript tail, interactive attach and steer **only if** the installed Orca CLI offers a terminal-input command (checked against `--help`; otherwise view-only + interrupt); `git-process` = view via transcript tail, interrupt, **no steer**; `fake` = all, for tests. The console shows exactly the capabilities the adapter reports.
+**Capabilities by worker kind** (confirmed per adapter in slices 1 and 6; "Orca" = the `orca` adapter, "git" = `git-process`):
 
-Selection: `workers.dispatcher: orca | git-process` in the agent definition, overridable in `machine.yaml`. No silent automatic
-fallback (a silent switch would change visibility); optional `workers.fallback: git-process`, off by default.
-A contract test suite runs against every adapter with a fake `pi` binary.
-
-Pros and cons of v1 workers versus durable conversations:
-
-| | Workers as Pi sessions in Orca worktrees (v1) | Workers as durable conversations in the steward |
+| Capability | `pi-session` | `durable-conversation` |
 | --- | --- | --- |
-| Pros | Reuses skills, agent profiles, extensions, `idea-to-pr`, Pi packages unchanged. Process isolation per worker. Visible in Orca today. Anthropic subscription works (extension loads). Stable surface. | Crash-resume of the worker itself. No TUI or extra process per worker. Native API/TUI attach. Owned task trees: abort bottom-up, `failFast`/`allSettled`. One audit stream. |
-| Cons | A TUI per worker (mitigated by caps and headless `pi -p` where possible). No crash-resume: steward detects and re-dispatches (`pi --continue`). Coupling by polling GitHub/Orca. | Experimental API (1.4.0). One process owns the storage; workers contend for one event loop. Tools, skills and extensions must be ported. Anthropic shaping needs D2. Each worker's shell needs its own sandboxed env. |
+| Where it runs | Pi TUI process in an Orca terminal (or a detached process on `git-process`) | Inside the agent's steward process, headless (no extra process; tool subprocesses only) |
+| `attach` | Orca: `interactive` (its own terminal); git: `read` (log tail) | `interactive` through `durable attach` (viewable in an Orca terminal, D20); `read` everywhere else |
+| `steer` | Orca: `true` (`terminal send --text --enter`, spike-verified on a throwaway terminal; one live-TUI check in slice 6); git: `false` | `true` (follow-up or steer on the child conversation), subject to the chat guardrails |
+| `transcript` | Tail of the Pi session JSONL under the per-agent sessions dir | Native conversation events (live, durable) |
+| `interrupt` | Orca: `terminal send --interrupt` or close; git: signal | Abort the owning task (bottom-up) |
+| `resumeAfterCrash` | **No** native resume: the steward re-dispatches with `pi --continue` (process-level, bounded by `maxAttemptsPerItem`) | **Yes**: pi-durable resumes the child; an interrupted non-replay-safe tool returns `interrupted` and the model re-checks state |
+| User skills, extensions, prompts, Pi packages | **Yes** (the derived per-agent Pi directory; `idea-to-pr` etc.) | **No**; only allowlisted skill documents as prompt sections (D19) |
+| Anthropic subscription OAuth | Yes (the extension loads in the Pi session) | Only if the `modelAuth` Anthropic option is enabled (D2) |
+| Process isolation | One process per worker | **Shared** steward process and event loop (limits, D19) |
+| Token exposure | `GH_TOKEN` in the worker's environment (guard + GitHub rules are the stop) | **Not in the model's shell environment**; code-owned tools are the supported path (credential files stay readable, so not enforced; R47) |
+| Viewable in Orca | Terminal tab (the Pi TUI) plus the worktree's branch/diff | Worktree branch/diff **plus** a `durable attach` viewer terminal |
 
-Migration path (evidence-gated): (1) ship `orca` + `git-process` adapters; (2) after slice 9, read failure modes and TUI cost from the
-audit log; (3) add a `durable-conversation` adapter for read-only roles first (scout, reviewer); (4) move write workers only after the
-same dispatcher contract tests and acceptance tests pass; rollback is a config change.
+Selection: `workers.dispatcher: orca | git-process`; the worker kind per role follows one precedence (program design §2.1, with a truth table): `machine.yaml` `workers.roles.<role>.kind` > definition `workers.roles.<role>.kind` > definition `workers.kind` > platform default (**`pi-session` on Linux**, `durable-conversation` on Android). **Role enablement is separate:** an effective durable kind needs the role in `workers.durable.enabledRoles` (default `[]` on Linux), else doctor fails and dispatch is refused; enablement alone never selects. `workers.durable: { enabledRoles, maxConcurrent, skills, viewer }` (D19). No silent automatic fallback between dispatchers or kinds (a silent switch would change visibility, token exposure and recovery behaviour).
+
+**What this replaces.** The first revisions treated durable-conversation workers as a deferred migration. They are now a planned opt-in kind (slice 6c); Pi-session workers stay the default because they reuse the whole skills ecosystem unchanged. Pros and cons of the two kinds:
+
+| | Pi sessions in Orca worktrees (default) | Durable conversations in the steward (opt-in) |
+| --- | --- | --- |
+| Pros | Reuses skills, agent profiles, extensions, `idea-to-pr`, Pi packages unchanged. Process isolation per worker. Visible in Orca as a terminal. Anthropic subscription works. Stable surface. | Crash-resume of the worker itself. No TUI or extra process per worker (headless). Native API/TUI attach and a conversation tree. Owned task trees: abort bottom-up. One audit stream. Token never in the model's shell; code-owned push/PR tools. |
+| Cons | A TUI per worker (cost). No crash-resume (re-dispatch with `pi --continue`). Coupling by polling GitHub/Orca. Token in the worker env. | Experimental pi-durable subagent API (1.4.0). One process owns the storage: workers share the steward's event loop and fate. No user skills/extensions. Confinement is cwd + path checks + a command guard, not a sandbox. Anthropic OAuth needs D2 option 1. |
+
+Adoption path (evidence-gated): slice 6 ships both adapters and the `pi-session` kind; slice 6c adds `durable-conversation` for **read-only roles first** (reviewer, scout-style tasks) and small code-writing items behind per-agent opt-in; both kinds pass the same contract suite; rollback is a config change. Android defaults to `durable-conversation` (D17, slice 14).
 
 ### D5. Orca integration (inside the `orca` adapter)
 
 Resolve `ORCA_CLI_COMMAND` > `orca-dev` > `orca-ide` on Linux outside an Orca terminal > `orca` (bare `orca` can start the GNOME screen reader).
 Worktree per work item, terminal per job (title includes agent and item), `terminal list --worktree ... --json` before create to avoid duplicate
-sessions. The steward itself is viewable with `ORCA terminal create ... --command 'durable attach <id>'`. Orca flag drift is a named risk;
+sessions. **Viewers:** `ORCA terminal create --worktree path:<p> --title 'durable:<agent>/<item>' --command 'durable attach <agent>/<conversation>' --json` opens a `durable attach` TUI in an Orca terminal, so Orca lists durable conversations (the steward, chat threads, durable workers) beside the user's normal sessions. The Orca CLI's `terminal create --command` is documented in its `--help` and was executed in slice 1; **unverified** is whether a full-screen TUI renders and accepts input in such a terminal and whether closing the terminal leaves the work running (slice 1 addendum). Fallback if unsupported: `openViewer` returns the command string and the user runs `durable attach` themselves. Orca flag drift is a named risk;
 the adapter is the only place that knows the flags.
 
 ### D6. GitHub identity: the operator's account (C2) and what follows
@@ -272,8 +285,9 @@ Honest limit: workers share the operator's OS user and token, so these are prote
 
 1. **GitHub rules** (branch protection/rulesets, required checks/reviews, token scope). The gate reads `mergeStateStatus`, `reviewDecision`, `statusCheckRollup` from `gh pr view --json` instead of re-implementing protection logic.
 2. **Gate in code** (D8). 3. **Eligibility in code**: only trusted-author items enter the queue (OWNER/MEMBER/COLLABORATOR or explicit list); issue and PR text is untrusted.
-4. **Guards**: steward `beforeTool` hook and the Pi extension `durable-worker-guard.ts` (loaded when `DURABLE_WORKER=1`) block `gh pr merge`, `git push` to default/protected branches, force pushes, `--admin`, `gh api -X PUT .../merge`. A guardrail, not a sandbox.
-5. **Budgets and kill switch** (disabled file, `systemctl --user stop`, GitHub `durable/pause`, console/CLI `pause` (bearer scope `pause`), quiet hours). **Resume** after a pause requires the approval credential (D15), so an agent cannot un-pause itself. 6. **LLM can only tighten** decisions.
+4. **Guards**: the steward `beforeTool` hook, the same shared block-list inside durable-conversation workers' tools (D19) and the Pi extension `durable-worker-guard.ts` (loaded when `DURABLE_WORKER=1`) block `gh pr merge`, `git push` to default/protected branches, force pushes, `--admin`, `gh api -X PUT .../merge`. A guardrail, not a sandbox.
+5. **Human-held workspaces (D19):** a worktree under a hold fence is never resumed or written to by the daemon (either worker kind) until a human releases it through the approval class; `held` is acknowledged only after in-flight work is drained and its process groups are gone.
+6. **Budgets and kill switch** (disabled file, `systemctl --user stop`, GitHub `durable/pause`, console/CLI `pause` (bearer scope `pause`), quiet hours). **Resume** after a pause requires the approval credential (D15), so an agent cannot un-pause itself. 7. **LLM can only tighten** decisions.
 
 ### D10. Control plane, notifications and channels (answers C5; revised by U1 and U2)
 
@@ -303,7 +317,7 @@ reviewer provider-lock patch if it depends on `PI_SUBAGENT_AGENT`, after an inve
 
 | Skill | Fate |
 | --- | --- |
-| `idea-to-pr` | Unchanged. It is the worker's engine (brief = "load idea-to-pr, autopilot"). Worker brief forbids merging. |
+| `idea-to-pr` | Unchanged. It is the **Pi-session** worker's engine (brief = "load idea-to-pr, autopilot"). Worker brief forbids merging. Durable-conversation workers do not load it (D19): its workflow stays on Pi-session workers. |
 | `handoff` | Unchanged. For humans. Its Orca recipe is mirrored inside the `orca` adapter; if both drift, extract a shared helper later. |
 | `orchestration` | Unchanged. Not used by the steward (poll-based). |
 | `pi-improve` / self-improvement loop | Unchanged. Its kill switch and cap pattern are reused. It could later become a steward source. |
@@ -358,7 +372,7 @@ Front end: **no build step.** Static ES modules with small pinned, checksummed t
 Facts that shape the design: agents and workers run as the operator's OS user with the operator's GitHub token. They can read any file or token that user can read and can call any local or tailnet-reachable endpoint the daemon bearer token allows. They cannot produce a signature from a hardware or phone-held passkey.
 
 Design:
-1. **Approval is a separate credential class**, covering these high-risk actions only: **approve** (merge attempt), **resume** an agent after a kill/pause, **enroll** a key, and **verify a repo policy** (D8). Chat, steering, aborting a turn and pausing are not in this class (D16). Daemon bearer tokens (scopes `read`, `chat`, `pause`) can never approve, resume or enroll. The daemon's approval endpoints accept only (a) a valid **CLI nonce** (slice 7), or (b) a valid **WebAuthn assertion** (slice 12a).
+1. **Approval is a separate credential class**, covering these high-risk actions only: **approve** (merge attempt), **resume** an agent after a kill/pause, **enroll** a key, **verify a repo policy** (D8), and **release** a human hold (D19). Every nonce and challenge is bound to `{agent, action, item or repo, binding}` (binding = head SHA, policy fingerprint or `holdEpoch`), so a credential for one item or action never authorizes another. Chat, steering, aborting a turn and pausing are not in this class (D16). Daemon bearer tokens (scopes `read`, `chat`, `pause`) can never approve, resume or enroll. The daemon's approval endpoints accept only (a) a valid **CLI nonce** (slice 7), or (b) a valid **WebAuthn assertion** (slice 12a).
 2. **WebAuthn verified by the daemon.** The console is a conduit. Flow: console asks the daemon for a challenge for `{agent, item, headSha, action}`; the daemon stores the challenge (single use, short expiry, bound to that SHA) and returns it with display data (PR URL, title, diffstat, reviewer verdict, SHA); the browser calls `navigator.credentials.get` with `userVerification: required`; the console forwards the assertion; the daemon verifies the signature against public keys enrolled for that agent, the origin and RP ID from machine-local config, the counter, and that the **head SHA is still the same**; only then does it authorize the steward to *attempt* the merge within GitHub rules (D8). No secret exists on the console host or the daemon that can mint an approval.
 3. **Enrollment** is the trust root: `durable approval enroll` on a TTY on the daemon's machine prints a short-lived enrollment code; the operator enters it in the console while registering a passkey. Further keys require an existing key's assertion. Every enrollment and approval is audited and sent as a `desktop`/`command` notification.
 4. **Confirm step:** the approval screen shows the PR URL, title, diffstat and head SHA and requires an explicit tap; the SHA is inside the signed challenge, so a stale approval fails when new commits arrive.
@@ -385,7 +399,7 @@ The passkey step-up applies to **any browser**, not specially to phones. A passk
 | --- | --- | --- | --- | --- |
 | Steward supervisor conversation (`main`) | always | yes | yes: new **chat thread** (a child/fork conversation of the steward, `kind: chat`) | Narrow tool set (S3). The loop task is separate; chat never blocks or edits it. |
 | Scout conversations (per item, read-only tools) | always | yes: follow-up questions | yes: **scout Q&A** about an item (`kind: scout`) | Read-only tools only; cannot write. |
-| Worker sessions (Pi sessions) | always (live transcript tailed from the worker's Pi session log, plus `attachInfo`) | **only if the dispatcher adapter reports `steer: true`**; `interrupt` for all adapters (scope `pause`) | **no** (workers start only through claim -> dispatch with budgets) | Expected: `orca` steer only if the installed Orca CLI offers terminal input (checked in slice 6); `git-process` view + interrupt only; `fake` all. |
+| Worker sessions (Pi sessions) | always (live transcript tailed from the worker's Pi session log, plus `openViewer`) | **only if the dispatcher adapter reports `steer: true`**; `interrupt` for all adapters (scope `pause`) | **no** (workers start only through claim -> dispatch with budgets) | Expected: `orca` steer only if the installed Orca CLI offers terminal input (checked in slice 6); `git-process` view + interrupt only; `fake` all. |
 | Reviewer sessions | view | no | no | Verdict integrity. |
 
 **Guardrails (all enforced by the daemon, not the model or the client)**
@@ -413,7 +427,7 @@ The daemon core must not assume systemd, Orca, a desktop, the Tailscale CLI or a
 
 **Machine capabilities (machine file, §3.2):** `platform.os: linux | android`, `platform.service: systemd-user | termux-runit`, `platform.tailscaleCli: true | false`, `workers.dispatcher` default per platform, `network.peerCheck: required | optional | off`, `network.tailnetAddress` (explicit address because interface enumeration can fail on Android). `doctor` and the console adapt to them (for example, no Orca checks on Android; peer check reported as `unavailable (optional)`).
 
-**What an Android agent does by default (Q21):** steward + scout + chat, plus **light `git-process` workers** that open draft PRs for **small repos** (`maxConcurrentWorkers: 1`, short `itemMinutes`, repo-size warning in `doctor`; optional battery floor through Termux:API). Heavy builds and long test suites stay on other machines. **Auto-merge is disabled on Android** (a `merge.mode: auto-when-safe` ceiling on an `os: android` machine is a `doctor` error unless the operator explicitly sets `platform.allowAutoMerge: true`; default budgets are conservative).
+**What an Android agent does by default (Q21):** steward + scout + chat, plus **light workers** that open draft PRs for **small repos**. **Revision 7 decision: the default Android worker kind is `durable-conversation`** (D19): Pi sessions are heavy on a phone (a TUI process per worker, the skills repo needed), while a headless durable child conversation runs inside the steward with `git-process` providing only the git worktree, needs no skills and keeps the token out of the shell; the cost is the shared-process limits (`workers.durable.maxConcurrent: 1`) and no user skills, so workflows such as `idea-to-pr` run on desktop machines. Pi-session workers stay available on Android as an opt-in (`maxConcurrentWorkers: 1`, short `itemMinutes`, repo-size warning in `doctor`; optional battery floor through Termux:API). Heavy builds and long test suites stay on other machines. **Auto-merge is disabled on Android** (a `merge.mode: auto-when-safe` ceiling on an `os: android` machine is a `doctor` error unless the operator explicitly sets `platform.allowAutoMerge: true`; default budgets are conservative).
 
 **Termux directly, not proot-distro (Q22):** fewer layers, matches the Pi Termux docs (`pkg install nodejs git`, `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`); proot adds a second filesystem and process model that complicates paths, service supervision and wake locks. Revisit only if a required tool is missing in Termux.
 
@@ -443,13 +457,51 @@ The daemon core must not assume systemd, Orca, a desktop, the Tailscale CLI or a
 **Cross-repo coordination.**
 1. Order: **durable first, then the skills repo pin bump.** A change that touches both repos (for example a `profile-meta` manifest field, a Pi directory contract, a skill name that durable requires) is merged and verified in durable first; the skills repo then bumps its pin and updates its docs/rows in the same PR as the bump.
 2. Compatibility: durable keeps reading older formats. Additive changes stay within `version: 1`; a breaking change to `profile-meta` or the machine/definition schemas bumps the schema `version` and ships a `durable profile migrate` (or equivalent) **before** the pin bump. The `profile-meta/<name>.json` file is created and owned by `durable profile`; the skills repo only documents it.
-3. Skills contract: durable's `docs/skills-contract.md` lists the skill names workers need (default `idea-to-pr`, `pr`, `build`, `review-code`); `durable doctor` checks they exist under the Pi agent directory's `skills/`. Renaming a required skill is a coordinated change: durable accepts both names for one release, then the skills repo renames.
+3. Skills contract: durable's `docs/skills-contract.md` lists the skill names **Pi-session** worker and reviewer roles need (default `idea-to-pr`, `pr`, `build`, `review-code`); `durable doctor` checks them per effective (kind, role) under the Pi agent directory's `skills/` (durable roles need only their allowlist, default empty). Renaming a required skill is a coordinated change: durable accepts both names for one release, then the skills repo renames.
 4. Pins: pi-durable, pi-ai and pi-coding-agent are pinned **exactly** in the durable repo (`package.json` plus the committed `pnpm-lock.yaml`), changed only by a durable PR that passes the contract suite and the `kill -9` recovery test. The skills repo pins durable by commit only; it never pins pi-durable. Durable's `doctor` verifies that its pinned `pi-coding-agent` can read the installed Pi's auth file format.
 5. Pi-directory interface: durable's derived per-agent Pi dirs symlink `auth-profiles/`, `secrets/`, `profile-meta/`, `extensions/`, `skills/`, `agents/`, `prompts/` from the user's Pi directory. That list is a contract documented in both repos; renaming any of those in the skills repo's Pi harness needs the durable-first sequence above.
 
-**Android.** The Termux bootstrap lives in the durable repo and clones and pins durable directly. The skills repo is an optional, separately pinned input needed only for worker dispatch (D17); steward, scout and chat run without it.
+**Android.** The Termux bootstrap lives in the durable repo and clones and pins durable directly. The skills repo is an optional, separately pinned input needed only by skill-dependent (Pi-session) worker roles (D17); steward, scout, chat and the default skill-free durable workers run without it.
 
 **Public repo rules (durable repo).** No secrets, no machine-local state, no absolute or personal paths, no real host or tailnet names, no personal emails, no private repo names in any committed file. Documents and examples use placeholders. CI runs a secret/path/host scan (`scripts/hygiene-scan.sh`, from slice 2) over the whole repo including `docs/plan/`. Agent definitions, machine files, tokens, audit logs and state stay outside the repo, as before.
+
+### D19. Durable-conversation workers (revision 7, U6, option 1)
+
+Reference: pi-durable's own subagent model (its README "Abort and Subagents"; examples 22 foreground, 23 background, 24, 26, 28, 29 in github.com/earendil-works/pi). A subagent is a **child conversation owned by a task**: the creating tool call commits `ownership: { kind: "task", taskId }`, the child starts as a copy of its parent's agent (model, extensions, tools, cwd) and can be reconfigured, model and tool calls are durable tasks, a non-replay-safe tool interrupted by a crash returns `interrupted`, aborts propagate bottom-up, and a `background: true` task is an abort boundary.
+
+**What it is.** A worker kind in which the steward asks the dispatcher to create the Orca (or git) workspace/worktree, then starts a **headless durable child conversation** whose cwd and file/shell tools are confined to that worktree. Orca shows the worktree's branch, diff and git state; `durable attach` shows the conversation (D20). The Pi-session kind stays the default; this kind is opt-in per agent or per role (selection precedence and `workers.durable.enabledRoles`, D4 and program design §2.1).
+
+**Ownership.** The worker conversation is owned by a **`run-worker` task** (one per attempt) that is a child of the item's `WorkItemTask`; the `WorkItemTask` belongs to the steward loop, and the steward's `main` conversation is the *logical* parent shown in the tree. `run-worker` is created as a **background** task: aborting a chat turn, the loop tick or the steward `main` conversation does **not** lose worker progress. Reaching the worker again after a restart uses the ownership index (`scanConversations({ ownerTaskId })`), so a rerun reuses the same child (the pi-durable replay-safe pattern from example 22/23). Foreground ownership (the parent waits and aborts the child) is not used for workers; it is used for short read-only children such as the scout.
+
+**How the kill switch still stops it (background does not mean uncontrollable).** The exact effect, outcome, scope and restart rule of every stop-like operation (abort turn, interrupt soft/hard, hold, pause/kill switch, stop workers, shutdown, crash) is the single lifecycle table in program design §2.2; intentional cancellation never silently restarts work. Mechanisms: (1) a `beforeTool` hook on every worker tool call checks the kill switch and the item's budgets and blocks with an abort request when paused or exhausted; (2) the supervising `WorkItemTask` watches the kill switch, `human-held` marks and per-item wall-clock and issues an **explicit abort of the `run-worker` task** (explicit task abort crosses the background boundary and follows the owned subtree), which writes a terminal outcome so nothing resumes afterwards; (3) `durable stop --workers` and the console/CLI `pause` abort every worker anchor (`abort({ background: true })`); (4) `close()` on daemon shutdown stops invocations **without** writing outcomes, so unfinished workers resume on the next start unless step 2 had already aborted them. Per-item limits: `itemMinutes`, max turns and tool calls, and a token budget read from the conversation's usage document.
+
+**Tool set (fixed in code).** `read`, `edit`, `write` (path realpath must stay inside the worktree and outside `.git/`; symlink escapes refused), `bash` (cwd = worktree; its own recorded process group; the minimal **`durable-shell`** environment (D3): neither `GH_TOKEN` nor `GITHUB_TOKEN`, no profile secrets or provider keys, scratch `HOME`; the shared command guard blocks `git push`, `git merge`, `git rebase`, `git reset --hard`, branch switching, `git worktree`, `gh pr merge`, `--admin`, `--force`, and `cd`/absolute paths outside the worktree), plus **code-owned tools**: `commit` (author identity from the manifest, trailer `Durable-Agent`), `push_branch` and `open_draft_pr` (replay-safe by persisted operation intent: `{attemptId, repo, branch, commitSha, expectedRemoteHead}` committed first; push exactly `commitSha` to `durable/<id>/<item>` as a plain fast-forward push from a steward-owned git dir with hooks disabled and worktree git config ignored; ambiguous outcomes reconciled by reading the remote head, and a moved branch stops with `conflict` instead of overwriting; the PR is looked up by head branch and marker before and after create; program design DW5), `report` (progress note); a read-only reviewer gets `read`, search, `pr_diff` and `report_verdict` instead. No `subagent`, no GitHub write other than through the code-owned tools, no credential-bearing tool output (outputs are screened). The worker playbook (system prompt) is steward-authored: implement, test, commit, push, open the draft PR; after any `interrupted` result, inspect `git status` and the files before repeating.
+
+**Confinement is advisory guardrails, not a boundary (R47).** File tools enforce realpath containment; `bash` only gets cwd = worktree and a command denylist. `bash` runs as the operator's OS user, so access **outside the worktree is possible**: interpreters (`python -c`, `node -e`), scripts written into the worktree and then run, and reading credential files the user can read (`auth-profiles/*.json`, `secrets/*.env`, `~/.config/gh/hosts.yml`) by absolute path. A known-limits test suite asserts these cases so the docs cannot overclaim. The only guarantee is that **credentials are omitted from the shell environment**. Code-owned tools are the **supported, guarded** GitHub write path, not an enforced one: with no sandbox the shell can read credential files and push or call the GitHub API directly, so GitHub rules, the token's scope, budgets, the kill switch and the gate remain the real stops. Sandbox hardening (bubblewrap, or a per-conversation container per pi-durable example 29) is **deferred** with its configuration to a follow-up spec if the slice 1 addendum justifies it.
+
+**Crash recovery.** After a steward crash or restart pi-durable resumes unfinished tasks. Replay-safe tools (`read`, searches) rerun; non-replay-safe tools (`bash`, `write`, `edit`, `commit`, `push_branch`, `open_draft_pr`) return `interrupted`; the code-owned tools are idempotent by deterministic names and remote checks (S1). The child conversation continues, and the `WorkItemTask` re-attaches via the ownership index. Tool subprocesses killed by `KillMode=control-group` also yield `interrupted` (slice 1 correction 4). This replaces the Pi-session path's re-dispatch with `pi --continue`.
+
+**Differences from Pi-session workers (skills and extensions).** Durable workers load **no user skills, extensions, prompts or Pi packages** (no `codemode`, Jev, web access, observational memory, no `subagent`). A **minimal skill-prompt mechanism** exists: `workers.durable.skills` is an allowlist of skill names; the worker kind reads only the `SKILL.md` body from the Pi directory's `skills/<name>/`, size-capped, and inlines it as a system-prompt section. No scripts, tools or referenced files are loaded, and skills known to need other tools (the allowlist validator rejects any skill whose text requires `subagent`, `codemode` or helper scripts) are refused. Default allowlist: empty. **Consequence:** workflows built on those facilities stay on Pi-session workers: `idea-to-pr`, `build`, `review-code`, `planning` and anything that orchestrates subagents or runs skill scripts. Durable workers suit small, well-scoped, single-PR tasks with a steward-authored playbook, and read-only reviewer/scout-style roles.
+
+**Models.** The child uses the agent's profile through the `modelAuth` seam; Anthropic subscription OAuth works only if D2 option 1 is enabled; a cross-family reviewer therefore needs a non-Anthropic or API-key family unless that option is on.
+
+**Storage and ownership constraint.** One process owns a storage and pi-durable has no cross-process locking, so every durable worker conversation lives in **the agent's steward process** and database. Resulting limits: (1) worker count per steward is bounded (`workers.durable.maxConcurrent`, default 2, conservative on Android: 1); more parallelism means more agents (processes), not more threads; (2) workers share the event loop with the loop, the API and the SSE streams (spiked under load); (3) a steward crash or restart interrupts all in-flight worker tools at once; (4) transcripts grow the steward's SQLite, so finished worker conversations are retained for a configurable period then exported and pruned if pi-durable allows (spike check); (5) a stolen-lease takeover by another machine cannot resume the conversation (single owner), it starts fresh from the pushed branch state.
+
+**Human-held rule (both worker kinds; safety, not a handoff feature).** Users may open a regular Pi session in a worktree a worker uses. Minimal rule: `durable hold <item>` (`POST /v1/items/<item>/hold`, scope `pause`; also a console button) establishes exclusive human ownership through a **`holding -> held` sequence**: (1) persist a fence with a new `holdEpoch`; (2) reject every new daemon operation on the item (dispatch, resume, tools, push, PR, cleanup); (3) cancel and drain in-flight work (soft interrupt, then hard after a short drain: explicit abort of `run-worker`, or the Pi-session process); (4) kill the item's **containment unit** and wait until it is empty: on Linux every hosted process and tool call of an attempt runs in a transient systemd user scope inside a per-attempt slice (`durable-<agent>-<item>-<attempt>.slice`), so descendants that leave their process group (`setsid`, double fork) are caught too (the spike saw tool subprocesses survive their parent); (5) only then mark `held` and acknowledge. If containment cannot be confirmed empty (Android/Termux has no cgroups; or the Linux kill fails), the item **stays `holding`, never `held`**: still fenced, and the operator is told which independent check is needed: on Linux, stop the slice and confirm it is empty; where containment is unconfirmed (Android, or Linux on cgroup v1), stopping the steward alone does **not** establish exclusive ownership (an unmarked `setsid` descendant survives it) and `/proc` cannot prove there is no future writer (cwd `/`, absolute paths), so exclusive ownership requires **force-stopping Termux or rebooting** (cgroup v1 Linux: rebooting) before editing; `durable hold --verify` only lists likely writers and is advisory. Emptiness on Linux is the slice's recursive cgroup v2 `populated 0`. On restart the fences are loaded **before** unfinished tasks resume. The claim and its lease are kept. `durable release <item>` (`POST /v1/items/<item>/release`) clears the fence and belongs to the **same guarded class as agent resume** (D15: CLI nonce from slice 6b, passkey from 12a, bound to agent, item and `holdEpoch`), so an agent cannot lift a human's hold; after release the steward re-derives state from the branch and either starts a new attempt or reviews. An advisory check reports a **foreign terminal** (an Orca terminal in the worktree that durable did not create) as `suspected human session` in `status`/`doctor`; it does not block anything by itself.
+
+### D20. Conversation tree and the durable TUI harness (revision 7, U6, option 2)
+
+**One tree for everything.** The daemon API exposes every conversation-like thing in an agent as nodes of a tree, with a stable shape for the CLI, TUI and console:
+
+`{ id, parentId, kind, status, item?, ownerTaskId?, source: "durable" | "dispatcher", workspace?, startedAt, capabilities: { attach, steer, transcript, interrupt, resumeAfterCrash } }`
+
+where `kind` is `steward | chat | scout | worker-durable | reviewer-durable | worker-pi | reviewer-pi | subagent`, `status` is `idle | running | waiting | done | failed | aborted | holding | held` (`holding` = fenced, takeover not yet confirmed: clients render it as "holding: do not edit yet", and on Android it never advances to `held`), and `parentId` is the logical parent (the steward `main`; a worker's parent is the steward, a nested subagent's parent is its worker). `worker-pi` and `reviewer-pi` are **leaf nodes sourced from the dispatcher** (their transcript is the Pi session JSONL tail), the rest are pi-durable conversations (children found through the ownership index). Node ids are opaque. Routes (additive in v1): `GET /v1/conversations?tree=true`, `GET /v1/conversations/<id>`, `GET .../<id>/transcript`, `GET .../<id>/events` (SSE), `POST .../<id>/messages`, `POST .../<id>/abort` (aborts the node's current turn only; on a worker node it never ends the attempt); the worker routes remain (`interrupt {mode: soft}` is the alias of `abort` on worker nodes, `{mode: hard}` ends the attempt; program design §2.2). A `tree` SSE frame carries deltas in the steward scope. What a client may do with a node follows `capabilities` and the token scopes (`read`, `chat`, `pause`).
+
+**`durable attach <target>` TUI.** `<target>` is an agent id (opens the tree) or `<agent>/<conversation-id|item>`. The TUI renders the tree live (parent -> child), a transcript pane for the selected node, and a composer that offers follow-up, steer and abort exactly where the node's capabilities and the token scopes allow; Pi-session leaf nodes are view-only unless `steer: true`, and `interrupt` works for all. It uses the typed client only (no direct database access), runs headless-safe (no state of its own) and exits cleanly; closing it never affects the work.
+
+**Orca integration.** `openViewer` for a durable worker returns `{ kind: "command", command: "durable attach <agent>/<conversation>", openIn: "orca-terminal" }`. With `workers.durable.viewer: on-start` (default for durable workers) the `orca` adapter calls `openViewer`, creating an Orca terminal titled `durable:<agent>/<item>` in the worktree, so Orca lists durable conversations beside normal sessions; `on-demand` (via `durable open <conversation>`) and `never` are the alternatives. Viewers are cheap API clients, are not workers, never keep a worker alive and are not closed by the steward (the TUI shows the final state and waits for a keypress). If the Orca CLI cannot create such a terminal on a given machine, `openViewer` returns the command string and the console/CLI display it.
+
+**Console.** The console shows the same tree (machine -> agent -> conversation tree) from the same API, with the same capability-gated controls.
 
 ## 3. Contracts
 
@@ -486,7 +538,16 @@ notify:                        # channel names come from machine.yaml; kinds: in
   budget-stop:     { channels: [console] }
   agent-down:      { channels: [desktop] }       # console shows offline devices without a channel
   staleDays: 7
-workers: { dispatcher: orca }  # orca | git-process
+workers:
+  dispatcher: orca                       # orca | git-process (workspace + process hosting)
+  kind: pi-session                       # default kind for every role; pi-session (default) | durable-conversation
+  roles:                                 # optional per-role kind selection (precedence: program design §2.1)
+    reviewer: { kind: durable-conversation }   # this example: only the read-only reviewer runs durable
+  durable:                               # only used by the durable-conversation kind
+    enabledRoles: [reviewer]             # roles ALLOWED to run durable (enablement; never selects); default []
+    maxConcurrent: 2                     # per steward process (single storage owner)
+    skills: []                           # allowlist of skill names inlined as prompt text (default none)
+    viewer: on-start                     # on-start | on-demand | never (durable attach terminal in Orca)
 chat:                          # all optional
   startableKinds: [chat, scout]   # console-wide; never workers or reviewers (dispatch starts those)
   maxMessageBytes: 1048576        # sanity ceiling protecting the daemon process; default 1 MiB
@@ -505,6 +566,7 @@ platform:                                # auto-detected; explicit values overri
   service: systemd-user                  # systemd-user | termux-runit
   tailscaleCli: true                     # false on Android (Tailscale app only)
   allowAutoMerge: true                   # android defaults to false
+profiles: { allowDefault: false }       # agents must use named profiles; true is an explicit opt-in (in-process users only)
 agents:                                  # assignment: which agents run here (id, or id + port)
   - acme-api
   - { id: acme-docs, port: 4802 }        # default: stable allocation from daemon.portBase, recorded in agents/<id>/port
@@ -534,7 +596,7 @@ orca: { command: orca-ide }              # optional override of CLI resolution
 - **Streams (SSE):** `hello {apiVersion, scope, serverTime}`, then a snapshot, then deltas; `: ping` every 15 s; 45 s of silence = dead; reconnect gets a fresh snapshot (no replay); a viewer more than 2 MB behind is dropped; closing a stream never stops work. Scopes: device (`tree`, `activity`, `doc`), agent conversation (`snapshot`, `batch`, `inbox`), steward (`queue`, `workers`, `gate`, `inbox`, `budget`).
 - **Idempotency:** `POST .../messages` takes a required `requestId`; creating routes accept `Idempotency-Key`.
 - **Errors:** `{error:{code,message}}` with codes `unauthorized`, `forbidden`, `not_found`, `invalid`, `busy`, `conflict`, `unavailable`, `internal`.
-- **Routes (our own contract; names chosen for familiarity):** `GET /v1/sessions`, `.../transcript?format=`, `.../events`, `.../tasks`, `POST .../messages` (`whenBusy`), `POST .../abort`. Chat additions (additive in v1): `GET /v1/conversations?kind=&item=`, `POST /v1/conversations {kind: chat|scout, item?, name?}` (kind must be in `startableKinds`, which is console-wide; `Idempotency-Key`), `POST /v1/workers/<id>/steer {content}` (`501 not_supported` unless the adapter reports `steer`), `POST /v1/workers/<id>/interrupt {mode}` (scope `pause`); messages are screened and size-ceilinged (D16); `429 rate_limited` only if the opt-in `chat.rateLimit` is configured; `invalid credential-like-content`. Ours: `GET /v1/queue`, `GET /v1/workers`, `GET /v1/audit?since=`, `GET /v1/inbox` + `POST /v1/inbox/<id>/ack`, `GET /v1/gate/<item>`, `GET /v1/budget`, `POST /v1/pause` (scope `pause`). Approval routes (no bearer scope): `POST /v1/approvals/challenge`, `POST /v1/approvals/assert` (WebAuthn), `POST /v1/approvals/nonce` (CLI), `POST /v1/resume`, `POST /v1/approvals/enroll/*`.
+- **Routes (our own contract; names chosen for familiarity):** `GET /v1/sessions`, `.../transcript?format=`, `.../events`, `.../tasks`, `POST .../messages` (`whenBusy`), `POST .../abort`. Conversation tree and chat additions (additive in v1): `GET /v1/conversations?tree=true`, `GET /v1/conversations/<id>` and `.../<id>/{transcript,events,messages,abort}` for every node kind (D20), plus `GET /v1/conversations?kind=&item=`, `POST /v1/conversations {kind: chat|scout, item?, name?}` (kind must be in `startableKinds`, which is console-wide; `Idempotency-Key`), `POST /v1/workers/<id>/steer {content}` (`501 not_supported` unless the adapter reports `steer`), `POST /v1/workers/<id>/interrupt {mode}` (scope `pause`); messages are screened and size-ceilinged (D16); `429 rate_limited` only if the opt-in `chat.rateLimit` is configured; `invalid credential-like-content`. Item hold: `POST /v1/items/<item>/hold` (scope `pause`; returns `202 {state: holding}`, the tree shows `held` when acknowledged). Ours: `GET /v1/queue`, `GET /v1/workers`, `GET /v1/audit?since=`, `GET /v1/inbox` + `POST /v1/inbox/<id>/ack`, `GET /v1/gate/<item>`, `GET /v1/budget`, `POST /v1/pause` (scope `pause`). Approval routes (no bearer scope): `POST /v1/approvals/challenge`, `POST /v1/approvals/assert` (WebAuthn), `POST /v1/approvals/nonce` (CLI), `POST /v1/resume`, `POST /v1/items/<item>/release` (nonce or assertion bound to `holdEpoch`), `POST /v1/approvals/enroll/*`. Lifecycle semantics of every stop-like route: program design §2.2.
 - **Listeners:** loopback always. `network.bind: tailnet` (slice 11) adds the Tailscale interface address; peers are checked via `whois` against `allowedPeers` when the Tailscale CLI is available (`peerCheck: required`), otherwise the check is reported as unavailable (`optional`) and the bearer token plus the tailnet's own ACL remain the baseline (D17). No `0.0.0.0`.
 
 ### 3.5 Console files (on the console host only, never committed)
@@ -576,6 +638,9 @@ Audit: `$DURABLE_HOME/agents/<id>/audit.jsonl`, append-only: `{ts, agent, profil
 | Failure | Handling |
 | --- | --- |
 | Steward crashes or restarts | pi-durable resumes loop and tasks. Intent-first, deterministic names; "interrupted" -> world re-read. `agent-down` notification via `OnFailure`. |
+| Steward crash with durable workers running | pi-durable resumes the child conversations; interrupted tools return `interrupted`; code-owned tools are idempotent; the `WorkItemTask` re-attaches through the ownership index (D19). |
+| Human opens a session in a worker's worktree | `durable hold` (fenced `holding -> held`: reject, drain, kill the attempt's containment and wait until empty, then acknowledge; stays `holding` where containment cannot be confirmed) and the `status` advisory: daemon refuses to resume or write until a guarded `durable release` (D19). |
+| Push or PR call loses its response, or the branch moved | Operation intent + remote-head reconciliation: confirmed, retried as the same operation, or `conflict` -> `needs-human`; never a second push, force push or different commit (D19). |
 | Worker session dies without a PR | Liveness check (`dispatcher.status` + no PR + lease) -> re-dispatch (`pi --continue`) up to `maxAttemptsPerItem`, then `escalation`. |
 | Profile missing or identity mismatch | Fail closed, audit, notify (`identity-failure`), do not start. |
 | GitHub rate limit/outage | Back off with jitter; no queue loss. |
@@ -589,7 +654,7 @@ Audit: `$DURABLE_HOME/agents/<id>/audit.jsonl`, append-only: `{ts, agent, profil
 
 ## 6. Compatibility, packaging, rollout
 
-- **Language/runtime:** TypeScript on Node >= 22.19 using native type stripping (no build step); `tsc --noEmit` and `node --test` in CI. Pinned exactly in a committed lockfile: `@earendil-works/pi-durable@1.4.0`, matching `pi-ai`, `@earendil-works/pi-coding-agent` (for `AuthStorage`), `typebox`, `yaml`. `node:http`, no Express.
+- **Language/runtime:** TypeScript on Node >= 22.19 using native type stripping (no build step); `tsc --noEmit` and `node --test` in CI. Pinned exactly in a committed lockfile: `@earendil-works/pi-durable@1.4.0`, `@earendil-works/pi-ai@1.4.0`, `@earendil-works/pi-coding-agent@1.4.0` (for `ModelRuntime`), `@earendil-works/chord@1.4.0` (direct dependency), `typebox`, `yaml`; `engines.node >=22.19.0`. `node:http`, no Express.
 - **Install:** (a) skills-repo `install.sh` step: clone the pinned `nanstey/durable` commit, `pnpm install --frozen-lockfile --prod --ignore-scripts` in the clone (stamped), link `~/.local/bin/durable`; idempotent (`ok|cloned|updated`); never enables or starts an agent; (b) standalone: the durable repo's `docs/install.md`; (c) Android: `termux/bootstrap.sh`. Units are rendered and installed by `durable enable` through the `ServiceManager`, not by an installer. Tests stub `git`, `pnpm`, `systemctl`, `sv`.
 - **Repo vs machine split:** the durable repo = engine, schemas, examples, units, docs, plan. The skills repo = thin integration only (D18). Machine = profiles, `profile-meta`, `machine.yaml`, definitions (a private checkout via `DURABLE_AGENTS_DIR` is optional), state, audit, tokens.
 - **Upgrade process for pi-durable:** bump the exact pin + lockfile in one durable-repo PR; the contract suite and the `kill -9` recovery test must pass; no patches to pi-durable (if ever needed: unified diff, idempotent installer step, new patch file per change, per AGENTS.md).
@@ -599,12 +664,12 @@ Audit: `$DURABLE_HOME/agents/<id>/audit.jsonl`, append-only: `{ts, agent, profil
 
 ## 7. Observability
 
-`durable status`, `durable queue <id>`, `durable inbox <id>`, `durable audit <id> --since`, `durable attach <id>` (TUI), `durable logs <id>`, `durable doctor <id|--all>`, `durable profile show|check`, `durable token create|list|revoke`, `durable console ...`. Workers: Orca terminals (`attachInfo`) and per-agent Pi sessions. Console: fleet and per-agent views, transcript attach, audit, inbox, gate report.
+`durable status`, `durable queue <id>`, `durable inbox <id>`, `durable audit <id> --since`, `durable attach <id>` (TUI), `durable logs <id>`, `durable doctor <id|--all>`, `durable profile show|check`, `durable token create|list|revoke`, `durable console ...`. Workers: Orca terminals (`openViewer`) and per-agent Pi sessions. Console: fleet and per-agent views, transcript attach, audit, inbox, gate report.
 
 ## 8. Unresolved and deferred
 
 - Open: Q18 only, deferred by the user: the policy mechanism is decided per repo when the first repo needs auto-merge (default `none`). Q19-Q23 are resolved. None blocks slices 1-6.
-- Deferred, not specced: **D-1 Peer-to-peer agent messaging** (hooks: reserved `peers`; reuses the daemon `whois` + token design; the console does not replace it). **D-2 durable-conversation workers** (D4). Remote attach is no longer deferred: it is the console (D13, D14). macOS/launchd is deferred (Linux is the first fleet; Android/Termux is an additional target, D17, slice 14). PWA and Web Push are an additive follow-up (12b), not deferred design.
+- Deferred, not specced: **D-1 Peer-to-peer agent messaging** (hooks: reserved `peers`; reuses the daemon `whois` + token design; the console does not replace it). **D-2 (now planned):** durable-conversation workers are slice 6c (D19), not deferred. Remote attach is no longer deferred: it is the console (D13, D14). macOS/launchd is deferred (Linux is the first fleet; Android/Termux is an additional target, D17, slice 14). PWA and Web Push are an additive follow-up (12b), not deferred design.
 
 ## 9. Review status
 
