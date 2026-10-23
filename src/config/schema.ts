@@ -20,6 +20,20 @@ export type AgentDef = {
 	network?: { bind: "loopback" };
 	schedule?: { pollSeconds?: number; quietHours?: string };
 	limits?: Record<string, number>;
+	connectors?: Array<{
+		id: string;
+		provider: "fake";
+		connection: string;
+		tools: Array<{
+			id: string;
+			access: "read" | "write";
+			write?: boolean;
+			maxCalls?: number;
+			maxCost?: number;
+		}>;
+		maxCalls?: number;
+		maxCost?: number;
+	}>;
 	sources?: Array<{
 		kind: string;
 		repo: string;
@@ -170,6 +184,24 @@ export function validateAgent(value: unknown): AgentDef {
 		/[A-Za-z0-9-]+\.(?:com|net|org|local|ts\.net)(?:["'/]|$)/i.test(json)
 	)
 		throw new Error("definition path fields must be relative");
+	for (const connector of x.connectors ?? []) {
+		if (
+			new Set(connector.tools.map((tool) => tool.id)).size !==
+			connector.tools.length
+		)
+			throw new Error("connector tool IDs must be unique");
+		if (
+			connector.tools.some(
+				(tool) => tool.access === "write" && tool.write !== true,
+			)
+		)
+			throw new Error("connector write tools require write: true");
+	}
+	if (
+		new Set((x.connectors ?? []).map((connector) => connector.id)).size !==
+		(x.connectors ?? []).length
+	)
+		throw new Error("connector IDs must be unique");
 	if (
 		x.workers?.durable?.maxConcurrent !== undefined &&
 		x.workers.durable.maxConcurrent < 1

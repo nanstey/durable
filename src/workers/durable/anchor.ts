@@ -19,6 +19,8 @@ import {
 } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
 import { familyFor, providerFor } from "../../config/agent.ts";
+import type { ConnectorMediator } from "../../connectors/mediation.ts";
+import type { AgentDef } from "../../config/schema.ts";
 import type { ProcessManager } from "../../steward/procs.ts";
 import type { JobSpec } from "../kind.ts";
 import {
@@ -40,6 +42,7 @@ import { durableSkillSections } from "./skills.ts";
 import {
 	assertCommand,
 	durableBash,
+	connectorTools,
 	fileTools,
 	screenToolOutput,
 } from "./tools.ts";
@@ -106,6 +109,8 @@ export type NativeAnchorOptions = {
 	account: (usage: Usage) => Promise<void>;
 	prDiff?: (job: JobSpec) => Promise<string>;
 	verifyIdentity?: () => Promise<void>;
+	connectorMediator?: ConnectorMediator;
+	connectorDef?: AgentDef;
 	/** All durable children share this harness storage and must be admitted here. */
 	maxConcurrent?: number;
 };
@@ -217,6 +222,13 @@ export class NativeDurableAnchor implements DurableAnchor {
 		});
 		return [
 			...fileTools((id) => this.jobFor(id)),
+			...(o.connectorMediator && o.connectorDef
+				? connectorTools(
+						o.connectorDef,
+						(id) => this.jobFor(id),
+						o.connectorMediator,
+					)
+				: []),
 			defineTool({
 				name: "bash",
 				description:

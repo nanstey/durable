@@ -29,6 +29,9 @@ import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/n
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { Type } from "typebox";
 import { providerFor } from "../config/agent.ts";
+import { FakeConnectorProvider } from "../connectors/fake.ts";
+import { ConnectorMediator } from "../connectors/mediation.ts";
+import { ConnectorProviders } from "../connectors/select.ts";
 import { loadManifest } from "../config/manifest.ts";
 import type { AgentDef } from "../config/schema.ts";
 import { buildAgentEnv } from "../identity/env.ts";
@@ -642,8 +645,28 @@ export async function openHarness(options: HarnessConfig) {
 	registry.install(Safety);
 	if (options.work?.durable) {
 		const work = options.work;
+		const fakeProvider = new FakeConnectorProvider(
+			Object.fromEntries(
+				(def.connectors ?? []).map((connector) => [
+					connector.id,
+					{
+						connection: connector.connection,
+						tools: connector.tools.map((tool) => ({
+							name: tool.id,
+							access: tool.access,
+						})),
+					},
+				]),
+			),
+		);
 		const anchor = new NativeDurableAnchor({
 			...work.durable!,
+			connectorDef: def,
+			connectorMediator: new ConnectorMediator(
+				def,
+				new ConnectorProviders([fakeProvider]),
+				{ quietHours: def.schedule?.quietHours },
+			),
 			harness: () => harness,
 			owner: async (tx, item) => {
 				const owner = (await tx.doc(WorkOwnersDoc)).owners[item];
