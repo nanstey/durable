@@ -106,6 +106,30 @@ export function doctor(
 		detail: providers.length ? providers.join(", ") : "missing or invalid",
 		fix: `run Pi /login using profile ${p.name}`,
 	});
+	for (const connector of def.connectors ?? []) {
+		const maxCalls =
+			connector.maxCalls ??
+			Math.max(...connector.tools.map((tool) => tool.maxCalls ?? 0));
+		const maxCost =
+			connector.maxCost ??
+			Math.max(...connector.tools.map((tool) => tool.maxCost ?? 0));
+		checks.push({
+			name: `connector ${connector.id} provider`,
+			ok: connector.provider === "fake",
+			detail: connector.provider === "fake" ? "available" : "unavailable",
+			fix: "only the built-in fake provider is enabled; Composio is pending the custody decision",
+		});
+		checks.push({
+			name: `connector ${connector.id} budget`,
+			ok:
+				(def.limits?.maxToolCalls === undefined ||
+					maxCalls <= def.limits.maxToolCalls) &&
+				(def.limits?.dailyDollars === undefined ||
+					maxCost <= def.limits.dailyDollars),
+			detail: "connector budgets must not exceed agent limits",
+			fix: "lower connector maxCalls/maxCost or increase the agent limit",
+		});
+	}
 	const pi = join(durableHome(), "agents", id, "pi");
 	checks.push({
 		name: "derived auth",

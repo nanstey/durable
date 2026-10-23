@@ -31,6 +31,76 @@
       "required": [],
       "additionalProperties": false
     },
+    "connectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+$"
+          },
+          "provider": {
+            "const": "fake"
+          },
+          "connection": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+$"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]+$"
+                },
+                "access": {
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "write": {
+                  "type": "boolean"
+                },
+                "maxCalls": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxCost": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "id",
+                "access"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          },
+          "maxCalls": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxCost": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "connection",
+          "tools"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
     "limits": {
       "type": "object",
       "properties": {

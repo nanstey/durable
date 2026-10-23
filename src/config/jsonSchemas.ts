@@ -48,6 +48,27 @@ const policySource = {
 	...object({ kind: { enum: ["none", "fixture"], default: "none" } }, ["kind"]),
 	default: { kind: "none" },
 };
+const connectorTool = object(
+	{
+		id: { type: "string", pattern: "^[A-Za-z0-9._-]+$" },
+		access: { enum: ["read", "write"] },
+		write: { type: "boolean" },
+		maxCalls: positive,
+		maxCost: { type: "number", minimum: 0 },
+	},
+	["id", "access"],
+);
+const connector = object(
+	{
+		id: { type: "string", pattern: "^[A-Za-z0-9._-]+$" },
+		provider: { const: "fake" },
+		connection: { type: "string", pattern: "^[A-Za-z0-9._-]+$" },
+		tools: { type: "array", items: connectorTool, minItems: 1 },
+		maxCalls: positive,
+		maxCost: { type: "number", minimum: 0 },
+	},
+	["id", "provider", "connection", "tools"],
+);
 const pipeline = object({
 	stages: {
 		type: "array",
@@ -65,6 +86,7 @@ export const agentSchema = object(
 		description: text,
 		network: object({ bind: { const: "loopback" } }),
 		schedule: object({ pollSeconds: positive, quietHours: text }),
+		connectors: { type: "array", items: connector, default: [] },
 		limits: object({
 			maxConcurrentWorkers: positive,
 			maxWorkersPerDay: positive,

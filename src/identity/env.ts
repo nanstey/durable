@@ -93,6 +93,9 @@ export function buildAgentEnv(
 	// Structural controls cannot be overridden by a secrets file.
 	delete secrets.SSH_AUTH_SOCK;
 	delete secrets.DURABLE_HOME;
+	// Connector credentials are consumed only by code-owned provider calls.
+	for (const key of Object.keys(secrets))
+		if (/^(?:COMPOSIO_|MCP_|CONNECTOR_)/.test(key)) delete secrets[key];
 	return {
 		...secrets,
 		...common,

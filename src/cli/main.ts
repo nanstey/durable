@@ -7,7 +7,7 @@ import {
 	type Scope,
 } from "../api/tokens.ts";
 import { DurableClient } from "../client/client.ts";
-import { loadMachine } from "../config/load.ts";
+import { loadAgent, loadMachine } from "../config/load.ts";
 import { durableHome } from "../config/paths.ts";
 import { startConsole } from "../console/main.ts";
 import { ensureConsoleConfig } from "../console/registry.ts";
@@ -82,6 +82,45 @@ subCommands.inbox = defineCommand({
 					),
 					args.json,
 				);
+			},
+		}),
+	},
+});
+subCommands.connectors = defineCommand({
+	meta: { name: "connectors" },
+	subCommands: {
+		list: defineCommand({
+			meta: { name: "list" },
+			args: {
+				agent: { type: "positional" },
+				json: { type: "boolean", default: false },
+			},
+			run({ args }) {
+				const def = loadAgent(selected(args.agent));
+				print(
+					(def.connectors ?? []).map(({ id, provider, connection, tools }) => ({
+						id,
+						provider,
+						connection,
+						tools: tools.map(({ id: tool, access }) => ({ id: tool, access })),
+					})),
+					args.json,
+				);
+			},
+		}),
+		show: defineCommand({
+			meta: { name: "show" },
+			args: {
+				agent: { type: "positional" },
+				connector: { type: "positional", required: true },
+				json: { type: "boolean", default: false },
+			},
+			run({ args }) {
+				const connector = loadAgent(selected(args.agent)).connectors?.find(
+					(candidate) => candidate.id === args.connector,
+				);
+				if (!connector) throw Error("connector not found");
+				print(connector, args.json);
 			},
 		}),
 	},
