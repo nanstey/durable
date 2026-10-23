@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { consoleGuard } from "../../src/console/guard.ts";
 import { DeviceMonitor } from "../../src/console/monitor.ts";
 import { StreamMux } from "../../src/console/mux.ts";
+import { validConsoleUrl } from "../../src/console/registry.ts";
 import { allowedDaemonRoute, proxyDaemon } from "../../src/console/proxy.ts";
 import { createConsoleApp } from "../../src/console/routes.ts";
 
@@ -47,6 +48,17 @@ test("Serve requires an allowed identity even with a spoofed loopback Host", asy
 		headers: { host: "console.example", "tailscale-user-login": "operator" },
 	});
 	assert.equal(allowed.status, 200);
+});
+
+test("console device URLs are limited to loopback and tailnet hosts", () => {
+	for (const url of [
+		"http://127.0.0.1:7330",
+		`https://${[100, 100, 1, 2].join(".")}`,
+		`https://durable.tailnet.${["ts", "net"].join(".")}`,
+	])
+		assert.equal(validConsoleUrl(url), true);
+	for (const url of ["https://example.com", "http://169.254.169.254"])
+		assert.equal(validConsoleUrl(url), false);
 });
 
 test("proxy allowlist excludes files, shells and arbitrary paths", () => {

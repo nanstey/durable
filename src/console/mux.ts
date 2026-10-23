@@ -27,12 +27,15 @@ export class StreamMux {
 	private readonly tabs = new Map<string, Tab>();
 	private readonly devices: Map<string, ConsoleDevice>;
 	private readonly fetcher: typeof fetch;
+	private readonly authorize: (device: ConsoleDevice) => Promise<boolean>;
 	constructor(
 		devices = new Map<string, ConsoleDevice>(),
 		fetcher: typeof fetch = fetch,
+		authorize: (device: ConsoleDevice) => Promise<boolean> = async () => true,
 	) {
 		this.devices = devices;
 		this.fetcher = fetcher;
+		this.authorize = authorize;
 	}
 	open(context: Context) {
 		const id = randomUUID();
@@ -90,6 +93,14 @@ export class StreamMux {
 		const device = this.devices.get(deviceId);
 		if (!device || !deviceId || !scope) {
 			await tab.write({ type: "fault", key, detail: "unknown device" });
+			return;
+		}
+		if (!(await this.authorize(device))) {
+			await tab.write({
+				type: "fault",
+				key,
+				detail: "device identity unavailable",
+			});
 			return;
 		}
 		const path =
