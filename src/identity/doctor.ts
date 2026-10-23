@@ -19,6 +19,7 @@ import { type Capabilities, detectCapabilities } from "../platform/detect.ts";
 import { type GithubRunner, githubLogin } from "./github.ts";
 import { checkRoleSkills, effectiveKind } from "./skills.ts";
 import { tokenWarnings } from "./token.ts";
+import { pipelineDoctorErrors, pipelineFor } from "../pipeline/select.ts";
 
 export { effectiveKind } from "./skills.ts";
 
@@ -138,6 +139,13 @@ export function doctor(
 			detail: "auto merge needs allowAutoMerge",
 		});
 	for (const repo of def.scope?.repos ?? []) {
+		for (const detail of pipelineDoctorErrors(pipelineFor(def, repo.slug)))
+			checks.push({
+				name: `pipeline ${repo.slug}`,
+				ok: false,
+				detail,
+				fix: "remove spec/specApproval until slice 7",
+			});
 		const policy = options.resolvedPolicies?.[repo.slug];
 		const tighten = repo.merge?.tighten ?? def.merge?.tighten;
 		if (policy && tighten)
