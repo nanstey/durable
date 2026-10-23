@@ -1,0 +1,9 @@
+{
+  "name": "@nanstey/durable",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Durable, proactive agents that push project work to human review, built on pi-durable.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22" }
+}
