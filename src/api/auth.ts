@@ -3,12 +3,17 @@ import { authenticate, type Scope, type TokenRecord } from "./tokens.ts";
 export type ApiEnv = { Variables: { actor: TokenRecord } };
 function requiredScope(method: string, path: string): Scope | undefined {
 	if (method === "GET") return "read";
-	if (method === "POST" && path === "/v1/pause") return "pause";
+	if (
+		method === "POST" &&
+		(/^\/v1\/workers\/[^/]+\/interrupt$/.test(path) || path === "/v1/pause")
+	)
+		return "pause";
 	if (
 		method === "POST" &&
 		(/^\/v1\/(?:conversations|sessions)\/[^/]+\/(?:messages|abort)$/.test(
 			path,
 		) ||
+			/^\/v1\/workers\/[^/]+\/steer$/.test(path) ||
 			path === "/v1/messages" ||
 			path === "/v1/conversations")
 	)

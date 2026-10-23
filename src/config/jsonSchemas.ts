@@ -212,6 +212,8 @@ export const machineSchema = object(
 			),
 		},
 		workers: object({
+			dispatcher: { enum: ["orca", "git-process"] },
+			fallback: { type: "boolean" },
 			roles: {
 				type: "object",
 				additionalProperties: object({ kind, skills: strings }),

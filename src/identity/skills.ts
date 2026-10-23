@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { piAgentDir } from "../config/paths.ts";
-import type { AgentDef, MachineCfg, WorkerKind } from "../config/schema.ts";
+import type { AgentDef, MachineCfg, WorkerKindName } from "../config/schema.ts";
 
 export function effectiveKind(
 	def: AgentDef,
 	machine: MachineCfg,
 	role: string,
-): WorkerKind {
+): WorkerKindName {
 	return (
 		machine.workers?.roles?.[role]?.kind ??
 		def.workers?.roles?.[role]?.kind ??

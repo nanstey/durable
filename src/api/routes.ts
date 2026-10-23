@@ -7,6 +7,7 @@ import {
 	startableConversationKinds,
 } from "../steward/conversations.ts";
 import type { StewardHarness } from "../steward/harness.ts";
+import type { WorkerRegistry } from "../workers/registry.ts";
 import { type ApiEnv, auth } from "./auth.ts";
 import { ApiError, bodyHash, validateMessage } from "./chat.ts";
 import { events } from "./sse.ts";
@@ -20,11 +21,21 @@ export function createApi(opts: {
 	harness: StewardHarness;
 	definition: AgentDef;
 	startedAt?: number;
+	workers?: WorkerRegistry;
 }) {
 	const app = new Hono<ApiEnv>();
 	const { harness } = opts;
 	const startedAt = opts.startedAt ?? Date.now();
 	const max = opts.definition.chat?.maxMessageBytes ?? 1048576;
+	async function tree() {
+		const durable = await harness.tree();
+		const parentId =
+			durable.find((node) => node.kind === "steward")?.id ?? null;
+		return [
+			...durable,
+			...(opts.workers ? await opts.workers.tree(parentId) : []),
+		];
+	}
 	app.use("*", auth(opts.agent));
 	app.use(
 		"*",
@@ -89,13 +100,13 @@ export function createApi(opts: {
 		};
 		return c.json(device);
 	});
-	app.get("/v1/sessions", async (c) => c.json(await harness.tree()));
+	app.get("/v1/sessions", async (c) => c.json(await tree()));
 	app.get("/v1/conversations", async (c) => {
 		const kind = c.req.query("kind");
 		const item = c.req.query("item");
 		if (kind && !startableConversationKinds.includes(kind as "chat" | "scout"))
 			throw new ApiError("invalid", "kind must be chat or scout");
-		const nodes = (await harness.tree()).filter(
+		const nodes = (await tree()).filter(
 			(node) => (!kind || node.kind === kind) && (!item || node.item === item),
 		);
 		return c.json({ nodes });
@@ -142,6 +153,54 @@ export function createApi(opts: {
 	});
 	app.get("/v1/budget", async (c) => c.json((await harness.snapshot()).budget));
 	app.get("/v1/queue", async (c) => c.json({ items: await harness.queue() }));
+	app.get("/v1/workers", async (c) =>
+		c.json({ workers: (await opts.workers?.list()) ?? [] }),
+	);
+	app.get("/v1/workers/events", (c) =>
+		events(c, "workers", async () => ({
+			nodes: opts.workers ? await opts.workers.tree(null) : [],
+			workers: (await opts.workers?.list()) ?? [],
+		})),
+	);
+	app.get("/v1/workers/:id/transcript", async (c) => {
+		if (!opts.workers) throw new ApiError("not_found", "worker not found", 404);
+		return c.json(await opts.workers.transcript(c.req.param("id")));
+	});
+	app.post("/v1/workers/:id/steer", async (c) => {
+		if (!opts.workers) throw new ApiError("not_found", "worker not found", 404);
+		const body = validateMessage(await c.req.json(), max);
+		try {
+			await opts.workers.steer(c.req.param("id"), body);
+		} catch (error) {
+			if ((error as { code?: string }).code === "not_supported")
+				throw new ApiError("not_supported", "steer not supported", 501);
+			throw error;
+		}
+		audit(opts.agent, {
+			event: "worker-steer",
+			actor: "human",
+			client: c.get("actor").client,
+			workerId: c.req.param("id"),
+			bytes: Buffer.byteLength(body),
+			sha256: bodyHash(body),
+		});
+		return c.json({ steered: true }, 202);
+	});
+	app.post("/v1/workers/:id/interrupt", async (c) => {
+		if (!opts.workers) throw new ApiError("not_found", "worker not found", 404);
+		const value = (await c.req.json()) as { mode?: unknown };
+		if (value.mode !== "soft" && value.mode !== "hard")
+			throw new ApiError("invalid", "mode must be soft or hard");
+		await opts.workers.interrupt(c.req.param("id"), value.mode);
+		audit(opts.agent, {
+			event: "worker-interrupt",
+			actor: "human",
+			client: c.get("actor").client,
+			workerId: c.req.param("id"),
+			mode: value.mode,
+		});
+		return c.json({ interrupted: true }, 202);
+	});
 	app.get("/v1/inbox", async (c) => c.json((await harness.snapshot()).inbox));
 	app.post("/v1/inbox/:id/ack", async (c) => {
 		if (!(await harness.ack(c.req.param("id"))))
@@ -163,16 +222,12 @@ export function createApi(opts: {
 		return c.json({ paused: true });
 	});
 	async function node(id: string) {
-		const found = (await harness.tree()).find(
-			(candidate) => candidate.id === id,
-		);
+		const found = (await tree()).find((candidate) => candidate.id === id);
 		if (!found) throw new ApiError("not_found", "conversation not found", 404);
 		return found;
 	}
 	async function mainId() {
-		const steward = (await harness.tree()).find(
-			(node) => node.kind === "steward",
-		);
+		const steward = (await tree()).find((node) => node.kind === "steward");
 		if (!steward)
 			throw new ApiError(
 				"unavailable",
@@ -190,7 +245,7 @@ export function createApi(opts: {
 			);
 		const state = await harness.snapshot();
 		return {
-			nodes: await harness.tree(),
+			nodes: await tree(),
 			paused: state.paused,
 			heartbeat: state.heartbeat,
 			budget: state.budget,
@@ -225,10 +280,16 @@ export function createApi(opts: {
 		});
 		app.get(`${base}/:id/transcript`, async (c) => {
 			const id = c.req.param("id");
-			await node(id);
+			const selected = await node(id);
 			const format = c.req.query("format") ?? "json";
 			if (!["json", "markdown"].includes(format))
 				throw new ApiError("invalid", "format must be json or markdown");
+			if (selected.source === "dispatcher") {
+				if (!opts.workers)
+					throw new ApiError("not_found", "worker not found", 404);
+				const entries = await opts.workers.transcript(id);
+				return format === "json" ? c.json(entries) : c.text(entries.join("\n"));
+			}
 			const entries = await harness.transcript(id);
 			return format === "json"
 				? c.json(entries)
@@ -251,7 +312,11 @@ export function createApi(opts: {
 			const selected = await node(id);
 			if (!selected.capabilities.interrupt)
 				throw new ApiError("not_supported", "abort not supported", 501);
-			await harness.abort(id);
+			if (selected.source === "dispatcher") {
+				if (!opts.workers)
+					throw new ApiError("not_found", "worker not found", 404);
+				await opts.workers.interrupt(id, "soft");
+			} else await harness.abort(id);
 			audit(opts.agent, {
 				event: "abort-turn",
 				actor: "human",
