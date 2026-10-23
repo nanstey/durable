@@ -50,13 +50,16 @@ test("real user service KillMode control-group removes direct tool children afte
 			(await ctl(["kill", "--kill-whom=main", "--signal=KILL", unit])).exitCode,
 			0,
 		);
-		await eventually(
-			() =>
-				!existsSync(`/sys/fs/cgroup${group}/cgroup.events`) ||
-				recursivelyEmpty(
-					readFileSync(`/sys/fs/cgroup${group}/cgroup.events`, "utf8"),
-				),
-		);
+		await eventually(() => {
+			const events = `/sys/fs/cgroup${group}/cgroup.events`;
+			if (!existsSync(events)) return true;
+			try {
+				return recursivelyEmpty(readFileSync(events, "utf8"));
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+				throw error;
+			}
+		});
 		for (const pid of pids) assert.equal(existsSync(`/proc/${pid}`), false);
 	} finally {
 		await ctl(["stop", unit]);
