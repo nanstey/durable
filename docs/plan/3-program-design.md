@@ -1,0 +1,396 @@
+# Program design
+
+Inputs: [1-product-review](./1-product-review.md), [2-system-architecture](./2-system-architecture.md). Revision 1 (C1-C7). Revision 2 (U1 no ntfy; U2 multi-machine console, remote-ready API, guarded approvals). Revision 3 (repo-committed, human-trusted merge policy; interactive chat; PWA-ready console; Linux only). Revision 4 (dpi-* inspiration only; platform abstraction for an Android/Termux target). Revision 5 (pluggable `RepoPolicySource` seam with mechanism-independent invariants P1-P6; no phone-specific capability gating; no default chat rate limits). Revision 6 (the engine lives in its own public repo `nanstey/durable`; the skills repo keeps only a thin integration; paths below are repo-root paths of the durable repo unless marked "skills repo").
+This document fixes code shape only where a wrong guess would be costly. Names are proposals bound by the invariants below.
+
+Evidence for conventions (in the skills repo, mirrored by the thin integration): `install/main.sh` (HARNESSES table, typed pairs `config|hoist|vendor-git|patch-*`), `install/modules/*.sh` (definitions only, `ok|copy|update` reports), `harness/pi/bin/pi-improve` (zero-dependency Node CLI: Orca resolution, locks, caps, kill switch, `PI_CODING_AGENT_DIR`, dry-run), `harness/pi/bin/pi-secret` and `extensions/profile-secrets.ts` (profile resolution, `secrets/<profile>.env`, same name regex), `@nanstey/pi-auth-profiles` (profile files), `@gotgenes/pi-anthropic-auth/src/{oauth-transport,host-transport}.ts` (transport wrapper), `harness/pi/tests/*` and `install/tests/install.test.sh` (offline, stubs), `.github/workflows/ci.yml`, reference `durable-pi` (`jobs.ts` `{again:{nextAt}}` repeat tasks, `extensions.ts` approval task + `beforeTool` guard).
+
+## 1. Repository layout
+
+### 1.1 The durable repo (public, MIT, package `@nanstey/durable`, Node >= 22, `main` protected: PRs required, squash-only)
+
+Layout, stated once. Everything of the engine lives at the repo root of `nanstey/durable`:
+
+```
+bin/durable                          CLI entry shim (runs src/cli/main.ts with Node type stripping)
+src/
+  platform/  detect.ts  capabilities.ts  service/{types,systemdUser,termuxRunit}.ts  notifier/{notifySend,termuxNotification}.ts
+  config/    schema.ts  agent.ts  machine.ts  manifest.ts  load.ts  paths.ts
+  identity/  profiles.ts  env.ts  pidir.ts  github.ts  token.ts  modelAuth.ts  doctor.ts  skills.ts(required-skills check)
+  api/       types.ts  routes.ts  sse.ts  auth.ts  tokens.ts  net.ts(whois,bind)  chat.ts(screen,size-ceiling,audit,optional-ratelimit)
+  client/    client.ts  stream.ts  transcript.ts          # durable-client: our own, from scratch; used by CLI, TUI and console hub
+  steward/   conversations.ts  main.ts  harness.ts  loop.ts  audit.ts  limits.ts  killswitch.ts  claims.ts  inbox.ts
+  sources/   types.ts  githubIssues.ts  githubPrs.ts  localFiles.ts  eligibility.ts
+  scout/     judge.ts  brief.ts
+  dispatch/  types.ts  orca.ts  gitProcess.ts  fake.ts  select.ts  monitor.ts  launcher.ts
+  notify/    types.ts  notifier.ts  channels/{inbox,desktop,command,github}.ts  dedup.ts  reminders.ts
+  gate/      policy.ts  policySource.ts(+ sources/{none,fixture}.ts)  hardPaths.ts  tighten.ts  facts.ts  decide.ts  review.ts  merge.ts  approval.ts  shadow.ts
+  approval/  nonce.ts  webauthn.ts  keys.ts  challenge.ts
+  console/   main.ts  monitor.ts  proxy.ts  mux.ts  guard.ts  registry.ts  auth.ts  push.ts(stub: 501 until 12b)  routes.ts   # the console hub server (our own; dpi-* inspiration only)
+  tui/       main.ts  views.ts
+  guard/     commands.ts
+  cli/       (commands: doctor, profile, status, queue, inbox, audit, attach, ask, chat, approve, policy, stop, enable, token, notify, console, approval, ...)
+web/         console static front end, NO build step: index.html app.js views/*.js style.css sw.js manifest.webmanifest vendor/{preact,htm}.js + SHA256SUMS
+schema/      generated JSON Schemas (agent, machine, profile-meta) + drift test
+examples/    agent.example.yaml  machine.example.yaml  profile-meta.example.json   (placeholders only)
+units/       durable-agent@.service  durable-agent-failure@.service  durable-console.service     (systemd user; rendered/installed by `durable enable`, not by an installer)
+termux/      bootstrap.sh  service-run.tmpl  log-run.tmpl                                     (Android/Termux, slice 14; clones and pins this repo directly)
+templates/   worker-brief.md  reviewer-brief.md
+pi-extension/ durable-worker-guard.ts   (Pi extension for workers; loaded through the derived per-agent Pi settings, so it needs no installation into the user's Pi directory)
+test/        unit/  contract/ (dispatcher, policySource, recovery)  rig/ (two daemons + fake tailnet)  fixtures/{github,orca}/ (recorded, scrubbed)  hygiene.test.ts
+scripts/     hygiene-scan.sh  hygiene-allow.txt                                              (public-repo secret/path/host scan, run in CI)
+docs/        operator.md  architecture.md  security.md  console.md  network.md  workers.md  android.md  install.md  skills-contract.md     (the real documentation)
+docs/plan/   this plan (README.md index, 1-product-review.md ... 4-vertical-slices.md, specs/)
+docs/evidence/ spike.md  android-checklist.md                                                (slice 1 results)
+spike/       throwaway slice 1 scripts (excluded from the npm package via `files`; may be deleted after slice 1)
+.github/workflows/ci.yml   unit + contract tests, `tsc --noEmit`, hygiene scan
+package.json  pnpm-lock.yaml  tsconfig.json  LICENSE(MIT)  README.md  AGENTS.md
+```
+The console server stays in `src/console/` (it shares types and the client with the rest of the TypeScript tree) and the static front end in `web/`; there is no separate `console/` top-level directory.
+
+**Public repo rules (durable repo):** no secrets, no machine-local state, no absolute or personal paths, no real host or tailnet names, no personal emails, no private repo names in any committed file; examples and docs use placeholders (`<console-host>`, `<operator-login>`, `acme/api`, `operator@example.invalid`). Enforced by `scripts/hygiene-scan.sh` in CI from slice 2 (spec 02) and by review.
+
+### 1.2 The skills repo (this repo): thin integration only (spec 02b)
+
+```
+harness/durable/vendor/nanstey-durable.txt   NEW  `<url> <40-char commit>` pin manifest, same format as harness/pi/vendor/*.txt
+harness/durable/README.md                    NEW  managed-file table for the integration (repo path, install destination, purpose); not installed
+harness/durable/bump-pin.sh                  NEW  resolves a ref to a full SHA (git ls-remote) and rewrites the manifest line; idempotent; offline-testable
+install/modules/durable.sh                   NEW  install_durable_deps (pnpm install --frozen-lockfile --prod in the pinned clone, stamped), install_durable_cli_link (~/.local/bin/durable)
+install/main.sh                              EDIT a `vendor-git` pair for the durable clone plus the two functions above (see spec 02b for the exact mechanism)
+install/tests/install.test.sh                EDIT cases: clone/ok/update with stub git, deps stub, CLI link, skip on old Node, run twice
+skills/agent/durable/SKILL.md                NEW  thin operator skill: what durable is, key commands, link to the durable repo docs
+README.md                                    EDIT catalog row for the skill
+harness/pi/README.md                         EDIT one table row documenting the contract between Pi's directory and durable (derived per-agent Pi dirs symlink auth-profiles/, secrets/, profile-meta/, extensions/, skills/, agents/, prompts/; `profile-meta/<name>.json` is created by `durable profile`)
+```
+Not in the skills repo any more: the engine, console, client, TUI, API, schemas, tests, units, Termux bootstrap, examples, docs, the worker guard extension, the spike, and this plan. The skills repo still owns: the skills and agent profiles durable workers reuse (`idea-to-pr`, `pr`, `build`, `review-code`, `handoff`, ...), Pi settings and patches (including slice 13), and the installer.
+
+### 1.3 Machine-local layout (unchanged)
+
+`$DURABLE_HOME` (default `~/.pi/durable`) holds `agents/<id>/{state.sqlite,audit.jsonl,token,gh/,gitconfig,pi/,disabled,lock}`, per agent `tokens.json` (hashed), `port`, `approval/`, and `vendor/` (the pinned durable clone when installed through the skills repo); definitions in `~/.config/durable/agents/<id>.yaml` (`DURABLE_AGENTS_DIR`); `~/.config/durable/machine.yaml`; on a console host `~/.config/durable/console/{console.yaml,devices.yaml,ui-state.json,push-subscriptions.json}`; profiles under `$PI_AGENT_DIR/{auth-profiles,secrets,profile-meta}`.
+
+## 2. Key types and invariants
+
+```ts
+// config/*.ts — TypeBox schemas, unknown keys rejected, peers must be [], network.bind must be "loopback".
+type AgentDef   = Static<typeof AgentDefSchema>;    // no secrets, no absolute paths (validator rejects "/" or "~" prefixed path fields)
+type MachineCfg = Static<typeof MachineSchema>;
+type ProfileManifest = Static<typeof ManifestSchema>;
+
+// identity/profiles.ts — mirrors @nanstey/pi-auth-profiles + pi-secret name regex ^[A-Za-z0-9._-]+$ (not "." or "..")
+resolveProfile(name): { authFile: string; secretsFile: string; manifestFile: string; isDefault: boolean }
+// INVARIANT P1: never falls back to another profile or to auth.json (unless name === "default").
+
+// identity/env.ts
+buildAgentEnv(def, machine, role: "steward" | "worker" | "reviewer", ctx): NodeJS.ProcessEnv
+// INVARIANT I1: built from an allowlist + profile secrets + manifest; never from process.env wholesale.
+// INVARIANT I2: GH_TOKEN, GH_CONFIG_DIR, GIT_CONFIG_GLOBAL/SYSTEM, PI_CODING_AGENT_DIR always set; ambient provider keys never survive.
+
+// identity/modelAuth.ts — the swap seam for the Anthropic decision
+createModelsFor(profile: ResolvedProfile, providers: string[]): Models   // plain | anthropicShaped (spike decides)
+
+// identity/doctor.ts
+doctor(def, machine, env): Promise<DoctorReport>   // { checks: {name, ok, detail, fix?}[]; ok }
+// INVARIANT I3: steward start and every dispatch call doctor-lite; false => refuse. A missing profile yields a fix string listing exact steps.
+
+// dispatch/types.ts — the WorkerDispatcher contract (C7)
+interface WorkerDispatcher {
+  readonly kind: string;                                   // "orca" | "git-process" | ...
+  capabilities(): { visible: boolean; resumable: boolean; headless: boolean;
+                    attach: "none" | "read" | "interactive"; steer: boolean; transcript: boolean };   // clients show exactly what the adapter reports
+  createWorkspace(spec: WorkspaceSpec): Promise<Workspace>;      // idempotent by spec.id; list-before-create
+  launch(ws: Workspace, job: JobSpec): Promise<JobHandle>;       // idempotent by job.id
+  status(h: JobHandle): Promise<JobStatus>;                      // { state: "running"|"exited"|"missing"|"unknown"; exitCode?; lastActivityAt? }
+  result(h: JobHandle): Promise<JobResult>;                      // exit info + log pointer; PR discovery is NOT here (GitHub via monitor)
+  list(filter: { agent: string; role?: Role }): Promise<JobHandle[]>;
+  interrupt(h: JobHandle, mode: "soft" | "hard"): Promise<void>;
+  steer?(h: JobHandle, text: string): Promise<void>;                // present only when capabilities().steer; chat-scope route returns 501 otherwise
+  transcript?(h: JobHandle, from?: Cursor): AsyncIterable<TranscriptFrame>;   // tails the worker's Pi session log
+  attachInfo(h: JobHandle): AttachInfo;                          // { kind: "orca-terminal", handle } | { kind: "command", command } for humans
+  removeWorkspace(ws: Workspace, opts: { force: false }): Promise<void>;  // refuses dirty or unpushed work
+}
+type WorkspaceSpec = { id: string; repo: string; baseRef: string; name: string };           // deterministic id: durable-<agent>-<item>
+type JobSpec = { id: string; role: Role; profile: string; briefText: string;                  // by value, not a path
+                 model: string; thinking: string; env: Readonly<Record<string,string>> };     // env already built by identity/env
+// INVARIANT W1: adapters never read process.env for credentials or forward ambient env; they pass `env` (allowlist-built) only.
+// INVARIANT W2: nothing in the contract assumes a local filesystem (a remote adapter can fit); secrets are resolved on the executing host via profile name.
+// INVARIANT W3: the contract test suite runs against every adapter with a fake `pi` binary (and the fake adapter) and asserts W1, idempotency, interrupt, dirty-refusal.
+
+// gate/decide.ts — pure; no I/O; table-tested
+decide(policy: EffectivePolicy, facts: GateFacts): { action: "merge" | "wait-human" | "block"; reasons: string[]; shadow?: boolean }
+// INVARIANT G1: unknown/null fact => wait-human. G2: mode "never" => wait-human. G3: "merge" only if every required fact is true.
+// INVARIANT G4: LLM-derived facts (risk class, review verdict) can only lower the outcome.
+// INVARIANT G5: gate/merge.ts is the only module that spawns `gh pr merge`; always --match-head-commit; never --admin/--force (lint test).
+// INVARIANT G6: facts come only from GitHub-computed fields and the steward's own records. Labels, comments, statuses and reactions authored by the shared identity are NEVER inputs (except `durable/hold`, which can only block).
+// INVARIANT G7: shadow=true => decide() output is computed and audited as would-merge, but the executor performs the human-approval path.
+// gate/policySource.ts + hardPaths.ts + tighten.ts — the policy MECHANISM is undecided; only the seam and invariants are fixed (architecture D8, §3.6)
+interface RepoPolicySource { kind: string; resolve(repo): Promise<PolicyResolution>; protectedLocations(repo): ProtectedLocation[]; describeChange(repo, since): Promise<ChangeSummary> }
+type PolicyResolution = { state: "verified" | "unverified" | "invalid" | "unavailable" | "none"; policy?: AutoMergePolicy; ref: string; fingerprint: string }
+effectivePolicy(resolution: PolicyResolution, def: MergeDef): EffectivePolicy      // intersection with the definition; the definition may only tighten; clamps and records warnings
+isHardPath(path, protectedLocations): boolean                                      // CODEOWNERS variants, .github/**, plus the source's protected locations
+// built-in sources: `none` (state "none", auto off; default) and `fixture` (tests). Real sources are chosen per repo later; nothing here names a file, path or pin format.
+// INVARIANT P1 (was G9): a source reads only from a trusted ref/location the STEWARD resolves and records; never from a PR head, fork, worker worktree or any worker-writable filesystem. Sources take no path/ref from PR or worktree input (lint test).
+// INVARIANT P2 (was G10/G11): auto-merge needs state "verified"; a source may return "verified" only on evidence the agent cannot forge (an approval-class human action, or GitHub-computed state). The `verify-policy` approval action carries source-supplied display data (describeChange).
+// INVARIANT P3 (was G12): a PR touching a hard path or any protectedLocation yields wait-human (policy-or-owner-file-change), is never would-merge in shadow mode, and is excluded from any auto path; after such a change the policy state drops to "unverified" until re-verified through the approval class. Changes to GitHub rules/CODEOWNERS are treated the same.
+// INVARIANT P4 (was G14): missing, unparseable, invalid, unavailable or unverified policy => auto-merge disabled (human-approval path unaffected). `none` is such a state.
+// INVARIANT P5 (was G13): effectivePolicy never loosens: each numeric/set field = most restrictive of policy and definition; the definition cannot enable auto-merge without a verified policy that says enabled: true (reason no-verified-repo-policy).
+// INVARIANT P6: shadow mode first; never --admin or any bypass; policy state, kill switch and daily cap are re-checked immediately before any merge call (G5).
+// INVARIANT G8: reviewDecision REVIEW_REQUIRED from GitHub rules => wait-human with reason github-requires-approval-from-other-account; no override exists.
+
+// approval/* — credential classes (D15). Bearer tokens (scopes read|chat|pause) NEVER approve, resume an agent, enroll or verify a policy. Actions: approve | resume | enroll | verify-policy.
+issueNonce(item, headSha): string          // CLI path. Returned to the notifier for desktop/command ONLY; steward stores sha256(nonce+item+sha)+expiry; never logged, never in any file, GitHub object, inbox or API response
+verifyNonce(item, headSha, code): boolean  // constant-time; single use; expires; invalidated by a new head SHA
+issueChallenge(item, headSha, action): Challenge   // console path; public, single use, short expiry, bound to {agent,item,headSha,action}; returns display data from daemon state
+verifyAssertion(challengeId, assertion): Verified | Rejected   // WebAuthn: signature over the stored challenge, origin + rpId from machine.yaml, counter, enrolled public key, head SHA unchanged
+// INVARIANT A1: the only code paths that can authorize an approval or resume are verifyNonce and verifyAssertion. No route accepts a bearer token for them.
+// INVARIANT A2: the daemon, not the console, verifies assertions. The console holds no signing key and no approval secret.
+// INVARIANT A3: enrollment of the first key requires an enrollment code printed on a TTY on the daemon's machine; later keys require an existing key's assertion. Every enroll/approve/resume is audited and notified (desktop/command).
+// INVARIANT A5: verify-policy challenges carry display data produced by the daemon from the source's describeChange (what changed since the last verified fingerprint, from the daemon's own reads), never supplied by the client.
+// INVARIANT A4: an approval authorizes only an attempt to merge within GitHub rules for that exact head SHA (gate re-runs). It never changes policy.
+
+// notify/notifier.ts
+notify(event: NotifyEvent): Promise<void>   // maps event -> channels via def.notify; dedup(agent,event,target,sha) with TTL; quiet-hours hold (never drop); reminders; redacted payload (ids, titles, URLs)
+// channels: inbox|console (always writes steward.inbox), desktop, command, github(targetLogin != agent login; else skipped with an audit note). No other kinds exist.
+// INVARIANT N1: payloads never contain bodies, tokens or nonces. The CLI approval nonce is the single exception and goes only to `desktop` and `command` channels.
+// INVARIANT N2: no inbound network is required for notifications; the notifier only makes outbound calls (Web Push, when enabled in slice 12b, is sent by the console, not by daemons).
+
+// api/* — daemon API v1
+// INVARIANT D1: every route requires a scoped bearer token (read | chat | pause) except /healthz; scope table in architecture §3.3; 403 on scope mismatch.
+// INVARIANT D2: tokens are stored hashed; creation prints the token once; no endpoint ever returns a token.
+// INVARIANT D3: SSE sends hello -> snapshot -> deltas; reconnect = new snapshot; slow viewers are dropped.
+// platform/* — capability flags and interfaces (architecture D17)
+interface ServiceManager { install(agent): Promise<Result>; enable(agent): Promise<Result>; disable(agent): Promise<Result>; start(agent): Promise<Result>; stop(agent): Promise<Result>; status(agent): Promise<ServiceStatus>; logs(agent, opts): AsyncIterable<string>; }   // impls: systemdUser, termuxRunit
+interface DesktopNotifier { readonly nonceSafe: boolean; notify(e: NotifyPayload): Promise<void> }                                                         // impls: notifySend (nonceSafe true), termuxNotification (nonceSafe false)
+type Capabilities = { os: "linux" | "android"; service: "systemd-user" | "termux-runit"; tailscaleCli: boolean; dispatchers: ("orca" | "git-process")[]; storage: "sqlite" | "jsonl"; desktop: "notify-send" | "termux-notification" | "none"; peerCheck: "required" | "optional" | "off" };
+// INVARIANT PL1: nothing outside platform/* imports systemd, termux or notify-send specifics; the daemon core (steward/, api/, gate/, notify/) depends only on the interfaces above.
+// INVARIANT PL2: capabilities are detected (TERMUX_VERSION / $PREFIX, `systemctl --user`, `tailscale` on PATH, `node:sqlite` import, `orca` reachable) and may be overridden in machine.yaml; doctor reports detected vs declared and fails on a contradiction.
+// INVARIANT PL3: the approval nonce is delivered only to channels whose backend reports nonceSafe=true (notifySend, command); termuxNotification is nonceSafe=false, so on Android the CLI nonce path is unavailable and approvals need the passkey path or a GitHub merge.
+// INVARIANT PL4: network.peerCheck=required needs tailscaleCli=true; with tailscaleCli=false the check is reported "unavailable (optional)" and the bearer token plus the tailnet ACL remain the baseline; no code path treats a missing peer check as a pass for approval-class actions.
+// INVARIANT PL5: on os=android, merge.mode "auto-when-safe" is a doctor error unless platform.allowAutoMerge=true; default budgets are conservative; DURABLE_HOME must be under the Termux private $HOME (never /storage or ~/storage).
+// INVARIANT PL6: daemon dependencies install with `--ignore-scripts` and are pure JavaScript (including the WebAuthn verifier); storage is chosen by capability (sqlite via node:sqlite, else jsonl).
+
+// api/chat.ts + steward/conversations.ts — interactive chat (architecture D16)
+// INVARIANT CH1: message bodies are plain text only; the API has no role, attachment, HTML or tool-call field; max bytes enforced (default 8192).
+// INVARIANT CH2: credential screening on every message (token prefixes, private-key headers, cloud-key patterns, high-entropy strings) => 400 invalid:credential-like-content. Heuristic and documented; the model has no secret-reading tool.
+// INVARIANT CH3 (Q20): no default rate limits. A body-size sanity ceiling (default 1 MiB, configurable via chat.maxMessageBytes) protects the daemon process from a runaway client or loop; rate limiting exists only if the agent opts in (chat.rateLimit) => 429 rate_limited. Runaway cost stays bounded by the existing per-agent budgets and the kill switch.
+// INVARIANT CH4: every message audited {actor:human, via, client, serveUser?, conversationId, bytes, sha256}; content lives only in the conversation history.
+// INVARIANT CH5: conversation kinds startable by ANY console/API client are only those in startableKinds (console-wide, not per client type) and implemented: chat, scout. Workers and reviewers are never startable by API clients; no client type (phone or otherwise) has different capabilities.
+// INVARIANT CH6: chat conversations get a fixed code-defined tool set (list_queue, explain_item, status, set_priority, pause, request_merge, request_work). request_* only enqueue a request that gate/dispatcher evaluate under policy, budgets, caps, kill switch and trusted-author rules. No resume/approve/merge/edit/shell tool exists.
+// INVARIANT CH7: worker steer routes call dispatcher.steer only if capabilities().steer; interrupt works for every adapter and requires scope pause.
+// INVARIANT D4: non-loopback listeners are created only for network.bind=tailnet, bind only the Tailscale interface address, and reject peers failing `whois` allowedPeers.
+
+// console/* — INVARIANTS
+// C1: the browser never receives a daemon token; the proxy injects it server-side. C2: the console exposes no shell, file, config-edit or arbitrary-passthrough route (route table is an allowlist). C3: untrusted text (conversation, issue, PR, audit) is rendered as text nodes only; no markdown, no innerHTML; CSP forbids inline and remote script.
+// C4: writes require same-origin Host/Origin, JSON content type and the CSRF header; Serve identity header must be in allowedUsers for any non-GET.
+// C5: approve/resume/enroll/verify-policy go through the daemon's challenge/assert routes only; the console cannot approve on its own and stores no approval secret.
+// C6 (PWA-ready, Q16): all URLs same-origin and relative; CSP always includes worker-src 'self' and manifest-src 'self' and forbids inline script/style; /api/push/* reserved (501 not-enabled); VAPID keys + push-subscriptions.json paths, schemas and `push.enabled` flag defined now, implemented in 12b; `web-push` lazy optional import.
+// C7: chat UI sends only what the API accepts (text); the console shows capability-gated controls exactly as reported by the daemon (e.g. no steer button on a worker whose adapter has steer:false).
+
+// steward/claims.ts
+claim(item): Promise<"won" | "lost">  // label + marker comment (agent id), read-after-write, lowest comment id wins; lease renewal
+```
+
+Durable-side invariants:
+- **S1 intent-first:** every external effect is preceded by a committed intent entry and uses a deterministic id (`durable/<agent>/<item>` for branch, workspace, job, label). On resume, code **re-derives** world state (GitHub/dispatcher) before acting.
+- **S2 tool replay classes:** read tools `replay: "safe"`. `claim`, `launchWorker`, `requestMerge`, `postComment`, `notify` are not replay-safe; "interrupted" is resolved by a world read (notify: dedup key), never by blind retry.
+- **S3 steward LLM tools are narrow:** list_queue, explain_item, status, set_priority (code-validated document write), pause, and request_merge / request_work (enqueue only). No bash, no GitHub write, no resume. Chat conversations use the same set (CH6).
+- **S4 kill switch** (`disabled` file, `DURABLE_DISABLED=1`, GitHub `durable/pause` (stop only), quiet hours) is checked at tick start and immediately before each side effect.
+
+## 3. Call paths
+
+### 3.1 Process start (`durable-agent@<id>.service` -> `steward/main.ts`)
+
+```
+main(id)
+├─ config/load: machine.yaml (agent assigned here?), agents/<id>.yaml (validate), profile-meta/<profile>.json
+├─ identity/doctor.lite()   profile files exist, token → login == manifest login, git identity, providers present, reviewer family present
+├─ lockfile agents/<id>/lock   (second instance exits)
+├─ steward/harness.open()   Harness.open(sqlite, registry); models = identity/modelAuth.createModelsFor(profile, providersOf(def))
+│    └─ ensure main conversation + steward-loop task exist (idempotent)
+├─ dispatch/select(def, machine) → WorkerDispatcher; dispatcher.capabilities() recorded in status
+├─ steward/api.listen(127.0.0.1, token)
+└─ audit("start", {profile, login})
+```
+Isolation: `steward/harness.ts` is the only pi-durable importer; `identity/modelAuth.ts` is the only place that knows about Anthropic shaping.
+
+### 3.2 `steward-loop` (repeat task; step returns `{ again: { nextAt } }`)
+
+```
+step()
+├─ killswitch.check()  → stop ticking, audit("paused")
+├─ limits.rollover()
+├─ sources.pollAll() → eligibility.filter [code] → scout/judge [LLM, tighten-only] → queue.update
+├─ notify.reminders.due()   (re-send approval-needed reminders within cadence caps; park items older than staleDays)
+├─ for item in ready while workers < maxConcurrentWorkers && budget ok: spawn WorkItemTask(item)
+└─ return { again: { nextAt: now + pollSeconds } }
+```
+
+### 3.3 `WorkItemTask`
+
+```
+phase claim        intent → claims.claim → lost? release, end
+phase brief        scout child conversation (read-only) → brief document
+phase dispatch     intent → dispatcher.createWorkspace(spec) → dispatcher.launch(ws, JobSpec{env=buildAgentEnv(...,"worker")})
+phase await-pr     loop: sleep → dispatch/monitor: dispatcher.status + GitHub PR lookup
+                     exited && no PR → re-launch (resume brief, pi --continue) up to maxAttempts → else notify(escalation), park
+phase review       launch reviewer JobSpec{role:"reviewer", model=opposite family} → review.record(verdict, family, sha) in steward.reviews → mirror status+comment
+phase gate         facts.collect(head SHA) → decide(policy, facts)
+   ├─ merge        (auto + not shadow + cooling-off elapsed) → merge.request(sha); re-read state first; interrupted → re-read
+   ├─ wait-human   approval.create(): issueNonce → notify(approval-needed; nonce to desktop/command only; console inbox gets a nonce-free request) → durable wait, resolves on:
+   │                 (a) PR merged by someone else  (b) approving review from another account → re-run gate  (c) `durable approve --code` or a console passkey assertion (slice 12a) → attempt merge within GitHub rules
+   │                 reminders per cadence; stale → park
+   └─ block        comment + requeue to worker or human
+phase finish       release claim, outcome → queue, notify(merged), dispatcher.removeWorkspace only if merged/closed and clean
+```
+New commits after review invalidate the verdict and the nonce; the item returns to `review`.
+
+### 3.4 Dispatch (`dispatch/launcher.ts` + adapters)
+
+```
+launch(ws, job)           (orca adapter)
+├─ identity/pidir.build(def, profile)  → $DURABLE_HOME/agents/<id>/pi  (settings generated; symlinks; no auth.json unless profile=default)
+├─ brief written to a 0600 file outside the worktree from job.briefText
+├─ launcher script 0700: `env -i <job.env> exec pi --model … --thinking … "$(cat brief)"`
+├─ list-before-create: ORCA terminal list --worktree … ; reuse a live job with the same id
+└─ ORCA terminal create --worktree path:ws --title … --command launcher --json
+(git-process adapter: same launcher, detached spawn + log file; attachInfo = `tail -f <log>`)
+```
+Re-launch after a crash: `pi --continue` in the same workspace with a short resume brief.
+
+### 3.5 CLI
+
+`durable <cmd>` reads definitions, machine file, tokens; calls the loopback API; `doctor`, `enable`, `status`, `profile` work without a running agent.
+`durable profile init|bind-github|show|list|check <name>`; `durable approve <agent> <pr> --code <nonce>` (refuses without a TTY unless `DURABLE_NONINTERACTIVE_OK=1` is set by the operator's own shell); `durable notify --event <e> --agent <id>` (used by `OnFailure`); `durable token create|list|revoke`; `durable inbox <agent>`; `durable approval enroll` (TTY only); `durable console enable|add-device|serve|status`. `--dry-run` prints effects.
+
+### 3.6 Console flows
+
+```
+browser tab ─GET /api/stream (SSE, one per tab)─▶ console/mux ──subscribes──▶ [monitor: per-device status machine] ─▶ daemon SSE (hello→snapshot→deltas)
+browser tab ─PUT /api/stream/:id {subs:["<device>/agent/<aid>", ...≤20]}─▶ mux
+browser tab ─ALL /api/devices/:id/v1/<allowlisted route>─▶ guard(Host,Origin,JSON,CSRF,identity) ─▶ proxy(inject token) ─▶ daemon
+```
+Approve (slice 12a): `POST /api/devices/:id/approvals/challenge {item, headSha}` → daemon challenge + display data → browser `navigator.credentials.get` (user verification required) → `POST .../approvals/assert` → daemon `verifyAssertion` → steward re-runs the gate at the current head SHA → audit + notification. The console never sees a secret that could replace the assertion.
+
+Console startup: load `console.yaml` + `devices.yaml` → `monitor.checkAll()` (probe `/healthz`, `/v1/device`: `uid` match → `online`; `uid` differs → `mismatch`; `apiVersion` outside range → `incompatible`; 401/403 → `unauthorized`; unreachable → `offline` with 1 s → 30 s backoff) → listen on loopback/unix socket → (slice 11) `tailscale serve` is configured by `durable console serve`, which only prints or runs the documented command; it never enables Funnel.
+
+### 3.7 TUI and CLI clients
+
+`tui/main.ts` and `cli/*` use `client/` (the same typed client the console hub uses). `durable attach <agent>` = transcript view + composer (follow-up default, steer when busy) + abort + queue/inbox side panels, over loopback with the local token.
+
+### 3.8 Policy resolution (per repo, each tick and at gate time)
+
+```
+policyFor(repo)
+├─ source = sourceFor(def.scope.repos[repo].policySource.kind)           none (default) | fixture (tests) | (kinds chosen per repo later)
+├─ resolution = source.resolve(repo)                                      reads ONLY from a ref/location the steward resolved (P1); records ref + fingerprint
+├─ state not "verified" → auto disabled (P4); a change in fingerprint → state "unverified" + nonce-free approval-needed ("policy changed: verify")
+└─ state verified → effectivePolicy(resolution, definition)               tighten-only (P5); clamps recorded
+verify-policy action:  source.describeChange(repo, since) → challenge/nonce display data → approval class (A1-A5) → source records the verification → fingerprint accepted
+```
+The gate calls `policyFor` immediately before `decide` and again right before `gh pr merge` (state may have changed between ticks). With `none`, `decide` still evaluates every other fact so shadow mode can print a readiness list.
+
+### 3.9 Chat flow (CLI, TUI and console)
+
+```
+client ─POST /v1/conversations {kind: chat|scout, item?}─▶ api/chat (startableKinds? scope chat?) ─▶ steward/conversations.create (fixed tool set)
+client ─POST …/messages {content, requestId, whenBusy}─▶ screen(credentials) → size ceiling (1 MiB) → [opt-in rate limit] → audit → pi-durable conversation.submit
+client ─SSE agent stream─▶ transcript frames (text only rendering on the client)
+client ─POST /v1/workers/<id>/steer─▶ dispatcher.steer if capabilities().steer else 501 not_supported
+```
+
+### 3.10 Android/Termux start (slice 14)
+
+```
+Termux:Boot ─▶ ~/.termux/boot/durable (termux-wake-lock; sv-enable services) ─▶ runsv durable-agent-<id> ─▶ `durable run <id>`
+durable run <id> ─▶ platform.detect() (os=android, service=termux-runit, tailscaleCli?, storage?) ─▶ doctor.lite() with Android rules (PL3-PL5)
+                 ─▶ steward/harness.open(storage by capability) ─▶ api.listen(loopback [+ tailnetAddress if configured])
+runit restarts the process if it dies; if Termux itself is killed nothing runs until Termux/boot starts it again → console shows `offline`, claims expire via leases.
+```
+
+## 4. Install paths
+
+- **Skills-repo integration (spec 02b), Linux:** `install.sh` clones `nanstey/durable` at the pinned commit through a `vendor-git` pair (manifest `harness/durable/vendor/nanstey-durable.txt`, destination `$DURABLE_HOME/vendor/github.com/nanstey/durable`, `ok|cloned|updated` reporting and the same fail-closed behaviour as `install_vendor_git`), runs `install_durable_deps` (pnpm with the clone's lockfile, `--frozen-lockfile --prod --ignore-scripts`, only when `package.json` or the lockfile changed, hash stamp), and links `~/.local/bin/durable` with the existing `link_one`. It skips with a message when Node < 22.19 or `pnpm` is missing. It never writes `profile-meta`, `machine.yaml`, definitions, tokens, secrets or units.
+- **Standalone install (durable repo, `docs/install.md`):** `git clone`, `pnpm install --frozen-lockfile --prod --ignore-scripts`, link `bin/durable` onto PATH. Units are rendered and installed by `durable enable <id>` (through the `ServiceManager`), so no installer is needed for them.
+- **Termux (spec 14, durable repo only):** `termux/bootstrap.sh` refuses to run outside Termux (`TERMUX_VERSION`/`$PREFIX`), installs packages (`pkg install nodejs git gh termux-services`, optionally `termux-api`), installs Pi with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent@<pin>`, clones this repo at a pinned commit given by `--ref` (default: the commit the script itself was fetched at) into `$DURABLE_HOME/vendor/...`, installs dependencies with `--ignore-scripts`, renders runit service dirs, prints the manual steps (F-Droid/GitHub Termux build, Termux:Boot, battery-optimization exemption, `termux-wake-lock`). `ok|copy|update` reporting, run twice safe, offline-testable with stubs for `pkg`, `npm`, `sv`, `git`. It has **no dependency on the skills repo**. Skills are an optional, separately pinned input (`--skills-url`/`--skills-ref`, copying only the required skill trees into the Pi agent directory); they are needed only for worker dispatch. `durable doctor` checks the required skills (`identity/skills.ts`, configurable list, default `idea-to-pr`, `pr`, `build`, `review-code`) and, when they are missing, reports a fix message and keeps worker dispatch disabled; steward, scout and chat need no skills.
+
+## 5. Validation seams
+
+| Seam | Check |
+| --- | --- |
+| `config/*` | table tests: valid example; unknown key; `peers` set; bad id; path-like field in a definition; agent not assigned in machine file; `auto-when-safe` without `pathAllow`/`maxRisk`. |
+| `identity/profiles` | name regex; no fallback to `auth.json` for non-default; default profile symlinks `auth.json`. |
+| `identity/env` | snapshot: ambient `GH_TOKEN`, `ANTHROPIC_API_KEY`, `SSH_AUTH_SOCK`, `GH_CONFIG_DIR` in the parent never appear; profile secrets and manifest-derived git identity do. |
+| `identity/doctor` | stub `gh`: wrong login fails; missing profile fails with a fix string; missing reviewer-family provider fails; classic `ghp_` token warns; `admin:` scope warns. |
+| `identity/pidir` | tmp `PI_AGENT_DIR`; layout assertions; real `AuthStorage.modify` through the symlink (rotation test). |
+| `identity/modelAuth` | `plain` returns Models for an API-key profile; `anthropicShaped` selected only when the spike chose it; payload shaping unit-tested with the extension's own fixtures if option 1. |
+| `dispatch` | **contract suite** against `orca` (stub CLI recording args), `git-process` (fake `pi`) and `fake`: idempotent create/launch, no ambient env (W1), list-before-create, interrupt, dirty-refusal, attachInfo present. |
+| `gate/decide` | full truth table; property test: flipping any required fact to false/null never yields `merge`; G6 test: forged label/comment inputs have no effect; G8 test over recorded `REVIEW_REQUIRED` fixtures. |
+| `gate/merge` | source lint: only module spawning `gh pr merge`; argv has `--match-head-commit`, never `--admin`. |
+| `gate/shadow` | real-shaped fixtures: shadow output logged with reasons, executor takes human path. |
+| `gate/approval` | nonce hashing, single use, expiry, SHA invalidation, TTY refusal; nonce absent from every log, file and GitHub payload (grep test). |
+| `notify` | dedup TTL, quiet-hours hold and later delivery, reminder caps, redaction; channel kinds limited to inbox/desktop/command/github; `github` channel skipped when target == agent login; nonce reaches only desktop/command stubs and appears in no inbox entry, log or GitHub payload (grep test). |
+| `api` | scope matrix (read/chat/pause vs every route); no route accepts a bearer for approve/resume/enroll; token hash storage; SSE hello→snapshot→deltas with a fake clock; reconnect yields a new snapshot; non-loopback bind refused unless `network.bind: tailnet`; `whois` allowlist with a stub local Tailscale API. |
+| `approval/webauthn` | assertion verification against recorded fixtures (valid, wrong origin, wrong rpId, replayed counter, expired/used challenge, stale head SHA); enrollment rules (A3); no approval path from a bearer token. |
+| `console/guard,proxy,mux` | Host allowlist, cross-origin refusal, JSON-only, CSRF header; token injection (browser-visible payloads contain no token: grep test); route allowlist has no fs/shell/passthrough; mux 20-key cap; status machine with two stub daemons on different ports (online/offline/unauthorized/mismatch/incompatible). |
+| `gate/policySource` | seam contract suite run against `none` and `fixture`: every state (verified, unverified, invalid, unavailable, none) disables or enables auto as P4 requires; sources cannot take a path/ref from PR or worktree input (lint); a fingerprint change moves `verified` to `unverified`; the verification record is written only through the approval class; a future real source must pass the same suite; definition tries to loosen (clamped + warning); `mode: auto-when-safe` without a verified policy is ignored. |
+| `gate/hardPaths` | PR touching CODEOWNERS variants, `.github/**` or any `protectedLocations` of the source => wait-human, never would-merge, policy drops to unverified. |
+| `api/chat` | screening (positive and negative cases), 1 MiB ceiling, no default rate limiting, opt-in `chat.rateLimit` window tests with a fake clock, `startableKinds` is console-wide (same result for any client type), audit record fields (hash, no content), 501 for worker steer without capability, no route to start workers/reviewers. |
+| `web` | headless DOM tests for inert rendering (script-looking and markdown-looking text appears as text); CSP header test; manual browser smoke checks with `playwright-cli` recorded in the slice PR; phone layout checked at a narrow viewport. |
+| `steward` recovery | faux model, `SIGKILL` mid-await, restart, one worker, one claim, one notification per dedup key. |
+| `platform/*` | detection with stubbed env (Termux vs Linux, with/without `tailscale`, with/without `node:sqlite`); capability contradictions fail doctor; `ServiceManager` contract test against `systemdUser` (stub `systemctl`) and `termuxRunit` (stub `sv`, temp `$PREFIX`); `DesktopNotifier.nonceSafe` honoured (nonce never reaches `termuxNotification`); PL5 Android rules (auto-merge refused, `/storage` path refused). |
+| skills-repo installer step (spec 02b) | offline sandbox with stub `git`/`pnpm`: clone, `ok`, update to a new pin, fail-closed on a bad manifest, Node-version skip, run twice, CLI link, never writes machine files; `bump-pin.sh` against a local bare repo. |
+| `scripts/hygiene-scan.sh` (durable repo) | positive fixtures (home paths, emails, tokens, tailnet names, private-looking hostnames) fail the scan; allowlisted placeholders pass; the scan runs over `docs/plan/` too. |
+| `termux/bootstrap.sh` | stubbed `pkg`, `npm`, `sv`, `git` and a temp `$PREFIX`: twice-run `ok`, refuses outside Termux, no skills-repo access unless `--skills-*` is passed. |
+
+## 6. Decisions taken here (alternatives recorded)
+
+| Decision | Alternative | Why |
+| --- | --- | --- |
+| Profile manifest as a separate non-secret JSON in `profile-meta/` | Put login/email in `secrets/<name>.env` or extend `auth.json` | Keeps pi-auth-profiles and pi-secret formats untouched; non-secret metadata is inspectable and diffable; the manifest pins the identity so drift is detectable. |
+| Definitions without paths/secrets + machine file for assignment, paths, channels | One per-agent file with everything | Satisfies AGENTS.md (no machine state in repo) and lets definitions live in a private repo or move between machines unchanged. |
+| `WorkerDispatcher` interface with `orca`, `git-process`, `fake` | Direct Orca calls in the steward | C7: swap later (durable conversations, remote); `git-process` doubles as the test double. |
+| Approval nonce delivered out of band | GitHub label/comment approval | Shared identity makes labels/comments forgeable by the agent. |
+| Gate reads steward-internal review records, not the GitHub status/comment | Read the status/comment back | Same forgeability reason; the status/comment is display only. |
+| Native Node type stripping, no build | `tsx` or `tsc` build | Fewer deps; `erasableSyntaxOnly`. |
+| `gh` CLI for GitHub | Octokit | Already an installed tool; uses the profile token via env. |
+| TypeBox + `yaml` | zod / JSON-only | TypeBox is pi-durable's schema layer; YAML friendlier to hand edit. |
+| Poll for worker completion | Callback endpoint | No new auth surface in v1. |
+| Per-agent `PI_CODING_AGENT_DIR` derived from the profile | Worktree `.pi/settings.json` `authProfile` | `authProfile` needs project trust and a file in the worktree; repo content must not choose the identity. |
+| `durable-worker-guard.ts` in the durable repo (`pi-extension/`), loaded through the generated per-agent Pi settings | Install it into the user's `~/.pi/agent/extensions/` from the skills repo | It shares its block-list with the steward's `guard/commands.ts` (one repo, no cross-repo drift test) and Android workers need it without the skills repo. Assumption verified in slice 6: Pi accepts a local package path in the generated `settings.json`; fallback: the derived pidir makes `extensions/` a real directory of symlinks plus the guard. |
+| Approval nonce to `desktop`/`command` only | Nonce in the console inbox or GitHub | Both are readable by agents (shared OS user, shared token). |
+| WebAuthn verified by the daemon for console approvals | TOTP, console password, header-based identity | No secret on any host an agent can read; TOTP/password secrets and headers can be read or forged on a shared OS user. |
+| Daemon tokens are daemon-level, hashed, scoped, per client | Reuse profile secrets / one shared token | `profile-secrets` exports profile secrets into agent environments; scopes keep approve/resume out of tokens. |
+| Bind the Tailscale interface address + `whois` peer check | Loopback + `tailscale serve` per daemon | Real peer address and tags, no header trust, no proxy per port. (Serve is still used for the browser-facing console.) |
+| Console, hub, client library and API written from scratch; dpi-* are inspiration only (Q15, U3) | Vendor or adapt `dpi-playground`/`dpi-sdk` | See architecture D13: fit to our domain and trust model, dependency trimming, XSS surface, upstream churn, no attribution bookkeeping. |
+| `RepoPolicySource` seam with built-in `none` and `fixture`; mechanism chosen per repo later (Q18) | Fix an in-repo file and trust-pin format now | The user wants the policy mechanism to vary per repo; invariants P1-P6 hold for any mechanism and the gate is tested without picking one. |
+| Definition may only tighten the resolved policy | Definition overrides | A local file must never be able to enable what the policy source does not allow. |
+| Chat tools fixed in code; `request_*` only enqueue | Free-form tool use in chat | Chat cannot bypass gate, budgets, kill switch or eligibility. |
+| Chat guardrails (screening, audit, tool set, 1 MiB ceiling; rate limits opt-in) in the daemon API | Client-side checks; hard default rate limits (removed, Q20) | Every client (CLI, TUI, console in any browser) gets the same guardrails and audit; there is no phone-specific gating. |
+| Linux/systemd is the first fleet; Android/Termux added later behind capability-flagged interfaces | Also launchd now; hardcode systemd | Q7; keeps installer and tests small while not precluding Android (U4). macOS deferred. |
+| Engine in its own public repo; the skills repo keeps a thin integration (pin manifest, installer step, thin skill, catalog and table rows) | Engine under `harness/durable/` in the skills repo | An application with its own dependencies, tests and release cadence is not harness config; Android installs without cloning every skill; public-repo hygiene is enforced on one purpose-built repo; the skills repo's AGENTS.md rules (config copied into runtime dirs) fit only the thin part. |
+| `termux/bootstrap.sh` lives in the durable repo, clones and pins durable directly; skills optional | Depend on the skills repo or extend `install.sh` for Termux | `install.sh` assumes standard Linux paths, systemd and `environment.d`; the skills repo is needed on Android only for worker dispatch, so it is an optional separately pinned input. |
+| `git-process` as the Android worker path; light workers only | Orca on Android; no workers | No Orca on Android; light workers on small repos keep value without heavy builds. |
+| Android `desktop` backend is not nonce-safe | Send the nonce to `termux-notification` | Other Termux processes can read notifications (`termux-notification-list`). |
+| Console front end without a build step (third-party Preact + htm, pinned, checksummed) | Vue + Vite as upstream | No toolchain in the repo or on installs; small, auditable; inert text rendering needs no markdown/sanitizer dependencies. |
+| One process per agent, one port per agent daemon (declared or allocated, recorded) | A per-machine gateway process | No new component whose failure hides every agent on the machine; N ports is acceptable for a handful of agents. Revisit if agent counts grow. |
+
+## 7. Uncertainties (assumptions to verify in slices)
+
+- pi-durable 1.4.0 peer/dep range vs installed Pi (slice 1).
+- Anthropic-OAuth shaping hosting: deep import of `oauth-transport.ts`, delegate from `@earendil-works/pi-ai/compat`, injection point in pi-durable/pi-ai (`Models` provider override, `onPayload`, `beforeRequest`), peer floor pi-ai >= 0.86 (slice 1).
+- `AuthStorage` lock + atomic write through a symlinked `auth-profiles/` (slice 2).
+- Fine-grained PAT behaviour with `gh` for the calls used (`gh pr view --json`, status creation) (slice 2/7).
+- `pi --continue` with per-agent `PI_CODING_AGENT_DIR` (slice 6).
+- Orca CLI flags used match the installed Orca version (slice 6).
+- Tailscale: `whois` from a daemon via the local API; whether Serve passes user identity for tagged sources; HTTPS certificate issuance for the console host; `tailscale serve` proxy to loopback/unix socket (slice 1, 11, 12).
+- GitHub notifications for self-authored activity are suppressed; confirm with a test mention to the same account and to a second account (slice 1).
+- WebAuthn: passkey registration and assertion from an iPhone/Android browser against a Tailscale-issued HTTPS origin; verifier library size/license; RP ID = console host FQDN (slice 1 spike, slice 12a).
+- PWA: installable on iOS 16.4+ via Add to Home Screen; Web Push permission flow; VAPID keys; outbound internet from the console host (slice 12b).
+- Whether the fine-grained token can read rulesets/branch rules for the fingerprint, and `gh api .../contents?ref=<commit>` works as assumed (slice 1, 9).
+- Orca CLI terminal-input/read commands for worker steer/attach (slice 6); if absent, workers are view + interrupt only.
+- Android/Termux (slice 1 checklist, slice 14): Node version and `node:sqlite` in Termux; pi-durable install and storage under `--ignore-scripts`; `os.networkInterfaces()` behaviour; whether the Tailscale app's address is bindable from Termux; whether a `tailscale`/`tailscaled` userspace option exists in Termux packages; `termux-services` + Termux:Boot + wake-lock + Doze/phantom-process behaviour; `termux-notification-list` readability; `gh` in Termux.
+- Credential-screening patterns: false-positive rate on normal chat (slice 3/4).
+
+## 8. Review status
+
+Revised after user comments (rounds 1-4). No reviewer opted in.

@@ -1,0 +1,148 @@
+# Vertical slices
+
+Inputs: [1-product-review](./1-product-review.md), [2-system-architecture](./2-system-architecture.md), [3-program-design](./3-program-design.md).
+Revision 1: notifications slice, shadow-mode auto-merge, dispatcher adapter. Revision 2: ntfy removed; console planned; remote-ready API. **Revision 6 (this version):** the engine lives in its own public repo, `nanstey/durable`, and this plan lives there at `docs/plan/`. Every slice below is a **durable-repo** slice except **2b** and **13**, which are **skills-repo** slices (marked). The slice 1 spike lives in the durable repo (`spike/` for throwaway scripts, `docs/evidence/` for results) and needs no change to the skills repo. **Revision 5:** slice 9 becomes gate + shadow mode + the `RepoPolicySource` seam with built-in `none` and `fixture` sources (the real policy source is chosen per repo later, Q18); the phone is just another browser client (no phone-specific capabilities; passkey step-up applies to any browser); chat has no default rate limits (audit, screening, fixed tools, budgets and the kill switch remain; 1 MiB body ceiling; rate limiting opt-in). **Revision 4:** dpi-* are inspiration only (no code reuse; slice 1 no longer runs upstream code); a new **slice 14** adds an Android/Termux daemon as an additional target, with platform capability flags and interfaces threaded through slices 2, 3, 4, 6, 10 and 11 so the main line never precludes it. Revision 3: the repo-committed, human-trusted merge policy lands in slice 9 (hard paths in 7); interactive chat lands in the daemon (3, 4), the worker dispatcher capabilities (6) and the console (8, 11); the phone path is interactive from slice 11; old slice 12 splits into **12a** (passkey-guarded approvals, resume, enroll, policy trust) and **12b** (PWA and Web Push, a non-blocking follow-up); macOS/launchd is out of scope (Linux only).
+
+Rules for every slice: one PR (or one stacked PR) in the repo the slice belongs to; offline tests pass in that repo's CI. **Durable-repo slices:** docs updated in the same PR; the public-repo rules hold (no secrets, machine-local state, absolute or personal paths, real host or tailnet names, emails or private repo names), enforced by the hygiene scan from slice 2. **Skills-repo slices (2b, 13):** one change per commit, `README.md` catalog and `harness/<x>/README.md` tables updated in the same PR (AGENTS.md). the slice records its verification result in the README `## Slices` row before the next slice starts. The user can steer at each checkpoint.
+
+## Sequence and dependencies
+
+```
+1 spike ─▶ 2 profiles/doctor (+repo scaffold, CI, hygiene scan) ─▶ 2b skills-repo integration (pin, installer step, thin skill) ─▶ 3 steward + API v1 (+chat guardrails) ─▶ 4 CLI/TUI + notifier + chat conversations ─▶ 5 scout ─▶ 6 dispatcher/claims/draft PR ─▶ 7 review/gate/approval(CLI)
+                                                  │                                                                                                          │
+                                                  └───────────────────────▶ 8 console, one machine, interactive chat, PWA-ready (needs 3,4; richer with 5-7) ◀┘
+7 ─▶ 9 gate + shadow mode + RepoPolicySource seam (none, fixture); first real policy source chosen per repo later (adds shadow tab to console 8)
+6 ─▶ 10 second machine + leases
+8 + (10 or two local daemons) ─▶ 11 console across machines over Tailscale (any browser, phone included; interactive chat) ─▶ 12a passkey approvals, resume, enroll, policy verification (any browser; needs 7, 9 for policy verification)
+11 ─▶ 12b PWA + Web Push (follow-up; blocks nothing)
+6 (real use of 6-9) ─▶ 13 retire interactive subagents (skills repo)
+3 + 6 + 10 + 11 (12a recommended) ─▶ 14 Android daemon (Termux; durable repo only, no skills-repo dependency except optional worker skills): steward, scout, chat, light git-process workers; conservative, sometimes-offline
+```
+Linear execution order: 1, 2, 2b, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12a, 13, 14, then 12b whenever convenient (14 may start any time after 11; it is recommended after 12a because the CLI nonce is unavailable on Android). Slices 8 and 9 may swap; 10 may precede 8. Slice 11 is testable with **two daemons on one machine** (different ports, `DURABLE_HOME`s, profiles) and a fake tailnet listener, so it does not wait for slice 10's second machine. 12b depends only on 11 and blocks no other slice.
+
+## Slice 1 — Feasibility spike (justified bootstrap, no shipped code)
+
+- **Why bootstrap:** claims that decide the design cannot be known by reading: pi-durable 1.4.0 compatibility, generic Pi-OAuth reuse, Anthropic-OAuth hosting, **Android/Termux facts (a checklist the user can run on a real device later)**, **Tailscale facts**, **passkeys and PWA/Web Push on a phone against a Tailscale HTTPS origin**, **GitHub self-notification**, **whether the fine-grained token can read rulesets/branch rules and repo files at a commit**, and **Orca terminal input/read commands** (worker steer/attach).
+- **Observable outcome:** `docs/evidence/spike.md` (and `docs/evidence/android-checklist.md`, a copy-paste Termux checklist whose results can arrive later) with executed results, a ranked Anthropic option list, go/no-go per claim, the passkey ladder decision, the worker-steer capability matrix and the rules-readability result.
+- **Repo and layers:** durable repo. Throwaway scripts in `spike/` (excluded from the npm package), results in `docs/evidence/`. No skills-repo change.
+- **Checkpoint:** user reads results; picks the Anthropic option; accepts or drops console approvals based on the passkey test on the operator's browsers and devices.
+
+## Slice 2 — Durable repo scaffold, profiles, definitions, machine file and identity `doctor` (no daemon)
+
+- **Repo:** durable. **Observable outcome:** a fresh clone of `nanstey/durable` installs with `pnpm install --frozen-lockfile`, CI is green (tests, `tsc --noEmit`, **hygiene scan** over the whole repo including `docs/plan/`), and `durable profile ...` and `durable doctor <id>` print pass/fail tables; a missing profile fails closed with fix steps; a wrong `GH_TOKEN` fails.
+- **Layers:** schemas (definition incl. `merge` ceiling + `tighten`, `chat` limits, `workers`; machine incl. `name`, ports, `platform` capability flags (`os`, `service`, `tailscaleCli`, `allowAutoMerge`), `network.peerCheck`/`tailnetAddress`, channels `console|desktop|command|github`; capability detection and doctor rules in `platform/`; `network`/`approval` accepted but `not-yet-supported`), loader, profile resolver, manifest CLI, env builder, token checks, derived Pi dir, model-auth seam, doctor (including the required-skills check), repo scaffold (`package.json`, lockfile with exact pi-durable/pi-ai/pi-coding-agent pins, `tsconfig.json`, `AGENTS.md`, CI workflow, `scripts/hygiene-scan.sh` + allowlist), examples, `docs/` (install, operator, skills-contract).
+- **Verification:** unit tests; hygiene-scan positive/negative fixtures; manual doctor on two real profiles.
+- **Checkpoint:** user runs `doctor` on real profiles.
+
+## Slice 2b — Skills-repo integration (skills repo; thin)
+
+- **Repo:** the skills repo. **Observable outcome:** after one `install.sh` run on a Linux machine, the pinned `nanstey/durable` commit is cloned under `$DURABLE_HOME/vendor/github.com/nanstey/durable`, dependencies are installed, and `durable doctor --help` works from PATH; a second run reports `ok`; bumping the pin with `harness/durable/bump-pin.sh` and re-running reports `updated`. The thin `durable` skill appears in the README catalog and the contract row exists in `harness/pi/README.md`.
+- **Layers:** `harness/durable/{vendor/nanstey-durable.txt,README.md,bump-pin.sh}`, `install/modules/durable.sh`, `install/main.sh` wiring (a `vendor-git` pair mirroring `harness/pi/vendor`), `install/tests/install.test.sh` cases, `skills/agent/durable/SKILL.md`, README catalog row, one `harness/pi/README.md` row. Spec `02b-skills-repo-integration.md` (a separate spec because it targets a different repo and PR cadence; it depends on slice 2 having produced a first durable commit to pin, so it is not "slice 0").
+- **Verification:** offline installer tests with stub `git`/`pnpm`; `bump-pin.sh` against a local bare repo; catalog/table rows match.
+- **Checkpoint:** user runs `install.sh` on a machine and confirms `durable` is on PATH and the pin flow is acceptable. Later pin bumps are routine PRs, not slices.
+
+## Slice 3 — Steward process and remote-ready daemon API v1 (read-only toward GitHub)
+
+- **Observable outcome:** `durable enable <agent>` starts `durable-agent@<agent>` under systemd --user; `kill -9` -> restart; `durable token create --client x --scopes read,chat,pause` returns a token once; with it `curl` reads `/v1/device`, SSE (`hello` -> snapshot -> deltas), transcript, inbox; a `read` token cannot post a message (403); no token can approve/resume/enroll/verify-policy; `POST .../messages` is **credential-screened, audited and capped only by a 1 MiB sanity ceiling** (no default rate limits; opt-in `chat.rateLimit`; chat guardrails D16); pause stops ticking within one check.
+- **Layers:** steward process, pi-durable adapter (storage by capability: sqlite or jsonl), **`ServiceManager` interface with the `systemd-user` implementation**, API v1 (versioned, scoped hashed tokens `read|chat|pause`, SSE, idempotent `requestId`, device `uid`, error codes incl. 429), chat guardrail module `api/chat.ts`, inbox, audit, kill switch, units, minimal CLI.
+- **Verification:** faux-model tests; `SIGKILL` recovery; scope matrix; screening/size-ceiling/audit tests (and opt-in rate-limit tests); live drill.
+- **Checkpoint:** user inspects the API with `curl` and judges it fit for remote clients.
+
+## Slice 4 — Operator CLI/TUI client, chat conversations and notifier core
+
+- **Observable outcome:** `durable attach <agent>` shows the live transcript and lets the operator send follow-ups/steers and abort; `durable chat new|list|resume` starts and resumes **chat** and **scout Q&A** conversations (kinds in `startableKinds`); `durable status|queue|inbox|audit` work; the notifier delivers test events through `desktop` (Linux), `command`, `github` (different login) and the inbox, with de-dup, quiet hours (hold, never drop), capped reminders and redaction; `agent-down` fires via `OnFailure`.
+- **Layers:** `client/`, `tui/`, CLI, `POST /v1/conversations` + `GET /v1/conversations`, `steward/conversations.ts` with the fixed chat tool set (incl. enqueue-only `request_merge`/`request_work`), `notify/*` with a platform-aware `desktop` backend interface (`notify-send`, nonce-safe) and the `nonceSafe` rule, channel definitions, docs.
+- **Verification:** client tests vs a faux daemon; `tmux` TUI smoke; tool-set test (no resume/approve/merge/edit/shell tool); `request_*` go through eligibility/gate stubs; notifier tests; redaction grep.
+- **Checkpoint:** user chats with a live steward from the terminal, starts a scout question, receives a desktop and a command notification; and judges the TUI's ergonomics.
+
+## Slice 5 — Read-only scout: sources, eligibility, queue
+
+- **Observable outcome:** `durable queue <agent>` (and `GET /v1/queue`, SSE `queue` frames) lists ranked candidates with code-owned reasons. Zero GitHub writes.
+- **Layers:** `sources/*`, eligibility, optional Jev judgment (tighten-only), queue document, rate-limit handling.
+- **Verification:** fixtures; untrusted-author injection test; live read-only run on a low-risk pilot repo (the skills repo is a candidate); API budget measured.
+- **Checkpoint:** user reviews the queue and tunes thresholds.
+
+## Slice 6 — WorkerDispatcher adapters, claims and worker dispatch -> draft PR
+
+- **Observable outcome:** one labelled low-risk issue becomes a draft PR on `durable/<id>/<item>` with agent markers under the profile's identity, via `orca` (visible in Orca) and via `git-process`. Caps, quiet hours and the kill switch are enforced; `kill -9` mid-wait starts no duplicate worker. Dispatcher **capabilities** (`attach`, `steer`, `transcript`) are reported and tested; workers' live transcripts are viewable through the API for both adapters; `POST /v1/workers/<id>/steer` works only where `steer: true`; interrupt works everywhere.
+- **Layers:** `dispatch/*` + contract suite (incl. capabilities, steer, transcript tail; the `git-process` adapter works with no Orca installed and is the default where Orca is absent), `claims`, scout brief, templates, `durable-worker-guard.ts`, budgets, re-dispatch, `GET /v1/workers`, `workers` SSE frames.
+- **Size note:** large; may split into 6a (dispatcher + contract suite) and 6b (claims + brief + draft PR).
+- **Verification:** contract suite across adapters; replay tests; guard tests; budget tests; live pilot; identity on every write; Orca terminal-input check against the installed CLI.
+- **Checkpoint:** user reviews the draft PR, audit trail, attach/steer experience and machine load.
+
+## Slice 7 — Cross-family review, gate (human approval) and approval task (CLI)
+
+- **Observable outcome:** the PR gets an opposite-family verdict recorded in the steward store (mirror to GitHub for display), a gate report, an `approval-needed` notification, and a durable approval wait resolving by human merge, an approving review from another account, or `durable approve --code` (nonce only to `desktop`/`command`). Review-required repos end in `wait-human`. **PRs touching hard paths (CODEOWNERS variants, `.github/**`, and later any policy source's protected locations) are always `wait-human`.** New commits void verdict and nonce. The `verify-policy` and `resume` actions exist in the approval class (CLI nonce) for use in slice 9.
+- **Layers:** `gate/*` (decide, facts, hard paths, tighten-only effective policy from the definition), reviewer job, `approval/nonce.ts`, challenge storage, notifier integration, `GET /v1/gate/<item>`, CLI.
+- **Verification:** truth-table and property tests; forged-signal test; `REVIEW_REQUIRED` fixtures; hard-path test; nonce never in inbox/logs/GitHub (grep); restart during wait; live PR.
+- **Checkpoint:** user judges the report, notification flow and shared-identity approval behaviour.
+
+## Slice 8 — Web console, single machine (localhost), interactive chat, PWA-ready
+
+- **Observable outcome:** `durable console enable` starts the console on loopback; the browser shows this machine's agents (status, budget, kill-switch state), per-agent queue, claims, workers (with adapter capabilities), PRs and gate state, **interactive chat**: live transcript, follow-up, steer, abort a turn, start a new chat or scout conversation, resume an existing one, steer a worker only where the adapter allows; pause; audit; inbox read/ack. Responsive layout. No approve/agent-resume/enroll/policy-verification yet. No shell, file or passthrough route. The release is **PWA-ready**: same-origin relative URLs, CSP already allowing `worker-src`/`manifest-src`, `/api/push/*` reserved (501), VAPID and subscription-store paths/schemas and `push.enabled: false` defined.
+- **Layers:** `console/*` (our own hub, written from scratch; ideas only from `dpi-playground`), `web/` no-build front end (third-party Preact + htm, pinned and checksummed), strict CSP, inert rendering, chat UI that only sends text and shows capability-gated controls, installer + unit.
+- **Verification:** guard/proxy/mux tests; token-never-in-browser; route allowlist; DOM inertness tests; PWA-readiness tests; chat UI tests incl. credential-screen error display (and 429 display when the opt-in rate limit is configured); browser smoke with `playwright-cli`.
+- **Checkpoint:** user uses it for a day on one machine and chats with an agent; confirms the build-minimal decision stands.
+
+## Slice 9 — Gate completion, shadow mode and the RepoPolicySource seam (no policy mechanism chosen)
+
+- **Observable outcome:** the gate's auto path, the merge executor and shadow mode exist and are tested against the built-in `fixture` policy source; every real repo uses the `none` source (the default), so auto-merge is off. Shadow mode runs on real PRs: with `none` it reports `would-not-merge: policy-source-none` **plus a readiness list** of every other gate fact; `durable gate report` and the console's shadow tab show it. The mechanism-independent invariants P1-P6 are enforced by code and tests: policy never read from a PR head, fork, worktree or worker-writable filesystem; usable only when `verified` on evidence the agent cannot forge; changes to the policy holder, CODEOWNERS or rules are hard paths needing human approval; missing/unparseable/unverified means off; the definition only tightens; never `--admin`. The `verify-policy` approval action exists (CLI nonce) with source-supplied display data.
+- **Layers:** `gate/{policySource,sources/none,sources/fixture,hardPaths,tighten,merge,shadow}`, neutral `AutoMergePolicy` model, `scope.repos[].policySource` in the definition (default `none`; unknown kinds are a doctor error), `durable policy show|verify`, risk, path rules, methods from `gh repo view`, cooling-off, caps, G5/P1-P6 invariants and lint, console tab.
+- **Not in this slice:** any real policy source (in-repo file, GitHub rules only, definition-only, out-of-repo store) and any policy file format or trust-pin layout. They are options only; the first one is chosen per repo, with its own small spec, when the first repo needs auto-merge (Q18, deferred by the user).
+- **Verification:** seam contract suite (every state, fingerprint change to `unverified`, sources cannot take path/ref from PR/worktree input); tighten-only property test; hard-path tests; negative matrix on recorded fixtures; no `--admin` in source; shadow readiness output reviewed by the operator on real PRs.
+- **Checkpoint:** user reviews shadow readiness reports on real PRs; when the first repo needs auto-merge, a policy source is chosen for it (separate decision and spec); until then auto-merge stays off everywhere.
+
+## Slice 10 — Second machine and claim leases (Linux)
+
+- **Observable outcome:** a second Linux machine (its own profile contents) runs a steward for an overlapping repo; one worker per item; the loser releases; lease expiry takeover works. Install is one `install.sh` run plus profile steps, `machine.yaml` and a definition.
+- **Layers:** lease renewal/expiry (including an agent that vanishes mid-claim, the Android case), "add a machine" docs (systemd only).
+- **Verification:** two-process claim race with a fake GitHub; live race on a low-risk repo; lease expiry; repo-grep test for machine-specific data.
+- **Checkpoint:** user reviews multi-machine operation and rate-limit friction.
+
+## Slice 11 — Console across machines over Tailscale (any browser, phone included; interactive)
+
+- **Observable outcome:** the console on the chosen console host shows machine -> agent -> conversation/worker across several daemons over the tailnet with `online | offline | unauthorized | mismatch | incompatible`; the operator creates the ACL tags `tag:durable-daemon` and `tag:durable-console` (doctor prints the snippet); the console is reachable from **any browser, a phone included**, over Tailscale Serve HTTPS with the identity allowlist, with the same capabilities as localhost; the operator can watch live transcripts, send follow-ups/steers, abort, start/resume chat and scout conversations, pause an agent and interrupt a worker; killing the console leaves every agent running.
+- **Layers:** daemon `network.bind: tailnet` listener + `whois` allowlist (capability-detected: `peerCheck: required | optional | off`; explicit `tailnetAddress`), token lifecycle (`chat` scope for any console client), console registry, multi-device monitor/mux, `tailscale serve` helper, ACL guidance, chat guardrails (screening, size ceiling, audit; opt-in rate limit) verified end to end through the proxy, identical capabilities for every browser client.
+- **Test rig (required):** two daemons on one machine + fake tailnet peer + stub `whois`.
+- **Verification:** registry/status-machine tests, token rotation, `mismatch`, ACL-denied peer refused, CSRF/DNS-rebinding tests through Serve, forged identity-header tests, a browser-client checklist run on a laptop and on a phone with identical results (view, chat, steer, abort, pause, start/resume chat and scout); live over the real tailnet.
+- **Checkpoint:** user chats with an agent from their phone and reviews token handling on the console host.
+
+## Slice 12a — Passkey-guarded approvals, agent resume, enrollment and policy verification (any browser)
+
+- **Observable outcome:** the operator enrolls a passkey (first key by TTY code), sees the approvals inbox in any browser (a phone passkey is the natural step-up device; desktop browsers may use it via the cross-device flow, to be checked in the spike), and with a passkey assertion verified by the daemon can **approve** a human-approval PR (merge attempt within GitHub rules), **resume an agent after a kill/pause**, **enroll** another key, and **verify a repo policy** (the `verify-policy` action; display data supplied by the policy source; meaningful once a real source exists, exercised with the `fixture` source until then). A bearer token cannot do any of these. A stale head SHA or blob fails.
+- **Layers:** `approval/{webauthn,keys,challenge}`, daemon approval routes (replacing the 501 stubs), approvals inbox and confirm UI, policy-change display (source-supplied), enrollment flow, audit + `desktop`/`command` notifications, docs with the residual-risk statement.
+- **Fallback ladder (from slice 1):** if passkeys are not viable on the operator's browsers and devices, skip 12a for every browser; interactive chat and pause are unaffected; approvals, resume and policy verification use GitHub merge and the CLI nonce on a machine terminal.
+- **Verification:** assertion fixtures (valid; wrong origin/rpId; replay; expiry; stale SHA/blob; revoked key); no-token-approval test; enrollment rules; XSS inertness with hostile PR/change text; live test from a phone and from a laptop browser.
+- **Checkpoint:** user decides whether to keep console approvals after seeing audit and notifications.
+
+## Slice 12b — PWA and Web Push (follow-up; blocks nothing)
+
+- **Observable outcome:** the console is an installable web app (manifest, service worker caching the static shell only), and best-effort Web Push delivers `approval-needed`, `escalation`, `budget-stop` and device-offline events with minimal payloads to subscribed phones. Nothing else depends on it.
+- **Layers:** manifest/icons, `sw.js`, `push.ts` (VAPID via `durable console push-keys init`, subscription store, lazy `web-push`), enable `/api/push/*`, `push.enabled`.
+- **Verification:** additive-only check (no changes to API v1 or the daemons; slice 8 PWA-readiness tests keep passing), stub push endpoint tests, payload redaction, live iOS/Android install and push if supported.
+- **Checkpoint:** user decides whether the push experience is worth keeping (the inbox badge and GitHub mobile remain backstops).
+
+## Slice 13 — Retire `pi-interactive-subagents` and trim (skills repo)
+
+- **Observable outcome:** `settings.json` no longer lists `@maplezzk/pi-interactive-subagents`; its config, patches, fixtures and tests are removed; `install.sh` runs clean on a machine that still has the package; documented workflows have replacements.
+- **Layers:** inventory; rewrites (handoff, steward workers, headless `pi -p`; Claude Code `agents/` unchanged); settings, `APPEND_SYSTEM.md`, README tables, installer rows, tests.
+- **Verification:** `package-patches.test.sh` and `install.test.sh` pass; no stale references; sandbox install twice (`ok`).
+- **Checkpoint:** user confirms nothing they use is lost. Follows real use of 6-9 and the console.
+
+## Slice 14 — Android daemon in Termux (durable repo; additional platform target)
+
+- **Observable outcome:** on a real Android phone, `termux/bootstrap.sh` (idempotent) installs Node, git, gh, Pi and the durable app in Termux; `durable doctor` shows `os: android`, `service: termux-runit`, `dispatcher: git-process`, `tailscaleCli: false`, `peerCheck: optional`; an agent runs under `termux-services` with a wake lock, survives a kill (pi-durable resume) and a Termux restart via Termux:Boot; the console (slice 11) lists it, shows `offline` when the phone sleeps or Termux is killed, and `online` again after; the agent runs steward + scout + chat and one light `git-process` worker producing a draft PR on a small repo; a lease taken by the phone expires and another machine takes over when the phone vanishes mid-claim; auto-merge is refused by doctor.
+- **Layers:** `platform/service/termuxRunit.ts`, `platform/notifier/termuxNotification.ts` (non-nonce-safe), `termux/bootstrap.sh` + runit templates, capability handling in doctor and the console (no Orca checks, peer check `unavailable (optional)`), tailnet exposure per the spike's ranked options, Android defaults and conservative budgets, `docs` for the manual steps (F-Droid/GitHub build, Termux:Boot, battery optimization, wake lock, Termux private `$HOME`). The bootstrap lives in the durable repo, clones and pins durable directly and has no skills-repo dependency; worker skills are an optional, separately pinned input (without them `doctor` keeps worker dispatch disabled; steward, scout and chat need none).
+- **Verification:** offline tests with stubbed `pkg`, `npm`, `sv`, `termux-*` and a temp `$PREFIX` (bootstrap twice, PL1-PL6 invariants); `ServiceManager` contract suite; live on a device using the slice 1 Android checklist results: kill and restart recovery, an overnight Doze run (tick gaps recorded), battery/thermal notes, a draft PR from a light worker, console online/offline transitions, claim-expiry takeover, token and profile separation.
+- **Checkpoint:** user lives with the phone agent for several days, reviews battery cost and offline behaviour, and decides whether workers on the phone are worth keeping or the phone stays steward + scout + chat.
+
+## Deferred (not specced; design hooks exist)
+
+- **D-1 Peer-to-peer agent messaging:** reserved `peers` key; reuses daemon `whois` + token design. The console does not replace it.
+- **D-2 Durable-conversation workers:** a new `WorkerDispatcher` adapter, read-only roles first.
+- **D-3 macOS/launchd:** out of scope for now (Linux first fleet; Android/Termux is slice 14).
+- Console items left out on purpose: shell, file browsing, config editing, token display, starting workers or reviewers directly, Funnel/public exposure.
+
+## Justified bootstrap
+
+Only slice 1, and it ships no source. Slices 2-14 are vertical: each delivers a runnable CLI, API or console behaviour with tests and docs.
