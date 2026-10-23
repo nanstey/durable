@@ -55,15 +55,18 @@ test("shared table and registered Pi tool_call handler cannot drift; holding and
 				handler = callback;
 			},
 		});
-		assert.equal(blockedWorkerCommandPatterns.length, 5);
+		assert.equal(blockedWorkerCommandPatterns.length, 9);
 		for (const command of [
 			"gh pr merge 1",
-			"git push -f origin branch",
-			"git push origin master",
-			"gh api repos/a/b/pulls/1/merge",
-			"gh repo edit --admin",
-			"git status",
+			"gh repo edit --force",
 			"git push origin durable/a/i",
+			"git merge branch",
+			"git rebase main",
+			"git reset --hard HEAD",
+			"git switch main",
+			"git worktree add ../other",
+			"cd /",
+			"git status",
 		]) {
 			assert.equal(
 				Boolean(handler!({ toolName: "bash", input: { command } })),
