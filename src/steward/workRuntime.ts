@@ -52,6 +52,7 @@ export type WorkRuntimeOptions = {
 	check: () => Promise<void>;
 	now?: () => number;
 	drainMs?: number;
+	recordCost?: (cost: number) => Promise<void>;
 };
 export type WorkStore = {
 	load: () => Promise<WorkState>;
@@ -184,6 +185,16 @@ export class WorkRuntime {
 				await this.store.save(state);
 			},
 		});
+		if (
+			attempt.cost === undefined &&
+			(await kind.status(handle)) !== "running"
+		) {
+			const result = await kind.result(handle);
+			if (typeof result.cost === "number") {
+				attempt.cost = result.cost;
+				await o.recordCost?.(result.cost);
+			}
+		}
 		if (item.prs.length && !item.outcome) {
 			// Review and gate implementations arrive in slice 7. Never cross them on a prompt's authority.
 			item.stage = "review";
@@ -193,8 +204,11 @@ export class WorkRuntime {
 			if ((await kind.status(handle)) !== "running")
 				attempt.endedAt ??= this.now();
 		}
-		if (result === "needs-human") await o.notify("escalation", item.id);
 		await this.store.save(state);
+		if (result === "needs-human")
+			await o
+				.notify("escalation", item.id)
+				.catch(() => audit(o.agent, { event: "notify-failed", item: item.id }));
 	}
 	private async runPhases(
 		state: WorkState,
@@ -409,7 +423,12 @@ export class WorkRuntime {
 		}
 		if (reason !== "soft")
 			await this.options.processes.terminate({ item: item.id });
-		if (reason === "limit") await this.options.notify("budget-stop", item.id);
+		if (reason === "limit")
+			await this.options
+				.notify("budget-stop", item.id)
+				.catch(() =>
+					audit(this.options.agent, { event: "notify-failed", item: item.id }),
+				);
 	}
 	async requestWork(id: string, queue: Queue) {
 		return this.enqueue(async () => {
@@ -496,7 +515,11 @@ export class WorkRuntime {
 				holdEpoch: result.holdEpoch,
 			});
 			if (result.state === "holding")
-				await this.options.notify("escalation", item);
+				await this.options
+					.notify("escalation", item)
+					.catch(() =>
+						audit(this.options.agent, { event: "notify-failed", item }),
+					);
 			return result;
 		});
 	}

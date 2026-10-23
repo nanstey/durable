@@ -85,6 +85,20 @@ Fix: call `notifier.due()` from the steward loop tick (and on `notify`), and add
 - **G4 (spec 06 items 5b, 11).** `WorkAttempt.cost` (`workItems.ts:17`) is never written; `limits.dailyDollars`/`dailyTokens` count only steward model usage (`harness.ts:392-394`), not worker spend. `maxConcurrentWorkers`/`maxWorkersPerDay` default to unlimited when unset.
 - **G5 (spec 06 item 9 acceptance).** Guard tests cover the table only; no test exercises option-interleaved forms (M3), shim-level push/PR rewriting with `--opt=value`, or restart with the non-cgroup backend (H2).
 
+## Remediation status
+
+| Finding | Status | Regression coverage |
+| --- | --- | --- |
+| H2 | Fixed | `test/contract/process-fallback.test.ts` |
+| M4 | Fixed | Work state is persisted before notification; notification errors are audited. |
+| M5 | Fixed | Steward loop invokes `Notifier.due()` through production wiring. |
+| G1 | Fixed | Scout queue evaluation calls `applyJudgment` when `models.judge` is configured. |
+| G2 | Fixed | Queue evaluation supplies claim, block-list, attempt, size and age eligibility inputs. |
+| G3 | Fixed (partial) | Invalid source timestamps are ineligible. Poll backoff remains follow-up work. |
+| G4 | Fixed | Worker result costs are persisted on attempts and added to the steward budget. |
+| L2 | Fixed | Failed worker launches close their attempt before rethrowing. |
+| L3-L8 | Not fixed | Outside this remediation slice. |
+
 ## Suggested order
 
 1. H1 (token in argv), H2 (restart on non-cgroup), H3 (queue-to-prompt and `request_work`).

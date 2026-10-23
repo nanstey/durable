@@ -86,6 +86,8 @@ export const agentSchema = object(
 					labels: strings,
 					exclude: strings,
 					trustedAuthors: strings,
+					blockedAuthors: strings,
+					updatedBefore: { type: "number", minimum: 0 },
 					own: { type: "boolean" },
 					glob: text,
 					statusField: text,

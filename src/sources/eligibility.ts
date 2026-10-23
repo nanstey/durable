@@ -52,13 +52,12 @@ export function eligibility(
 		(options.maxSize ?? Number.POSITIVE_INFINITY)
 	)
 		reasons.push("too-big");
-	const age = now - Date.parse(candidate.updatedAt);
+	const updatedAt = Date.parse(candidate.updatedAt);
+	if (!Number.isFinite(updatedAt)) reasons.push("invalid-updated-at");
+	const age = now - updatedAt;
 	if (options.maxAgeMs !== undefined && age > options.maxAgeMs)
 		reasons.push("too-old");
-	if (
-		options.updatedBefore !== undefined &&
-		Date.parse(candidate.updatedAt) > options.updatedBefore
-	)
+	if (options.updatedBefore !== undefined && updatedAt > options.updatedBefore)
 		reasons.push("not-yet-old-enough");
 	return { eligible: reasons.length === 0, reasons };
 }
