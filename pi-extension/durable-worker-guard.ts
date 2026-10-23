@@ -1,4 +1,3 @@
-// fallow-ignore-file unused-file
 import { blockedWorkerCommand } from "../src/guard/commands.ts";
 
 /** Pi extension entrypoint; registration is intentionally inert outside durable workers. */
@@ -6,6 +5,7 @@ export function shouldBlockDurableWorkerCommand(command: string, env = process.e
 	return env.DURABLE_WORKER === "1" && blockedWorkerCommand(command);
 }
 
+// fallow-ignore-next-line unused-export
 export default function durableWorkerGuard(pi: {
 	on?: (event: string, handler: (event: { command?: string }) => unknown) => void;
 }) {

@@ -192,6 +192,43 @@
                   "kind": "none"
                 }
               },
+              "pipeline": {
+                "type": "object",
+                "properties": {
+                  "stages": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "scout",
+                        "spec",
+                        "build",
+                        "review",
+                        "gate",
+                        "handoff"
+                      ]
+                    },
+                    "uniqueItems": true
+                  },
+                  "gates": {
+                    "type": "object",
+                    "properties": {
+                      "specApproval": {
+                        "type": "boolean"
+                      },
+                      "complexityThreshold": {
+                        "enum": [
+                          "medium",
+                          "large"
+                        ]
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              },
               "base": {
                 "type": "string"
               },
