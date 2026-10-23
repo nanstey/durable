@@ -653,16 +653,17 @@ export class WorkRuntime {
 			login: o.login,
 		};
 		const observed = await readClaim(o.github, target, now, this.leasePolicy());
-		if (
-			observed.state === "lost" ||
-			observed.commentId !== item.claim.commentId
-		) {
+		const expiredWithoutWinner = observed.state === "lost" && !observed.winner;
+		if (!expiredWithoutWinner && observed.state === "lost") {
 			await o.github.deleteComment?.(item.repo, item.claim.commentId, item.id);
 			audit(o.agent, { event: "claim-lost", item: item.id });
 			await this.cancel(state, item, "interrupted");
 			throw Error("claim lease lost");
 		}
-		if (Date.parse(item.claim.lease) - now >= this.leasePolicy().durationMs / 2)
+		if (
+			!expiredWithoutWinner &&
+			Date.parse(item.claim.lease) - now >= this.leasePolicy().durationMs / 2
+		)
 			return;
 		const lease = new Date(now + this.leasePolicy().durationMs).toISOString();
 		const result = await claim(
@@ -675,6 +676,9 @@ export class WorkRuntime {
 			await this.cancel(state, item, "interrupted");
 			throw Error("claim lease lost");
 		}
+		if (expiredWithoutWinner)
+			await o.github.deleteComment?.(item.repo, item.claim.commentId, item.id);
+		item.claim.commentId = result.commentId;
 		item.claim.lease = lease;
 		await this.store.save(state);
 	}
