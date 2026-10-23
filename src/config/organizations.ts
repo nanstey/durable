@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { parse, stringify } from "yaml";
 import { ApprovalNonces } from "../approval/nonce.ts";
@@ -29,6 +36,8 @@ export type EffectiveOrganization = {
 	bundleHash: string;
 	effectivePolicyHash: string;
 	policy: OrganizationDef | undefined;
+	/** Runtime-only: never persisted because it retains the local profile name. */
+	definition: AgentDef;
 };
 
 export function organizationsDir() {
@@ -164,30 +173,59 @@ export function materializeOrganization(
 			bundleHash: "default",
 			effectivePolicyHash: contentHash(stringify(def)),
 			policy: undefined,
+			definition: def,
 		};
+	const bytes = bundle?.bytes ?? readFileSync(organizationPath(name), "utf8");
+	const approved = bundle?.approval ?? releaseFor(name);
+	if (
+		!approved ||
+		approved.organization !== name ||
+		approved.contentHash !== contentHash(bytes)
+	)
+		throw Error("organization policy is not an approved hash-pinned release");
 	const org = bundle ? verifyBundle(bundle) : loadOrganization(name);
 	if (!org.memberAgents.includes(agent))
 		throw Error("agent is not an organization member");
-	const bytes = bundle?.bytes ?? readFileSync(organizationPath(name), "utf8");
-	const effective = effectiveOrganization(def, org);
+	const definition = effectiveOrganization(def, org);
 	const result = {
 		name,
 		bundleHash: contentHash(bytes),
-		effectivePolicyHash: contentHash(stringify(effective)),
+		effectivePolicyHash: contentHash(stringify(definition)),
 		policy: org,
+		definition,
 	};
-	saveJson(join(agentDir(agent), "organization.json"), result);
+	// Store only non-secret materialization metadata. The local profile remains local.
+	const persisted = {
+		name: result.name,
+		bundleHash: result.bundleHash,
+		effectivePolicyHash: result.effectivePolicyHash,
+	};
+	const path = join(agentDir(agent), "organization.json");
+	if (existsSync(path)) chmodSync(path, 0o600);
+	writeFileSync(path, `${JSON.stringify(persisted)}\n`, { mode: 0o400 });
+	chmodSync(path, 0o400);
 	return result;
 }
 export function effectiveOrganization(
 	def: AgentDef,
 	org: OrganizationDef,
 ): AgentDef {
-	const repos = def.scope?.repos ?? [];
 	const allowedRepos = new Set(org.scope?.repos ?? []);
+	const repos = def.scope?.repos ?? [];
 	if (allowedRepos.size && repos.some((repo) => !allowedRepos.has(repo.slug)))
 		throw Error(
 			"agent scope contains a repository outside organization policy",
+		);
+	if (org.scope?.repos && repos.length === 0)
+		throw Error(
+			"organization repository policy requires an explicit agent scope",
+		);
+	if (
+		allowedRepos.size &&
+		(def.sources ?? []).some((source) => !allowedRepos.has(source.repo))
+	)
+		throw Error(
+			"agent source contains a repository outside organization policy",
 		);
 	for (const connector of def.connectors ?? []) {
 		const ceiling = org.connectors?.find(
@@ -214,7 +252,24 @@ export function effectiveOrganization(
 		if (ceiling !== undefined && limit > ceiling)
 			throw Error(`limit ${key} exceeds organization ceiling`);
 	}
-	return def;
+	if (
+		org.schedule?.quietHours &&
+		def.schedule?.quietHours &&
+		org.schedule.quietHours !== def.schedule.quietHours
+	)
+		throw Error("agent quiet hours cannot replace organization quiet hours");
+	const limits = { ...org.limits, ...def.limits };
+	const schedule = { ...org.schedule, ...def.schedule };
+	return {
+		...def,
+		limits: Object.keys(limits).length ? limits : undefined,
+		schedule: Object.keys(schedule).length
+			? {
+					...def.schedule,
+					quietHours: org.schedule?.quietHours ?? def.schedule?.quietHours,
+				}
+			: undefined,
+	};
 }
 function organizationDiff(
 	previous: OrganizationRelease | undefined,

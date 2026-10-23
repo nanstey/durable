@@ -16,8 +16,10 @@ import { inboxEvent } from "../../src/steward/inbox.ts";
 import {
 	disabled,
 	pauseFile,
+	pauseOrganization,
 	quietHours,
 	resumeLocal,
+	resumeOrganization,
 } from "../../src/steward/killswitch.ts";
 import { exhausted, rollover } from "../../src/steward/limits.ts";
 import { tick } from "../../src/steward/loop.ts";
@@ -154,6 +156,13 @@ for (const [clock, expected] of [
 test("quiet parser rejects invalid config", () => {
 	for (const value of ["25:00-06:00", "22:90-23:00", "night"])
 		assert.throws(() => quietHours(value));
+});
+test("organization pause fences only its members", () => {
+	pauseOrganization("work");
+	assert.ok(disabled("member", undefined, Date.now(), {}, "work"));
+	assert.equal(disabled("other", undefined, Date.now(), {}, "other"), false);
+	resumeOrganization("work");
+	assert.equal(disabled("member", undefined, Date.now(), {}, "work"), false);
 });
 test("kill switches are independent and local resume requires TTY", () => {
 	assert.equal(disabled("kill"), false);

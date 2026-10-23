@@ -6,6 +6,7 @@ import { startApi } from "../api/server.ts";
 import { localToken } from "../api/tokens.ts";
 import { ApprovalNonces } from "../approval/nonce.ts";
 import { loadAgent, loadMachine } from "../config/load.ts";
+import { materializeOrganization } from "../config/organizations.ts";
 import { loadManifest } from "../config/manifest.ts";
 import type { AgentDef, MachineCfg } from "../config/schema.ts";
 import { doctor, type Report } from "../identity/doctor.ts";
@@ -96,6 +97,7 @@ async function preflight(
 	machine: MachineCfg,
 	caps: Capabilities,
 	processes: ProcessManager,
+	organization?: { name: string; bundleHash: string },
 ) {
 	const profile = resolveProfile(definition.profile);
 	let env: NodeJS.ProcessEnv;
@@ -133,6 +135,8 @@ async function preflight(
 		agent,
 		definition.profile,
 		loadManifest(profile.manifestFile).github.login,
+		organization?.name,
+		organization?.bundleHash,
 	);
 	return doctor(agent, definition, machine, {
 		capabilities: caps,
@@ -154,10 +158,18 @@ export async function run(
 	agent: string,
 	dependencies: RuntimeDependencies = {},
 ) {
-	const machine = loadMachine(),
-		definition = loadAgent(agent);
+	const machine = loadMachine();
+	const configuredDefinition = loadAgent(agent);
+	const organization = materializeOrganization(agent, configuredDefinition);
+	const definition = organization.definition;
 	const port = assignedPort(agent, machine);
-	setAuditIdentity(agent, definition.profile);
+	setAuditIdentity(
+		agent,
+		definition.profile,
+		undefined,
+		organization.name,
+		organization.bundleHash,
+	);
 	const unlock = await acquireAgentLock(agent);
 	let close: (() => Promise<void>) | undefined;
 	try {
@@ -191,6 +203,7 @@ export async function run(
 				machine,
 				caps,
 				processes,
+				organization,
 			),
 		);
 		const { dispatcher, workers, notifier, work } = setupWorkers({
@@ -208,6 +221,7 @@ export async function run(
 						machine,
 						caps,
 						processes,
+						organization,
 					),
 				),
 		});
@@ -231,6 +245,10 @@ export async function run(
 			agent,
 			machine: machine.name,
 			profile: definition.profile,
+			organization: {
+				id: organization.name,
+				bundleHash: organization.bundleHash,
+			},
 			port,
 			definition,
 			harness,

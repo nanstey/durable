@@ -33,13 +33,23 @@ export type AuditEvent = {
 	event: string;
 	[key: string]: unknown;
 };
-const identities = new Map<string, { profile: string; login?: string }>();
+const identities = new Map<
+	string,
+	{
+		profile: string;
+		login?: string;
+		organization?: string;
+		bundleHash?: string;
+	}
+>();
 export function setAuditIdentity(
 	agent: string,
 	profile: string,
 	login?: string,
+	organization?: string,
+	bundleHash?: string,
 ) {
-	identities.set(agent, { profile, login });
+	identities.set(agent, { profile, login, organization, bundleHash });
 }
 export function audit(
 	agent: string,
@@ -50,7 +60,7 @@ export function audit(
 		// A single O_APPEND write cannot interleave with another writer's line.
 		appendFileSync(
 			fd,
-			`${JSON.stringify(redact({ ts: Date.now(), at: Date.now(), agent, profile: identities.get(agent)?.profile ?? null, login: identities.get(agent)?.login ?? null, actor: "code", action: event.event, target: null, decision: null, reasons: [], sha: null, ...event }))}\n`,
+			`${JSON.stringify(redact({ ts: Date.now(), at: Date.now(), agent, profile: identities.get(agent)?.profile ?? null, login: identities.get(agent)?.login ?? null, organization: identities.get(agent)?.organization ?? "default", organizationBundle: identities.get(agent)?.bundleHash ?? "default", actor: "code", action: event.event, target: null, decision: null, reasons: [], sha: null, ...event }))}\n`,
 		);
 		fsyncSync(fd);
 	} finally {
