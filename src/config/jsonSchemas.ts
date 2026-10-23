@@ -45,7 +45,9 @@ const merge = {
 const role = object({ kind });
 const roles = { type: "object", additionalProperties: role };
 const policySource = {
-	...object({ kind: { enum: ["none", "fixture"], default: "none" } }, ["kind"]),
+	...object({ kind: { type: "string", minLength: 1, default: "none" } }, [
+		"kind",
+	]),
 	default: { kind: "none" },
 };
 const connectorTool = object(

@@ -15,6 +15,9 @@ export type GateFacts = {
 	dailyCapAvailable: boolean | null;
 	coolingOffElapsed: boolean | null;
 	killSwitchOff: boolean | null;
+	baseBranch?: string | null;
+	changedLines?: number | null;
+	fileCount?: number | null;
 };
 export type PrFactInput = {
 	repo: string;
@@ -35,6 +38,7 @@ const fields = [
 	"changedFiles",
 	"additions",
 	"deletions",
+	"baseRefName",
 	"reviews",
 ].join(",");
 
@@ -60,6 +64,9 @@ type GhPr = {
 	statusCheckRollup?: Array<{ conclusion?: unknown; status?: unknown }> | null;
 	files?: Array<{ path?: unknown; previousPath?: unknown }> | null;
 	changedFiles?: unknown;
+	additions?: unknown;
+	deletions?: unknown;
+	baseRefName?: unknown;
 	reviews?: Array<{
 		author?: { login?: unknown } | null;
 		state?: unknown;
@@ -135,6 +142,15 @@ export async function collectFacts(
 			dailyCapAvailable: null,
 			coolingOffElapsed: null,
 			killSwitchOff: null,
+			baseBranch:
+				typeof value.baseRefName === "string" ? value.baseRefName : null,
+			changedLines:
+				typeof value.additions === "number" &&
+				typeof value.deletions === "number"
+					? value.additions + value.deletions
+					: null,
+			fileCount:
+				typeof value.changedFiles === "number" ? value.changedFiles : null,
 		};
 	} catch {
 		return null;

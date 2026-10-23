@@ -230,6 +230,24 @@ export function createApi(opts: {
 		return c.json({ queued: true }, 202);
 	});
 	app.get("/v1/items", async (c) => c.json(await harness.workItems()));
+	app.get("/v1/gate/report", async (c) => {
+		const reports = Object.values((await harness.workItems()).items).flatMap(
+			(item) => {
+				const gate = item.gate;
+				return gate?.report
+					? [
+							{
+								item: item.id,
+								repo: item.repo,
+								pr: gate.pr,
+								report: gate.report,
+							},
+						]
+					: [];
+			},
+		);
+		return c.json({ reports });
+	});
 	app.get("/v1/gate/:item", async (c) => {
 		const item = (await harness.workItems()).items[c.req.param("item")];
 		if (!item?.gate) throw new ApiError("not_found", "gate not found", 404);

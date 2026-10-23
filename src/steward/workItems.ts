@@ -69,6 +69,7 @@ export type WorkItem = {
 		reasons: string[];
 		approvedAt?: number;
 		notified?: boolean;
+		report?: import("../gate/shadow.ts").ShadowReport;
 	};
 	outcome?: WorkItemOutcome;
 	createdAt: number;

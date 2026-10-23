@@ -72,7 +72,7 @@ export type AgentDef = {
 			slug: string;
 			base?: string;
 			merge?: AgentDef["merge"];
-			policySource?: { kind: "none" | "fixture" };
+			policySource?: { kind: string };
 			pipeline?: {
 				stages?: Array<
 					"scout" | "spec" | "build" | "review" | "gate" | "handoff"

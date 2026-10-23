@@ -20,6 +20,7 @@ import { type GithubRunner, githubLogin } from "./github.ts";
 import { checkRoleSkills, effectiveKind } from "./skills.ts";
 import { tokenWarnings } from "./token.ts";
 import { pipelineDoctorErrors, pipelineFor } from "../pipeline/select.ts";
+import { sourceFor } from "../gate/policySource.ts";
 
 export { effectiveKind } from "./skills.ts";
 
@@ -163,6 +164,26 @@ export function doctor(
 			detail: "auto merge needs allowAutoMerge",
 		});
 	for (const repo of def.scope?.repos ?? []) {
+		const sourceKind = repo.policySource?.kind ?? "none";
+		try {
+			sourceFor(sourceKind);
+			checks.push({
+				name: `policy source ${repo.slug}`,
+				ok:
+					sourceKind !== "fixture" ||
+					process.env.DURABLE_ALLOW_FIXTURE_SOURCE === "1",
+				detail:
+					sourceKind === "fixture" ? "fixture source is test-only" : sourceKind,
+				fix: "use none for real repositories or implement and contract-test the source kind",
+			});
+		} catch {
+			checks.push({
+				name: `policy source ${repo.slug}`,
+				ok: false,
+				detail: "source kind not implemented",
+				fix: "use none or implement and contract-test the source kind",
+			});
+		}
 		for (const detail of pipelineDoctorErrors(pipelineFor(def, repo.slug)))
 			checks.push({
 				name: `pipeline ${repo.slug}`,
