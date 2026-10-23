@@ -6,9 +6,11 @@ New in revision 6 (U5). **Repo: the skills repo.** Why a separate spec, not fold
 Depends on: spec 02 (a first durable commit with `bin/durable`, a lockfile and a passing CI).
 
 ## What is NOT in the skills repo any more
+
 The engine, console, client library, TUI, API, schemas, tests, systemd units, Termux bootstrap, examples, docs, the worker guard Pi extension (`pi-extension/durable-worker-guard.ts`, loaded through the derived per-agent Pi settings), the slice 1 spike and evidence, and the plan itself all live in `nanstey/durable`. The skills repo still owns the skills and agent profiles that durable workers reuse (`idea-to-pr`, `pr`, `build`, `review-code`, `handoff`, ...), Pi settings and patches (including slice 13), and the installer.
 
 ## Checklist (one change per commit)
+
 1. **Read the exact mechanism first.** Read `install/main.sh` (HARNESSES table, typed pairs) and `install/modules/*.sh` (`install_vendor_git`, `link_one`, `install_config`) and mirror the `vendor-git` pair: a manifest of `<url> <40-char commit>` lines; clone at that exact commit; `ok|cloned|updated` reporting; fail-closed on bad manifest lines or clone failures (deferred failure like the other pinned installs). Record any difference from the assumptions below in the PR.
 2. **Pin manifest** `harness/durable/vendor/nanstey-durable.txt`: `https://github.com/nanstey/durable <40-char commit>`. Acceptance: manifest format test (full SHA, comment lines allowed).
 3. **Installer wiring** `install/main.sh`: a `vendor-git` pair for the durable clone with destination `$DURABLE_HOME/vendor` (default `~/.pi/durable/vendor`, clone at `.../github.com/nanstey/durable`) and the manifest dir `$REPO_ROOT/harness/durable/vendor`, plus calls to the two functions below; run when Node >= 22.19 and the Pi harness is present; `DURABLE_SKIP=1` skips; never fails the whole install for a skipped optional step (mirrors the Pi patch steps). Acceptance: `install/tests/install.test.sh` cases.
@@ -20,17 +22,21 @@ The engine, console, client library, TUI, API, schemas, tests, systemd units, Te
 9. **Verification on a machine:** run `install.sh` twice (`cloned` then `ok`), `durable doctor --help` from PATH, then `bump-pin.sh` to a newer durable commit and re-run (`updated`).
 
 ## Cross-repo coordination (restated for this spec)
+
 - Order: durable first, then the pin bump here. A durable change that alters the `profile-meta` format, the Pi-directory contract or a required skill name is merged and verified in durable (with a migration, `version` bump or dual-name acceptance) before the pin bump.
 - pi-durable, pi-ai and pi-coding-agent versions are pinned **exactly in durable's `package.json` and lockfile**; this repo never pins them and pins durable by commit only.
 - Pi settings or patches that must change for durable stay in this repo (AGENTS.md "Pi changes must live in the repo"): none are required by slices 1-12; slice 13 removes interactive subagents here.
 
 ## Risk controls
+
 - Public-repo hygiene applies to both repos: no secrets, machine-local state, absolute personal paths, real host names or emails in committed files.
 - Fail closed: a malformed manifest or failed clone never leaves a half-installed CLI link; an existing working clone is kept if an update fails.
 - No engine code, schema or test is duplicated here.
 
 ## Out of scope
+
 Anything under the engine; units and service management (`durable enable`); the Termux bootstrap (durable repo); changes to Pi settings/patches other than slice 13.
 
 ## Done when
+
 Installer tests pass in CI; a real machine shows `cloned` then `ok`; the pin bump flow shows `updated`; catalog and harness-table rows are in sync; the user accepts the pin flow.

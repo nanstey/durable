@@ -7,6 +7,7 @@ Revision 5: no phone-specific capabilities or gating; any browser client behaves
 Depends on: spec 08. Spec 10 (second physical machine) is helpful but **not required**: the test rig below covers two daemons on one machine.
 
 ## Checklist
+
 1. **Tailnet listener** `api/net.ts`: `network.bind: tailnet` (machine file) adds a listener on the machine's Tailscale interface address (never `0.0.0.0`, never LAN); loopback keeps serving the local CLI; retries the tailnet bind until Tailscale is up. Peer check: ask the local Tailscale API (`whois`) for each connection's peer node/tags/user and require a match in `network.allowedPeers` (for example `tag:durable-console`) **in addition to** a valid bearer token. Result of the slice 1 spike (Tailscale facts) chooses the exact local API call. With `peerCheck: required` and no `whois`, refuse the tailnet bind (fail closed). With `peerCheck: optional` (declared, `tailscaleCli: false`), bind anyway, audit `peer-check: unavailable`, and show it in `doctor` and the console; approval-class actions never rely on the peer check (PL4). Acceptance: stub local Tailscale API tests (allowed peer, denied peer, unknown peer, API down => refuse); bind-address test; doctor checks the setting (Tailscale up, tags present) and warns on missing allowlist.
 2. **Port assignment:** per-agent daemon ports from `machine.yaml` (`daemon.portBase` + stable allocation recorded in `agents/<id>/port`, or explicit), collision check in doctor. Acceptance: tests.
 3. **Token lifecycle for remote clients:** `durable token create --client console-<host> --scopes read,chat,pause`; rotation procedure documented and tested (create new, switch the console registry, revoke old); default expiry 90 days with a doctor warning at 14 days; tokens never in profile secrets (reason documented: `profile-secrets` exports them to agent environments). Acceptance: rotation test with no downtime for an open SSE stream (reconnects with the new token).
@@ -20,6 +21,7 @@ Depends on: spec 08. Spec 10 (second physical machine) is helpful but **not requ
 11. **Live:** console host + at least one other machine over the real tailnet (two local daemons if spec 10 has not shipped): tree shows both; chat with one from a phone and from a laptop, pause another; rotate a token; unplug the console host and confirm the agents continue (check GitHub-side activity).
 
 ## Risk controls
+
 - The console host holds a scoped token for every daemon (concentration risk, R22): tokens carry no approve/agent-resume/enroll/policy-verification power, expire, and are revocable per client on each daemon. With the `chat` scope a stolen phone session can talk to agents within the guardrail limits (R35); it cannot approve or reach credentials.
 - Tailnet membership alone is not trust: ACL tags + daemon `whois` allowlist + bearer token. Serve identity headers never authorize approvals.
 - Never Funnel or public exposure; never `0.0.0.0`.
@@ -27,7 +29,9 @@ Depends on: spec 08. Spec 10 (second physical machine) is helpful but **not requ
 - Same-host agents can reach the console's loopback backend and forge identity headers: headers only gate operations an agent token already allows (D14).
 
 ## Out of scope
+
 PWA/home-screen install and Web Push (spec 12b), passkeys and approvals (spec 12a); peer-to-peer messaging; multiple consoles coordinating with each other.
 
 ## Done when
+
 CI green including the two-daemon rig; live multi-machine check recorded; independence test passes; user has chatted with an agent from a laptop browser and from a phone over the tailnet and reviewed token handling and the ACL tags.

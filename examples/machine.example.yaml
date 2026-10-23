@@ -1,7 +1,13 @@
 name: workstation
 agents: [api]
 profiles: { allowDefault: false }
-platform: { os: linux, service: systemd-user, tailscaleCli: false, allowAutoMerge: false }
+platform:
+  {
+    os: linux,
+    service: systemd-user,
+    tailscaleCli: false,
+    allowAutoMerge: false,
+  }
 network: { bind: loopback, peerCheck: off }
 channels:
   terminal: { kind: command }

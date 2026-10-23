@@ -10,6 +10,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22.19.0, cache: pnpm }
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm check
+      - name: Run type, lint, format, and dead-code checks
+        run: pnpm check
       - run: pnpm test
       - run: pnpm hygiene

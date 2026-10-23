@@ -5,6 +5,7 @@ Design refs: architecture D11; product review success signal "Retirement".
 Depends on: spec 06 minimum (durable workers proven; durable lives in its own repo and is consumed here only through the pinned clone) (workers and headless paths proven). Revision 2: renumbered (was 10). Run after real use of 06-09, ideally with the console (spec 08) in daily use.
 
 ## Checklist
+
 1. **Inventory** (record in the PR body; no new files in either repo): `grep -rn "subagent\|subagent_done\|caller_ping\|interactive" skills/ agents/ harness/ .agents/ README.md AGENTS.md`. For each hit classify: remove, rewrite to `handoff`/steward/headless `pi -p`, or keep (Claude Code `agents/` profiles stay valid for Claude Code).
 2. **Replacement coverage table** in the PR: each documented use -> replacement -> evidence it works (handoff run, steward worker, headless reviewer as `pi-improve` does). Stop if any use has no replacement and ask the user.
 3. **Rewrite references**: `harness/pi/APPEND_SYSTEM.md` (delegation bias section, subagent tiers), skills that instruct `subagent` use, `agents/*.md` frontmatter that exists only for the interactive package (`system-prompt`, `interactive`, `deny-tools`) — keep valid for Claude Code, update the Pi section of `harness/pi/README.md` ("Pi agent profiles").
@@ -16,13 +17,16 @@ Depends on: spec 06 minimum (durable workers proven; durable lives in its own re
 9. **Verify**: `bash install/tests/install.test.sh`, `bash harness/pi/tests/package-patches.test.sh`, `bash harness/pi/tests/pi-improve.test.sh` pass; sandbox `install.sh` twice: second run all `ok`; grep finds no stale reference; the self-improvement loop still runs its dry run.
 
 ## Risk controls
+
 - Do not remove before replacements are proven in real use; user checkpoint is mandatory.
 - This planning agent's own profile (`planner`, `worker`, `reviewer`) relies on `subagent_done` and `caller_ping` today. Keep Claude Code behaviour unchanged and document Pi behaviour after removal.
 - Patches already applied on machines remain in installed packages until the package is removed; do not edit existing patch files (AGENTS.md: add a new patch if one is ever needed).
 - Commit granularity: one PR; explain in the body why the package, patches, fixtures and docs are coupled.
 
 ## Out of scope
+
 Fixing pi-jev patch drift; changing Claude Code agent profiles; removing `pi-intercom` (decide separately).
 
 ## Done when
+
 All checks pass, inventory shows no unresolved use, and the user confirms nothing they rely on is lost.

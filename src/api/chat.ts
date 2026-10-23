@@ -1,3 +1,29 @@
 import { createHash } from "node:crypto";
-export function validateMessage(value:unknown,max=1048576):string {if(!value||typeof value!=="object"||typeof (value as {body?:unknown}).body!=="string"||Object.keys(value).some(k=>!["body","requestId","whenBusy","conversationId"].includes(k)))throw Object.assign(new Error("plain-text body required"),{code:"invalid"});const body=(value as {body:string}).body;if(Buffer.byteLength(body)>max)throw Object.assign(new Error("message too large"),{code:"invalid"});if(/(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:ant-)?[A-Za-z0-9_-]{16,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|AKIA[0-9A-Z]{16})/.test(body)||(/\S{48,}/.test(body)&&/[A-Za-z]/.test(body)&&/\d/.test(body)))throw Object.assign(new Error("credential-like-content"),{code:"credential-like-content"});return body;}
-export const bodyHash=(body:string)=>createHash("sha256").update(body).digest("hex");
+export function validateMessage(value: unknown, max = 1048576): string {
+	if (
+		!value ||
+		typeof value !== "object" ||
+		typeof (value as { body?: unknown }).body !== "string" ||
+		Object.keys(value).some(
+			(k) => !["body", "requestId", "whenBusy", "conversationId"].includes(k),
+		)
+	)
+		throw Object.assign(new Error("plain-text body required"), {
+			code: "invalid",
+		});
+	const body = (value as { body: string }).body;
+	if (Buffer.byteLength(body) > max)
+		throw Object.assign(new Error("message too large"), { code: "invalid" });
+	if (
+		/(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:ant-)?[A-Za-z0-9_-]{16,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|AKIA[0-9A-Z]{16})/.test(
+			body,
+		) ||
+		(/\S{48,}/.test(body) && /[A-Za-z]/.test(body) && /\d/.test(body))
+	)
+		throw Object.assign(new Error("credential-like-content"), {
+			code: "credential-like-content",
+		});
+	return body;
+}
+export const bodyHash = (body: string) =>
+	createHash("sha256").update(body).digest("hex");
