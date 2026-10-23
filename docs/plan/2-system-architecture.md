@@ -1,6 +1,6 @@
 # System architecture
 
-Inputs: [1-product-review](./1-product-review.md). File placement, types and call stacks are in
+Inputs: [1-product-review](./1-product-review.md). Revision 8 (Warp Factories research: named work item, per-project code-enforced pipeline, optional spec gate, metrics and PR-only improvement loop; pi-durable-only personal-tool boundary). File placement, types and call stacks are in
 [3-program-design](./3-program-design.md). Revision 1 (user comments C1-C7). Revision 2 (U1: no ntfy; U2: multi-machine web console; remote-ready daemon API; guarded console approvals). Revision 3 (repo-committed, human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet). Revision 4 (dpi-* are inspiration only, no code reuse; Android/Termux daemon as an additional platform target behind a platform abstraction). Revision 7 (U6: a second worker kind, `durable-conversation`, alongside Pi-session workers; a conversation tree and `durable attach` TUI viewable in Orca terminals; a human-held rule; D4, D19, D20; revised after a cross-family review: `ModelRuntime` model auth, named profiles only, minimal durable-shell environment, fenced hold, advisory-only confinement, replay-safe push/PR, guarded release, kind selection precedence, one lifecycle table). Revision 6 (the engine moves to its own public repo `nanstey/durable`; the skills repo keeps a thin integration; D18). Revision 5 (repo policy mechanism undecided: a pluggable `RepoPolicySource` seam with mechanism-independent invariants; the phone is just another browser client with identical capabilities; no default chat rate limits).
 
 Evidence base (read for this plan):
@@ -309,8 +309,8 @@ Layering and the recommendation are in the product review ("Control plane and no
 ### D11. Retirement of `pi-interactive-subagents`
 
 Do not remove it before replacements cover its documented uses. Replacement map: background/headless work -> steward workers or `pi -p` runs;
-"run this in a new worktree" -> `handoff`; parallel read-only analysis in an interactive session -> headless `pi -p` or Claude Code subagents
-(`agents/` profiles stay valid for Claude Code). Slice 13 removes the package from `settings.json`, its config, its two patches and fixtures, and the
+"run this in a new worktree" -> `handoff`; parallel read-only analysis in an interactive session -> headless `pi -p`.
+Other harness workers are out of scope. Slice 13 removes the package from `settings.json`, its config, its two patches and fixtures, and the
 reviewer provider-lock patch if it depends on `PI_SUBAGENT_AGENT`, after an inventory of `subagent`, `subagent_done`, `caller_ping` references.
 
 ### D12. Existing skills
@@ -372,7 +372,7 @@ Front end: **no build step.** Static ES modules with small pinned, checksummed t
 Facts that shape the design: agents and workers run as the operator's OS user with the operator's GitHub token. They can read any file or token that user can read and can call any local or tailnet-reachable endpoint the daemon bearer token allows. They cannot produce a signature from a hardware or phone-held passkey.
 
 Design:
-1. **Approval is a separate credential class**, covering these high-risk actions only: **approve** (merge attempt), **resume** an agent after a kill/pause, **enroll** a key, **verify a repo policy** (D8), and **release** a human hold (D19). Every nonce and challenge is bound to `{agent, action, item or repo, binding}` (binding = head SHA, policy fingerprint or `holdEpoch`), so a credential for one item or action never authorizes another. Chat, steering, aborting a turn and pausing are not in this class (D16). Daemon bearer tokens (scopes `read`, `chat`, `pause`) can never approve, resume or enroll. The daemon's approval endpoints accept only (a) a valid **CLI nonce** (slice 7), or (b) a valid **WebAuthn assertion** (slice 12a).
+1. **Approval is a separate credential class**, covering these high-risk actions only: **approve** (merge attempt), **resume** an agent after a kill/pause, **enroll** a key, **verify a repo policy** (D8), **approve-spec** (bound to work item, spec PR number and head SHA; D21), and **release** a human hold (D19). Every nonce and challenge is bound to `{agent, action, item or repo, binding}` (binding = head SHA, policy fingerprint or `holdEpoch`), so a credential for one item or action never authorizes another. Chat, steering, aborting a turn and pausing are not in this class (D16). Daemon bearer tokens (scopes `read`, `chat`, `pause`) can never approve, approve-spec, resume or enroll. The daemon's approval endpoints accept only (a) a valid **CLI nonce** (slice 7), or (b) a valid **WebAuthn assertion** (slice 12a).
 2. **WebAuthn verified by the daemon.** The console is a conduit. Flow: console asks the daemon for a challenge for `{agent, item, headSha, action}`; the daemon stores the challenge (single use, short expiry, bound to that SHA) and returns it with display data (PR URL, title, diffstat, reviewer verdict, SHA); the browser calls `navigator.credentials.get` with `userVerification: required`; the console forwards the assertion; the daemon verifies the signature against public keys enrolled for that agent, the origin and RP ID from machine-local config, the counter, and that the **head SHA is still the same**; only then does it authorize the steward to _attempt_ the merge within GitHub rules (D8). No secret exists on the console host or the daemon that can mint an approval.
 3. **Enrollment** is the trust root: `durable approval enroll` on a TTY on the daemon's machine prints a short-lived enrollment code; the operator enters it in the console while registering a passkey. Further keys require an existing key's assertion. Every enrollment and approval is audited and sent as a `desktop`/`command` notification.
 4. **Confirm step:** the approval screen shows the PR URL, title, diffstat and head SHA and requires an explicit tap; the SHA is inside the signed challenge, so a stale approval fails when new commits arrive.
@@ -503,6 +503,12 @@ where `kind` is `steward | chat | scout | worker-durable | reviewer-durable | wo
 
 **Console.** The console shows the same tree (machine -> agent -> conversation tree) from the same API, with the same capability-gated controls.
 
+### D21. Personal, code-owned factory flow (revision 8)
+
+Durable is a personal tool for one operator and uses **pi-durable only**; Claude Code, Codex and other worker harnesses are out of scope. A **work item** is the named record from an eligible intake candidate through claim, attempts, PRs and final outcome. It completes only when GitHub confirms merge, or when it is cancelled or parked; handoff is a state, never completion.
+
+Each project may declare a pipeline that composes Durable primitives: optional `scout` and `spec`, then mandatory `build`, `review`, `gate`, `handoff` in that order, with `handoff` last. The default is scout -> build -> review -> gate -> handoff. Configuration selects stages and gate conditions; code enforces eligibility, the spec-approval wait when enabled and every selected gate. Unlike Warp's prompt-policy pause points, no configured Durable gate is bypassable by a worker prompt; only GitHub rules enforce merge. The code-owned `pipeline/spec.ts` step, not the read-only scout, opens an intent-first idempotent draft spec PR from scout text keyed by work-item id. GitHub is the first intake adapter. Later adapters implement the same interface and fail-closed, code-owned eligibility filters.
+
 ## 3. Contracts
 
 ### 3.1 Agent definition (`agents/<id>.yaml`; no secrets, no absolute paths, no hostnames)
@@ -520,6 +526,9 @@ models:
 scope:
   repos:
     - slug: acme/api # checkout path comes from machine.yaml
+      pipeline: # optional; default is scout -> build -> review -> gate -> handoff
+        stages: [scout, build, review, gate, handoff]
+        gates: { specApproval: false, complexityThreshold: large }
       base: main
       policySource: { kind: none } # none (default; auto-merge off) | fixture (tests) | <kinds chosen per repo later, D8)
       merge: # CEILING + tighten-only overrides (D8); the policy itself comes from the policy source
@@ -667,6 +676,8 @@ No file name, path, format or trust-pin layout is specified. The invariants P1-P
 
 ### 3.4 Documents and audit
 
+`steward.workItems` is the canonical typed record keyed by a stable intake reference: `{id, source, candidate, queueState, claim?, attempts: {cost?: number}[], pr?, outcome?}`. `outcome` is `merged` only after GitHub confirms merge, or `cancelled`/`parked`; a handoff remains an active state. Until slice 6b, `steward.queue` is the intake projection; after 6b, `workItems` is the only writer and `queue` is a derived read view. Ineligible entries are not migrated, so their reasons remain in that view.
+
 `steward.queue`, `steward.budget`, `steward.gate` (decisions: facts, reasons, sha, action), `steward.reviews` (verdict, family, sha), `steward.notify` (dedup keys, reminder state, nonce hashes), `steward.inbox` (events, ack state; never secrets), `steward.approval` (enrolled public keys, challenge hashes and expiry; no secrets), `steward.policy` (per repo policy source summary and verification record), `steward.chat` (conversation index; rate-limit counters only if the opt-in is on).
 Startup containment and hold/recovery fences use an atomic fsynced `procs.json` journal readable before the harness opens. Failed cleanup keeps its records and refuses startup. The model budget document has UTC-day usage and configurable `limits.dailyDollars` / `limits.dailyTokens` ceilings (defaults 10 / 1000000); an in-flight response can overshoot, but the next request/tool is blocked.
 External state wins on conflict: on resume, code re-derives each non-terminal item from GitHub and the dispatcher before acting.
@@ -675,12 +686,12 @@ Audit: `$DURABLE_HOME/agents/<id>/audit.jsonl`, append-only: `{ts, agent, profil
 ## 4. Data flow (one item)
 
 1. `steward-loop` tick (durable timer). Kill switch/quiet-hours/budget checked.
-2. Sources poll -> candidates -> eligibility -> optional Jev judgment (tighten-only) -> queue.
+2. Sources poll -> candidates -> eligibility -> optional Jev judgment (tighten-only) -> work-item intake/queue projection.
 3. Dispatch while `maxConcurrentWorkers` allows. **Intent first**: commit an intent entry; claim on GitHub; `dispatcher.createWorkspace` then `launch`. Each effect has a deterministic name.
-4. Scout writes the brief (read-only). Worker runs `idea-to-pr` on the brief with the clean profile env and opens a draft PR.
+4. The configured pipeline runs: the read-only scout writes the brief; `pipeline/spec.ts` opens an intent-first idempotent draft spec PR from its text when the code-owned eligibility size reaches `complexityThreshold`, then, when `specApproval` is true, code waits for human approval; then worker runs `idea-to-pr` on the brief with the clean profile env and opens a draft PR.
 5. Steward sees the PR (poll), launches a reviewer on that head SHA (opposite family), records the verdict in its own store, mirrors it to GitHub.
 6. Gate decides. `wait-human` -> approval task + `approval-needed` notification with the PR URL. `merge` (auto, per-repo opt-in) -> `gh pr merge --match-head-commit`. `block` -> comment + back to worker or human.
-7. After merge or close: release claim, record outcome, remove workspace only if clean and merged.
+7. Each tick reads GitHub PR state. After the primary PR merges, release claim, record `merged`, remove workspace only if clean; if it closes unmerged, record `parked`/`needs-human`. With several PRs, only the primary PR merging completes the item; this also reconciles restarts.
 
 ## 5. Failure paths
 
@@ -713,12 +724,12 @@ Audit: `$DURABLE_HOME/agents/<id>/audit.jsonl`, append-only: `{ts, agent, profil
 
 ## 7. Observability
 
-`durable status`, `durable queue <id>`, `durable inbox <id>`, `durable audit <id> --since`, `durable attach <id>` (TUI), `durable logs <id>`, `durable doctor <id|--all>`, `durable profile show|check`, `durable token create|list|revoke`, `durable console ...`. Workers: Orca terminals (`openViewer`) and per-agent Pi sessions. Console: fleet and per-agent views, transcript attach, audit, inbox, gate report.
+`durable status`, `durable queue <id>`, `durable metrics <id>`, `durable inbox <id>`, `durable audit <id> --since`, `durable attach <id>` (TUI), `durable logs <id>`, `durable doctor <id|--all>`, `durable profile show|check`, `durable token create|list|revoke`, `durable console ...`. Workers: Orca terminals (`openViewer`) and per-agent Pi sessions. Console: fleet and per-agent views, transcript attach, audit, inbox, gate report.
 
 ## 8. Unresolved and deferred
 
 - Open: Q18 only, deferred by the user: the policy mechanism is decided per repo when the first repo needs auto-merge (default `none`). Q19-Q23 are resolved. None blocks slices 1-6.
-- Deferred, not specced: **D-1 Peer-to-peer agent messaging** (hooks: reserved `peers`; reuses the daemon `whois` + token design; the console does not replace it). **D-2 (now planned):** durable-conversation workers are slice 6c (D19), not deferred. Remote attach is no longer deferred: it is the console (D13, D14). macOS/launchd is deferred (Linux is the first fleet; Android/Termux is an additional target, D17, slice 14). PWA and Web Push are an additive follow-up (12b), not deferred design.
+- Deferred, not specced: intake adapters beyond GitHub, behind a shared adapter interface with fail-closed code-owned eligibility; **D-1 Peer-to-peer agent messaging** (hooks: reserved `peers`; reuses the daemon `whois` + token design; the console does not replace it). **D-2 (now planned):** durable-conversation workers are slice 6c (D19), not deferred. Remote attach is no longer deferred: it is the console (D13, D14). macOS/launchd is deferred (Linux is the first fleet; Android/Termux is an additional target, D17, slice 14). PWA and Web Push are an additive follow-up (12b), not deferred design.
 
 ## 9. Review status
 

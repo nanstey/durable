@@ -1,7 +1,7 @@
 # Product review: durable, proactive agents as the base of the harness
 
 Planning only. No source, tests, config or dependencies are changed by this plan.
-Revision 1 (user comments C1-C7 applied). Revision 2 (U1: no ntfy; U2: multi-machine web console on one chosen machine). Revision 7 (U6: durable-conversation workers as a second, opt-in worker kind; a durable conversation tree and `durable attach` TUI shown in Orca terminals; a human-held rule). Revision 6 (U5: the engine and this plan move to the public `nanstey/durable` repo; the skills repo keeps only a thin integration; public-repo hygiene rules and a CI scan). Revision 5 (Q18-Q23: policy mechanism deferred behind a `RepoPolicySource` seam; the phone is just another browser client; no default chat rate limits; Android defaults accepted). Revision 4 (U3: dpi-* projects are inspiration only; U4: an Android/Termux daemon as an additional platform target). Revision 3 (Q5-Q17 answers: repo-committed human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet; see README Decision log).
+Revision 8 (Warp Factories research: named work items, configurable code-enforced pipeline, optional spec gate, metrics and PR-only improvement loop; personal pi-durable-only framing). Revision 1 (user comments C1-C7 applied). Revision 2 (U1: no ntfy; U2: multi-machine web console on one chosen machine). Revision 7 (U6: durable-conversation workers as a second, opt-in worker kind; a durable conversation tree and `durable attach` TUI shown in Orca terminals; a human-held rule). Revision 6 (U5: the engine and this plan move to the public `nanstey/durable` repo; the skills repo keeps only a thin integration; public-repo hygiene rules and a CI scan). Revision 5 (Q18-Q23: policy mechanism deferred behind a `RepoPolicySource` seam; the phone is just another browser client; no default chat rate limits; Android defaults accepted). Revision 4 (U3: dpi-* projects are inspiration only; U4: an Android/Termux daemon as an additional platform target). Revision 3 (Q5-Q17 answers: repo-committed human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet; see README Decision log).
 
 ## Problem (user's terms)
 
@@ -17,7 +17,7 @@ Three things hurt:
 
 ## Desired outcome
 
-Each machine runs one or more long-lived **stewards**. A steward owns one project (or one group of
+This is a personal tool for one operator. Each machine runs one or more long-lived **stewards**. A steward owns one project (or one group of
 related projects), finds work in that scope, assigns workers to push it forward, and stops at one of
 two places: a PR waiting for human review, or an automatic merge when the repo's policy and
 GitHub's own rules allow it. The "operating system" is now two repos: the public **`nanstey/durable` repo** ships the engine, schemas, examples, docs and this plan; the **skills repo** keeps a thin integration (a pinned clone installed by `install.sh`, the `durable` CLI on PATH, a thin skill) plus the skills and agent profiles workers reuse. Each machine supplies its own profiles
@@ -78,9 +78,10 @@ Single operator, several machines, Orca for session management, Tailscale betwee
 | W5  | **Auto-merge** (only for repos that opt in): the gate passes and GitHub accepts the merge.                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Merged PR plus audit entry; otherwise W4                                                                                                                                                   |
 | W6  | **Stop**: pause one agent, or all agents on a machine, from a terminal or from GitHub.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | No new side effect after the next check (seconds, not minutes)                                                                                                                             |
 | W7  | **Add a machine**: install, define the machine's profiles, assign agents, start.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Second steward works in parallel without double-claiming an item                                                                                                                           |
+| W8  | **Use the console from any browser, including a phone**: open the web console (served on the operator's always-on console machine, reached over Tailscale), see every machine's agents, watch a conversation live, send follow-ups and steers, ask an agent or scout a question, start or resume a chat, abort a turn, pause an agent. A phone is just another browser client with the same capabilities and guardrails as a laptop. Approve, resume an agent after a kill, enroll a key and verify a repo policy require a passkey on **any** browser. | Interactive chat and pause from the console in any browser; high-risk actions only through the guarded flow; nothing needed on a phone but a browser (installable app and push come later) |
 | W9  | **Run an agent on an Android phone** (Termux): install with a documented bootstrap, define a conservative agent (steward, scout, chat, light workers on small repos), see it in the console; it may be asleep or killed and the system tolerates that.                                                                                                                                                                                                                                                                                                  | Phone daemon works within its limits, shows `offline` when away, never auto-merges                                                                                                         |
 | W10 | **View any durable conversation in Orca**: `durable attach` shows a live tree (steward, chat threads, scouts, workers, nested children) in an Orca terminal beside normal sessions, with steer, follow-up and abort where the node allows; take over a worker's worktree safely with `durable hold`.                                                                                                                                                                                                                                                    | Orca lists durable conversations; no two writers in one worktree                                                                                                                           |
-| W8  | **Use the console from any browser, including a phone**: open the web console (served on the operator's always-on console machine, reached over Tailscale), see every machine's agents, watch a conversation live, send follow-ups and steers, ask an agent or scout a question, start or resume a chat, abort a turn, pause an agent. A phone is just another browser client with the same capabilities and guardrails as a laptop. Approve, resume an agent after a kill, enroll a key and verify a repo policy require a passkey on **any** browser. | Interactive chat and pause from the console in any browser; high-risk actions only through the guarded flow; nothing needed on a phone but a browser (installable app and push come later) |
+| W11 | **Measure and improve:** inspect PRs opened/merged, autonomy, cycle time and cost per PR; after repeated failures, review a proposed skills, prompt or pipeline-config PR. | Metrics are derived from GitHub and steward records; improvement is adopted only by merging its PR |
 
 ## Identity decision: the operator's own GitHub account (C2)
 
@@ -129,6 +130,7 @@ Channel management model:
 
 - **Identity:** 100% of GitHub writes and model calls in the audit log carry the identity of the agent's profile. A deliberately wrong `GH_TOKEN` makes `doctor` fail and the agent refuse to start.
 - **Proactivity:** a labelled issue becomes a draft PR with no human prompt.
+- **Completion and learning:** a work item completes only on a confirmed merge, cancellation or parking; CLI/API and console show PRs opened/merged, autonomy, cycle time and cost per PR. Repeated failed or reworked runs produce reviewable PR-only improvement proposals, never automatic changes.
 - **Durability:** `kill -9` of the steward during a wait loses no queue state and starts no duplicate worker or PR.
 - **Safety:** zero merges that violate the repo policy or GitHub rules. Auto-merge decisions for each repo run in shadow mode ("would merge") against real PRs before any repo gets a policy source that enables it. No `--admin` merge path exists.
 - **Attention cost:** at most one notification per PR that needs a decision, plus capped reminders.
@@ -142,7 +144,7 @@ Channel management model:
 
 In scope: per-machine steward process, remote-ready daemon API, operator CLI/TUI, multi-machine web console served from one chosen machine, profile manifests, agent/machine definitions, `doctor`, read-only
 scout, a `WorkerDispatcher` adapter layer (Orca primary, git-process second), claims and worker dispatch,
-notifications and channels, code-owned review/merge gate with human approval, per-repo opt-in auto-merge
+notifications and channels, named work items, per-project configurable code-enforced pipelines, code-owned review/merge gate with human approval, per-repo opt-in auto-merge
 with shadow mode, second machine without a shared DB, kill switch, budgets, audit log, `docs/operator.md`,
 a thin skills-repo integration (pinned install, thin skill), retirement of interactive subagents (skills repo).
 
@@ -156,7 +158,8 @@ a thin skills-repo integration (pinned install, thin skill), retirement of inter
 - Replacing Orca, `idea-to-pr`, `handoff` or `orchestration`.
 - Per-agent GitHub bot accounts or GitHub Apps.
 - An auto-merge canary repo. Auto-merge proof is shadow mode plus recorded-fixture tests.
-- Multi-user operation.
+- Multi-user operation, multi-team features, hosted-style roles or a market-driven roadmap.
+- Warp interoperation or compatibility, and worker harnesses other than pi-durable (including Claude Code and Codex).
 - Fixing unrelated Jev patch drift.
 
 ## Settled decisions
@@ -202,6 +205,9 @@ From revision 7:
 25. Two worker kinds behind the dispatcher (U6): **`pi-session` (default)** reuses the whole skills ecosystem; **`durable-conversation` (opt-in)** is a headless pi-durable child conversation confined to the worktree, stopped by the kill switch, resumed natively after a crash, with no token in its shell. Durable workers get no user skills or extensions (only an allowlisted skill-text mechanism, default empty), so workflows such as `idea-to-pr` stay on Pi-session workers. Android defaults to the durable kind.
 26. `durable attach` is a conversation-**tree** TUI (steward, chat, scout, workers, nested children) that Orca can show in a terminal beside the user's normal sessions; the console shows the same tree.
 27. Safety rule: a worktree marked `human-held` is never resumed or written to by the daemon until a human releases it (release is a guarded action).
+28. A named work item follows eligible intake through merge confirmation, cancellation or parking; queue entries, claims and attempts are its records, not competing identities.
+29. Per-project pipeline config selects Durable stages and gate conditions; code enforces every selected gate. The default pipeline remains the current flow. A complexity-triggered spec stage produces a draft PR and, when `specApproval` is true, requires human approval before dispatch.
+30. Metrics land in slice 15; slice 16 uses their outcomes to make PR-only self-improvement proposals. GitHub is the first intake adapter; future adapters share code-owned, fail-closed eligibility.
 
 ## Assumptions (labelled; confirm or correct)
 
