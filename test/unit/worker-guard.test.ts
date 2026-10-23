@@ -101,6 +101,45 @@ test("shared table and registered Pi tool_call handler cannot drift; holding and
 	}
 });
 
+test("Pi reviewers may only read, search, or write the steward result file", () => {
+	const home = mkdtempSync(join(tmpdir(), "durable-reviewer-guard-"));
+	const previous = { ...process.env };
+	try {
+		Object.assign(process.env, {
+			DURABLE_WORKER: "1",
+			DURABLE_REVIEWER: "1",
+			DURABLE_REVIEW_RESULT_FILE: "/steward/review.json",
+			DURABLE_ITEM: "item",
+			DURABLE_FENCE_FILE: join(home, "fences.json"),
+		});
+		writeFileSync(
+			process.env.DURABLE_FENCE_FILE!,
+			JSON.stringify({ holds: {} }),
+		);
+		let handler:
+			| ((event: {
+					toolName: string;
+					input: Record<string, unknown>;
+			  }) => unknown)
+			| undefined;
+		durableWorkerGuard({
+			on: (_name, callback) => {
+				handler = callback;
+			},
+		});
+		assert.equal(handler!({ toolName: "read", input: {} }), undefined);
+		assert.equal(handler!({ toolName: "search", input: {} }), undefined);
+		assert.equal(
+			handler!({ toolName: "write", input: { path: "/steward/review.json" } }),
+			undefined,
+		);
+		for (const toolName of ["bash", "edit", "write"])
+			assert.ok(handler!({ toolName, input: { path: "src/main.ts" } }));
+	} finally {
+		process.env = previous;
+	}
+});
+
 test("generated Pi settings load the repository guard through the real offline extension loader", async () => {
 	const home = mkdtempSync(join(tmpdir(), "durable-pi-load-"));
 	const source = join(home, "source");
