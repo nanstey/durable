@@ -163,9 +163,12 @@ for (const action of ["approve", "approve-spec"] as const)
 		args: {
 			agent: { type: "positional", required: true },
 			pr: { type: "positional", required: true },
-			code: { type: "string", required: true },
+			code: { type: "string" },
+			request: { type: "boolean" },
 		},
 		async run({ args }) {
+			if (!args.request && !args.code)
+				throw Error("approve requires --code or --request");
 			if (
 				(!process.stdin.isTTY || !process.stdout.isTTY) &&
 				process.env.DURABLE_NONINTERACTIVE_OK !== "1"
@@ -183,12 +186,26 @@ for (const action of ["approve", "approve-spec"] as const)
 					: candidate.gate?.pr === Number(args.pr),
 			);
 			if (!item) throw Error("no approval task exists for that pull request");
+			if (args.request) {
+				if (action === "approve-spec")
+					throw Error("approve-spec requires --code");
+				await clientFor(args.agent).request(
+					`/v1/gate/${encodeURIComponent(item.id)}/approve/request`,
+					{ method: "POST" },
+				);
+				console.log(
+					"a fresh approval credential was delivered through the configured safe channel",
+				);
+				return;
+			}
+			const code = args.code;
+			if (!code) throw Error("approve requires --code");
 			const response = await fetch(
 				`http://127.0.0.1:${assignedPort(args.agent)}/v1/approvals/nonce`,
 				{
 					method: "POST",
 					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ item: item.id, code: args.code, action }),
+					body: JSON.stringify({ item: item.id, code, action }),
 					signal: AbortSignal.timeout(15000),
 				},
 			);

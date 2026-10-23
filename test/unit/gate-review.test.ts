@@ -296,6 +296,44 @@ test("refuses a same-family fallback assistant entry", async (t) => {
 	);
 	await assert.rejects(
 		() => collectReview(active, registry, definition),
-		/not an independent/,
+		/missing or non-independent provenance/,
+	);
+});
+
+test("fails closed when an assistant entry has no model provenance", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "durable-review-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const active = running("pi-session", join(root, "result.json"));
+	writeFileSync(
+		active.outputFile,
+		JSON.stringify({
+			verdict: "approve",
+			risk: "low",
+			summary: "OK",
+			headSha: "head",
+		}),
+	);
+	const registry = new WorkerRegistry();
+	const fake = new FakeDispatcher();
+	const workspace = await fake.createWorkspace(active.workspace);
+	registry.register(
+		reviewer("pi-session", async () => ({ status: "exited" }), [
+			JSON.stringify({ role: "assistant" }),
+		]),
+		{
+			id: active.id,
+			job: {
+				...active,
+				workspace,
+				role: "reviewer",
+				model: definition.models.reviewer,
+			},
+			process: { id: active.id, handle: active.id, workspace },
+			startedAt: 1,
+		},
+	);
+	await assert.rejects(
+		() => collectReview(active, registry, definition),
+		/missing or non-independent provenance/,
 	);
 });

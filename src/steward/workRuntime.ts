@@ -3,6 +3,7 @@ import type { AgentDef, MachineCfg } from "../config/schema.ts";
 import { monitorWorker } from "../dispatch/monitor.ts";
 import type { AttachInfo, WorkerDispatcher } from "../dispatch/types.ts";
 import { decide } from "../gate/decide.ts";
+import { collectFacts } from "../gate/facts.ts";
 import { noPolicy } from "../gate/policy.ts";
 import {
 	collectReview,
@@ -372,28 +373,35 @@ export class WorkRuntime {
 			};
 			return;
 		}
-		const decision = decide(noPolicy(this.options.definition.merge), {
-			draft: false,
-			author: this.options.login,
-			headMatches: true,
-			mergeClean: true,
-			reviewRequired: false,
-			checksPassed: true,
-			paths: [],
-			hardPath: false,
-			crossFamilyReview: true,
-			riskAcceptable:
-				review.result.verdict === "approve" &&
-				(review.result.risk === "low" || review.result.risk === "medium"),
-			dailyCapAvailable: true,
-			coolingOffElapsed: true,
-			killSwitchOff: true,
-		});
+		const githubFacts = await collectFacts(
+			{
+				repo: item.repo,
+				number: pr.number,
+				profileLogin: this.options.login,
+			},
+			sha,
+		);
+		const decision = decide(
+			noPolicy(this.options.definition.merge),
+			githubFacts && {
+				...githubFacts,
+				// collectReview has already verified every observed entry is opposite-family.
+				crossFamilyReview: true,
+				riskAcceptable:
+					review.result.risk === "low" || review.result.risk === "medium",
+				dailyCapAvailable: true,
+				coolingOffElapsed: true,
+				killSwitchOff: true,
+			},
+		);
 		item.stage = "gate";
-		item.gate ??= {
+		const approvalRequired = decision.reasons.includes(
+			"human-approval-required",
+		);
+		item.gate = {
 			pr: pr.number,
 			sha,
-			state: decision.action === "block" ? "wait-human" : "waiting-approval",
+			state: approvalRequired ? "waiting-approval" : "wait-human",
 			reasons: decision.reasons,
 		};
 		if (item.gate.state !== "waiting-approval" || item.gate.notified) return;
@@ -783,10 +791,25 @@ export class WorkRuntime {
 		return this.enqueue(async () => {
 			const state = await this.store.load();
 			const item = state.work.items[id];
-			if (!item?.gate || item.gate.sha !== sha)
-				throw Object.assign(Error("approval does not match the current gate"), {
-					code: "conflict",
-				});
+			if (
+				!item?.gate ||
+				item.gate.sha !== sha ||
+				item.gate.state !== "waiting-approval"
+			)
+				throw Object.assign(
+					Error("approval does not match an active approval gate"),
+					{
+						code: "conflict",
+					},
+				);
+			const live = await this.options.github.readPr(item.repo, item.gate.pr);
+			if (live.headSha !== sha)
+				throw Object.assign(
+					Error("approval does not match the live pull request head"),
+					{
+						code: "conflict",
+					},
+				);
 			item.gate.state = "approved";
 			item.gate.approvedAt = this.now();
 			item.updatedAt = this.now();

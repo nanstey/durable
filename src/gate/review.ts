@@ -145,20 +145,38 @@ export async function collectReview(
 		model: model.model,
 		family: familyFor(model),
 	};
+	const observed = entries.map((entry) => ({
+		provider: entry.provider,
+		model: entry.model,
+		family:
+			entry.family ??
+			(typeof entry.provider === "string" && typeof entry.model === "string"
+				? familyFor({ provider: entry.provider, model: entry.model })
+				: undefined),
+	}));
 	if (
-		entries.some(
+		observed.some(
 			(entry) =>
-				(entry.family ??
-					familyFor({ provider: entry.provider, model: entry.model ?? "" })) ===
-				expectedFamily,
+				!entry.provider ||
+				!entry.model ||
+				!entry.family ||
+				entry.family === expectedFamily ||
+				entry.family !== expected.family,
 		)
 	)
-		throw Error("reviewer assistant entry is not an independent model family");
+		throw Error(
+			"reviewer assistant entry has missing or non-independent provenance",
+		);
+	const first = observed[0];
+	if (!first?.provider || !first.model || !first.family)
+		throw Error("reviewer provenance is missing");
 	return {
 		sha: running.headSha,
 		result: review,
 		provenance: {
-			...expected,
+			provider: first.provider,
+			model: first.model,
+			family: first.family,
 			entries: entries.length,
 			source:
 				running.kind === "durable-conversation"

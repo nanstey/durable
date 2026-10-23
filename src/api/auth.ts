@@ -7,6 +7,7 @@ const writeScopes: Array<[Scope, RegExp[]]> = [
 		[
 			/^\/v1\/workers\/[^/]+\/interrupt$/,
 			/^\/v1\/items\/[^/]+\/(?:hold(?:\/verify)?|release\/request)$/,
+			/^\/v1\/gate\/[^/]+\/approve\/request$/,
 			/^\/v1\/(?:workers\/stop|pause)$/,
 		],
 	],
