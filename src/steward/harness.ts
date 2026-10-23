@@ -826,7 +826,7 @@ export async function openHarness(options: HarnessConfig) {
 			kind: "chat" | "scout",
 			idempotencyKey?: string,
 			item?: string,
-			idempotencyHash = kind,
+			idempotencyHash: string = kind,
 		) {
 			const requestKey = idempotencyKey
 				? `conversation:${idempotencyKey}`

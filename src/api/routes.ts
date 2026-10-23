@@ -122,19 +122,21 @@ export function createApi(opts: {
 		const idempotency = c.req.header("idempotency-key");
 		if (!idempotency || idempotency.length > 200)
 			throw new ApiError("invalid", "Idempotency-Key required");
+		const kind = body.kind as "chat" | "scout";
+		const item = body.item as string | undefined;
 		const id = await harness.create(
-			body.kind,
+			kind,
 			idempotency,
-			body.item,
+			item,
 			JSON.stringify(body),
 		);
 		audit(opts.agent, {
 			event: "conversation-created",
-			kind: body.kind,
+			kind,
 			conversationId: id,
 			client: c.get("actor").client,
 		});
-		return c.json({ id, kind: body.kind }, 201);
+		return c.json({ id, kind }, 201);
 	});
 	app.get("/v1/budget", async (c) => c.json((await harness.snapshot()).budget));
 	app.get("/v1/queue", async (c) => c.json({ items: await harness.queue() }));
