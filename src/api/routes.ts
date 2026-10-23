@@ -124,6 +124,8 @@ export function createApi(opts: {
 			throw new ApiError("invalid", "Idempotency-Key required");
 		const kind = body.kind as "chat" | "scout";
 		const item = body.item as string | undefined;
+		if (kind === "scout" && !item)
+			throw new ApiError("invalid", "scout conversations require an item");
 		const id = await harness.create(
 			kind,
 			idempotency,

@@ -119,6 +119,16 @@ explicit path; environment omission does not claim otherwise.
 
 See [skills-contract.md](skills-contract.md) for per-role dispatch prerequisites.
 
+## Console
+
+The optional local console is a viewer/controller, not a hub. Run `durable console
+enable`, then open the loopback address configured in its private `console.yaml`.
+It reads status, queue, inbox, audit and live conversations; it can send
+plain-text chat, abort a turn, pause an agent and use capability-gated worker
+controls. It cannot approve, resume an agent, enroll a credential, verify policy,
+run a shell command or browse files. Closing the console never stops an agent.
+See [console.md](console.md) for its localhost guardrails and PWA-ready boundary.
+
 ## API access and tokens
 
 Start the agent using [daemon commands](daemon.md). Its port is the assignment's

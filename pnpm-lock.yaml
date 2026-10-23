@@ -35,12 +35,18 @@ importers:
       hono:
         specifier: 4.13.13
         version: 4.13.13
+      htm:
+        specifier: 3.1.1
+        version: 3.1.1
       ink:
         specifier: 8.0.0
         version: 8.0.0(@types/react@19.3.0)(react@19.3.1)
       pino:
         specifier: 10.4.0
         version: 10.4.0
+      preact:
+        specifier: 10.27.2
+        version: 10.27.2
       proper-lockfile:
         specifier: 4.1.2
         version: 4.1.2
@@ -744,6 +750,9 @@ packages:
     resolution: {integrity: sha512-Hc+ghLoSt6QaYZUv0WBiIvmMDZuZZ7oaDvdH8MbfOO4lOsxdXLEvuC6ePoGs9H1X9oCLyq6+NVN0MKqD+ydxyg==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
+  htm@3.1.1:
+    resolution: {integrity: sha512-983Vyg8NwUE7JkZ6NmOqpCZ+sh1bKv2iYTlUkzlWmA5JD2acKoxd4KVxbMmxX/85mtfdnDmTFoNKcg5DGAvxNQ==}
+
   http-proxy-agent@9.1.0:
     resolution: {integrity: sha512-2NxoveTT58mjYT4n3RPTEfCZGLMbidoO8XEieXfpSYxu+PQJ1qpx4ypwH6N+uF9twBPIvRRgvkvW5HUTYWENig==}
     engines: {node: '>= 20'}
@@ -931,6 +940,9 @@ packages:
   pino@10.4.0:
     resolution: {integrity: sha512-bk1ZMTwG/Vymx+zPoa28MhNzucFvXJWp3csrSuxuHPSMeUettaCoQ5Jvg07mtC4JGNpcfTwz41oVCnNgBK9+vA==}
     hasBin: true
+
+  preact@10.27.2:
+    resolution: {integrity: sha512-5SYSgFKSyhCbk6SrXyMpqjb5+MQBgfvEKE/OC+PujcY34sOpqtr+0AZQtPYx5IA6VxynQ7rUPCtKzyovpj9Bpg==}
 
   pretty-ms@9.3.1:
     resolution: {integrity: sha512-HzMy3Geq23nVALD/M2LliU+F+M+gVNsvkQWWqeBZ8HDiCgzo6YPJ/Omrmtq24EFrIsk0a3EkQGEd7bDOo+IhGA==}
@@ -1880,6 +1892,8 @@ snapshots:
     dependencies:
       lru-cache: 11.5.3
 
+  htm@3.1.1: {}
+
   http-proxy-agent@9.1.0:
     dependencies:
       agent-base: 9.0.0
@@ -2056,6 +2070,8 @@ snapshots:
       safe-stable-stringify: 2.5.0
       sonic-boom: 4.2.1
       thread-stream: 4.2.0
+
+  preact@10.27.2: {}
 
   pretty-ms@9.3.1:
     dependencies:
