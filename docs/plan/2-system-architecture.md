@@ -1,6 +1,6 @@
 # System architecture
 
-Inputs: [1-product-review](./1-product-review.md). Revision 10 (organizations: optional policy boundary, implicit-default compatibility, named sharing). Revision 9 (O1: per-agent connectors are code-owned worker tools; Composio candidate; hosted credential custody open). Revision 8 (Warp Factories research: named work item, per-project code-enforced pipeline, optional spec gate, metrics and PR-only improvement loop; pi-durable-only personal-tool boundary). File placement, types and call stacks are in
+Inputs: [1-product-review](./1-product-review.md). Revision 11 (cross-machine organization releases: Git source, approval-class publish, pull/materialization and stale handling). Revision 10 (organizations: optional policy boundary, implicit-default compatibility, named sharing). Revision 9 (O1: per-agent connectors are code-owned worker tools; Composio candidate; hosted credential custody open). Revision 8 (Warp Factories research: named work item, per-project code-enforced pipeline, optional spec gate, metrics and PR-only improvement loop; pi-durable-only personal-tool boundary). File placement, types and call stacks are in
 [3-program-design](./3-program-design.md). Revision 1 (user comments C1-C7). Revision 2 (U1: no ntfy; U2: multi-machine web console; remote-ready daemon API; guarded console approvals). Revision 3 (repo-committed, human-trusted merge policy; interactive chat from the phone; PWA/Web Push as an additive follow-up; Linux-only first fleet). Revision 4 (dpi-* are inspiration only, no code reuse; Android/Termux daemon as an additional platform target behind a platform abstraction). Revision 7 (U6: a second worker kind, `durable-conversation`, alongside Pi-session workers; a conversation tree and `durable attach` TUI viewable in Orca terminals; a human-held rule; D4, D19, D20; revised after a cross-family review: `ModelRuntime` model auth, named profiles only, minimal durable-shell environment, fenced hold, advisory-only confinement, replay-safe push/PR, guarded release, kind selection precedence, one lifecycle table). Revision 6 (the engine moves to its own public repo `nanstey/durable`; the skills repo keeps a thin integration; D18). Revision 5 (repo policy mechanism undecided: a pluggable `RepoPolicySource` seam with mechanism-independent invariants; the phone is just another browser client with identical capabilities; no default chat rate limits).
 
 Evidence base (read for this plan):
@@ -524,7 +524,9 @@ An **organization** is a non-secret configuration boundary around agents, not a 
 
 Effective policy is `organization defaults < agent definition`. An agent may narrow a repo/tool/connector set, lower limits, extend quiet hours, reduce notification delivery or select an already-permitted pipeline subset. It cannot add a repo, tool or connector; turn a read access into write; raise limits; weaken quiet hours; add notification targets; or enable a disabled stage. Loosening is a doctor error. The effective policy is checked before source polling, checkout, claim, dispatch, connector invocation and GitHub effects.
 
-Profiles remain the sole machine-local credential unit. Organization `profileRefs` are named aliases only; use across organizations requires a bilateral named reference. A shared GitHub account, subscription or connector credential is consequently deliberate, visible to doctor as a warning, and never inferred from matching names. `buildAgentEnv` uses the selected agent profile plus effective organization policy only; it cannot resolve another organization's profile, repo, tool or connector. Audit, work-item, notification, connector and metric records carry `organization` (including `default`). Global pause remains global; organization pause fences only its member agents. CLI/API/console expose list/show, filters and fleet grouping. Flat, single-operator organizations only: nesting, RBAC and organization-owned secrets are deferred.
+Organizations span machines through a dedicated Git-backed, non-secret organization repository. An approved release records the organization name, parent hash and content hash. `durable org publish` is an approval-class nonce action bound to those hashes. On startup, bounded polling and a slice-11 console sync request, each member daemon independently pulls, verifies and materializes its effective policy with the released version. The console reports versions and requests sync for reachable daemons, but is neither source of truth nor a credential path.
+
+Profiles remain the sole machine-local credential unit. An agent resolves its own named profile only after local materialization; no organization document carries an alias, credential or profile selection. `buildAgentEnv` uses that profile plus effective organization policy only. Audit, work-item, notification, connector and metric records carry organization id and version. A bad/unapproved release, local materialization drift or Git conflict retains the last valid policy and fails closed for new work. An unreachable member becomes stale, may continue only under its last valid same-or-stricter policy until `maxStaleAge`, then stops new source, dispatch and connector work. Global pause remains global; organization pause fences only its members. Flat, single-operator organizations only: nesting, RBAC and organization-owned secrets are deferred.
 
 ## 3. Contracts
 
@@ -625,7 +627,6 @@ network: { bind: loopback } # loopback | tailnet (tailnet accepted from slice 11
 version: 1
 name: work
 memberAgents: [acme-api]
-profileRefs: [work] # named local profile aliases; sharing is explicit on both sides
 settings:
   scope: { repos: [acme/api] }
   pipeline: { stages: [scout, build, review, gate, handoff] }
@@ -636,7 +637,7 @@ settings:
   connectors: { allow: [{ provider: composio, tool: SEARCH_ISSUES, access: read }], deny: [] }
 ```
 
-These are policy ceilings, not credential/configuration values. `profileRefs` are names only, and no organization file can select a profile for an agent.
+These are policy ceilings only. The document contains no profile names, credential aliases or credential values; each member definition selects and resolves its profile locally.
 
 ### 3.2 Machine file (`~/.config/durable/machine.yaml`, never committed)
 
@@ -649,6 +650,7 @@ platform: # auto-detected; explicit values override
   tailscaleCli: true # false on Android (Tailscale app only)
   allowAutoMerge: true # android defaults to false
 profiles: { allowDefault: false } # agents must use named profiles; true is an explicit opt-in (in-process users only)
+organizations: { remote: <organization-git-remote>, pollSeconds: 300, maxStaleAge: 86400 } # local clone/cache only; policy source is Git
 agents: # assignment: which agents run here (id, or id + port)
   - acme-api
   - { id: acme-docs, port: 4802 } # default: stable allocation from daemon.portBase, recorded in agents/<id>/port
