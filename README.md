@@ -5,6 +5,10 @@ Built on [`@earendil-works/pi-durable`](https://www.npmjs.com/package/@earendil-
 
 Status: planning. No code yet.
 
+## Development checks
+
+Run `pnpm check` for TypeScript, Biome linting and formatting, and Fallow dead-code and duplication analysis. Use `pnpm test` and `pnpm hygiene` before opening a PR.
+
 ## Principles
 
 - One agent uses one credential profile and one GitHub identity.

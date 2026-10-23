@@ -6,6 +6,7 @@ Revision 1: throwaway-repo canary removed (C6). Revision 2: renumbered; shadow r
 Depends on: spec 07 (gate, hard-path rule, approval class with the nonce path). The passkey variant of `verify-policy` arrives in spec 12a.
 
 ## Checklist
+
 1. **Neutral policy model** `gate/policy.ts`: the `AutoMergePolicy` type the gate consumes (`enabled`, `authors`, `baseBranches`, `pathAllow`, `pathDeny`, `maxChangedLines`, `maxFiles`, `maxRisk`, `requiredChecks`, `methods`, `requireCrossFamilyReview`, `requireHumanApproval`, `coolingOffMinutes`). It is the gate's input contract, **not a storage format**. Acceptance: type tests; a validator that rejects `requireHumanApproval: false` without `enabled: true` and any `pathAllow` entry that matches a hard path.
 2. **The seam** `gate/policySource.ts`: `RepoPolicySource { kind, resolve(repo), protectedLocations(repo), describeChange(repo, since) }` and `PolicyResolution { state: verified | unverified | invalid | unavailable | none, policy?, ref, fingerprint }` (architecture §3.6). `scope.repos[].policySource: { kind }` in the definition schema, default `none`; unknown kinds are a doctor error ("source kind not implemented"). Acceptance: schema and doctor tests.
 3. **Built-in sources:** `none` (always `state: none`, auto off) and `fixture` (test-only: scripted resolutions for every state, scripted `protectedLocations` and `describeChange`; refused outside tests unless `DURABLE_ALLOW_FIXTURE_SOURCE=1`). Acceptance: both pass the seam contract suite.
@@ -22,6 +23,7 @@ Depends on: spec 07 (gate, hard-path rule, approval class with the nonce path). 
 14. **Docs:** `docs/operator.md` (modes `never | human-approval | auto-when-safe`, shadow readiness, the seam and its invariants, why `none` is the default, how to read the shadow report, the **open decision** for choosing a source per repo, listing the candidate kinds without recommending one).
 
 ## Risk controls
+
 - Default off everywhere: every real repo uses `none`. Real auto-merge cannot be enabled until a source for that repo is chosen, specified and implemented, and passes the contract suite; it additionally needs the definition's `auto-when-safe` with `shadow: false` and GitHub's own rules passing.
 - Invariants hold for any future mechanism: nothing is read from a PR head, fork or worker worktree; changes to the policy holder, CODEOWNERS or GitHub rules always need human approval; missing/unverified means off; the definition only tightens; no `--admin` or bypass.
 - Missing or unknown facts never merge. One merge per tick. Kill switch, policy state and daily cap are re-checked immediately before the merge call.
@@ -29,7 +31,9 @@ Depends on: spec 07 (gate, hard-path rule, approval class with the nonce path). 
 - The `fixture` source cannot be enabled on real repos.
 
 ## Out of scope
+
 Any real policy source, file name, path, format or trust-pin layout (open options: in-repo file, GitHub rules/rulesets only, agent-definition-only, out-of-repo store); policy templates; a canary repo; merge queues beyond `--auto`; automatic revert; multi-repo atomic merges.
 
 ## Done when
+
 CI green; seam contract suite passes for `none` and `fixture`; fixture matrix passes; shadow mode ran on real PRs with `none` and the operator reviewed the readiness reports; the choice of a real source per repo is recorded as an open decision in the README (not made here).

@@ -6,6 +6,7 @@ New in revision 3 (Q16): split out of the old spec 12.
 Depends on: spec 11 (HTTPS console on the tailnet); the slice 1 spike result for iOS/Android PWA and Web Push. Nothing else depends on this slice.
 
 ## Checklist
+
 1. **Additive-only guard:** before any change, run the slice 8 PWA-readiness tests (same-origin relative URLs, CSP with `worker-src 'self'` and `manifest-src 'self'`, reserved `/api/push/*` returning 501, `push.enabled: false`) and record them as the baseline; they must still pass at the end. A test asserts this slice modifies no file under `api/`, `steward/` or `notify/` (additive-only check in the PR checklist).
 2. **PWA:** `web/manifest.webmanifest`, icons, `web/sw.js` caching the **static shell only** (never API responses, transcripts or any authenticated data; versioned cache; clean-up on update), install flow documented (iOS 16.4+: Add to Home Screen; Android install prompt). Acceptance: manifest/service-worker tests; offline shows an "offline" shell and no stale data.
 3. **VAPID and subscription store:** `durable console push-keys init` generates a VAPID key pair into `~/.config/durable/console/vapid.json` (0600, `version: 1`); subject from `console.yaml push.subject` (machine-local mailto placeholder); `push-subscriptions.json` (0600) holds endpoints and keys; `push.enabled: true` switches the feature on. Acceptance: file modes; keys never printed; schema tests.
@@ -16,12 +17,15 @@ Depends on: spec 11 (HTTPS console on the tailnet); the slice 1 spike result for
 8. **Live:** install on a phone, subscribe, trigger `approval-needed` and `escalation` test events, confirm latency and payload; test with the console host offline (no push, no harm).
 
 ## Risk controls
+
 - No authenticated data in service-worker caches. No secrets, nonces or message bodies in push payloads.
 - The feature is off by default (`push.enabled: false`).
 - If iOS or the chosen browser cannot receive pushes, the slice can stop after item 2 (install only) or be dropped; no other slice is affected.
 
 ## Out of scope
+
 Approvals from a notification action, inbound action buttons, third-party push services (ntfy etc.), background sync of conversations.
 
 ## Done when
+
 Additive-only checks and baseline tests pass; live phone test recorded (or the user drops push after the spike); user decides whether to keep it.

@@ -10,6 +10,7 @@ Revision 6 (U5): all paths are repo-root paths of the **durable repo** (`nanstey
 Depends on: spec 01 (version pins, symlink result, Anthropic option for the `modelAuth` seam).
 
 ## Checklist
+
 1. **Scaffold the repo** (durable repo, root): `package.json` (`@nanstey/durable`, `"type": "module"`, `engines.node` **`>=22.19.0`**, `files` excluding `spike/`, `docs/plan/` optional), `pnpm-lock.yaml`, `tsconfig.json` (`erasableSyntaxOnly`), `bin/durable`, `AGENTS.md` (public repo rules, commit conventions), existing `LICENSE` kept. **Exact** pins from the spike (`docs/evidence/spike.md` "Version pins"): `@earendil-works/pi-durable@1.4.0`, `@earendil-works/pi-ai@1.4.0`, `@earendil-works/pi-coding-agent@1.4.0`, and `@earendil-works/chord@1.4.0` as a **direct** dependency (pnpm does not hoist it); `typebox`, `yaml`; dev: `typescript`, `@types/node`. A test asserts these exact versions and the engines floor in `package.json`. Branch flow respects the protected `main` (PRs, squash-only). Acceptance: `pnpm install --frozen-lockfile` in a fresh clone; `tsc --noEmit` passes.
 2. **Schemas + loader** `src/config/{schema,agent,machine,manifest,load,paths}.ts`: agent definition, machine file, profile manifest (architecture §3.1, §3.2, D3). Reject unknown keys; `peers` must be `[]`; `network.bind` = `loopback`; `merge.mode` default `human-approval`; **definition validator rejects absolute or `~` path fields and hostnames**; `profile` must match `^[A-Za-z0-9._-]+$`. Paths: `DURABLE_HOME`, `DURABLE_AGENTS_DIR` (default `~/.config/durable/agents`), machine file `~/.config/durable/machine.yaml`. Acceptance: table tests (valid, unknown key, path-like field, bad profile name, agent not in machine `agents`, definition missing).
 3. **Generated JSON Schemas** under `schema/` + a drift test.
@@ -27,6 +28,7 @@ Depends on: spec 01 (version pins, symlink result, Anthropic option for the `mod
 15. **Manual verification** (record in the plan README `## Slices`): `durable profile bind-github` and `durable doctor` on two real profiles; swap `GH_TOKEN` to see the mismatch; run an agent assigned to a machine without the profile and read the fix text.
 
 ## Risk controls
+
 - Doctor and profile commands never print tokens or credential file contents.
 - Tests never write to the real `auth.json`/profile files.
 - Public repo: no absolute or personal paths, hostnames, tailnet names, emails or secrets in committed files; examples use placeholders and `~`-relative paths only, and definitions use repo slugs; enforced by item 14.
@@ -34,7 +36,9 @@ Depends on: spec 01 (version pins, symlink result, Anthropic option for the `mod
 - Fine-grained token guidance is advisory in `doctor`; it never blocks on a warning.
 
 ## Out of scope
+
 Steward process, systemd units, GitHub polling, dispatcher, notifications, and everything in the skills repo (spec 02b).
 
 ## Done when
+
 Items 1-14 pass in the durable repo's CI (including the hygiene scan over the plan folder), item 15 recorded.

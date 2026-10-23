@@ -9,6 +9,7 @@ Revision 7 (review): the reviewer result is kind-neutral (`ReviewResult` + `Mode
 Depends on: spec 06 (PRs exist; `approval/nonce.ts` with `release`) and spec 04 (notifier delivers `approval-needed`).
 
 ## Checklist
+
 1. **Policy + facts** `gate/{policy,hardPaths,tighten,facts}.ts`: `EffectivePolicy` built from the definition's `merge` ceiling and `tighten` block (can only restrict, clamped with a warning; in this slice there is no policy source yet, so auto stays disabled); `isHardPath` (`CODEOWNERS`, `.github/CODEOWNERS`, `docs/CODEOWNERS`, `.github/**`; the source-declared protected locations are added in spec 09); `collectFacts(pr, headSha)` using `gh pr view --json isDraft,author,headRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,files,additions,deletions,reviews`. Unknown/failed reads yield `null`. Only GitHub-computed fields and steward records are inputs (G6). `reviews` from the PR author's own login are ignored. Acceptance: fixture tests over recorded, scrubbed `gh` outputs (add a small recording helper script under `tests/`, never run in CI).
 2. **Decide** `gate/decide.ts`: pure, per D8 and G1-G4, G6-G8. Modes `never` and `human-approval` return `wait-human`; `REVIEW_REQUIRED` returns `wait-human` with reason `github-requires-approval-from-other-account`; the `merge` branch exists but the executor only runs it in spec 09. Hard-path PRs return `wait-human` with reason `policy-or-owner-file-change` (G12) in every mode. The approval class also exposes `resume` (un-pause after a kill) via `durable resume` + nonce, and reserves `verify-policy` for spec 09. Acceptance: truth table; **property test** (flipping any required fact to false/null never yields `merge`; LLM-derived inputs only lower the result); **G6 test** (forged labels, comments, statuses authored by the operator identity have no effect, except `durable/hold` which can only block).
 3. **Reviewer job** `gate/review.ts` + `templates/reviewer-brief.md`: launch a reviewer through the dispatcher and a worker kind (role `reviewer`, read-only checkout of the PR head; kind `pi-session` by default, or `durable-conversation` when spec 06c exists and the agent allows it for reviewers; a durable reviewer needs an opposite-family model resolvable through the profile, DW9) with the opposite model family (family rules copied from `harness/pi/bin/pi-improve` with a drift test); the result is a kind-neutral **`ReviewResult`** `{verdict: approve|changes|blocked, risk: low|medium|high, summary, headSha}` plus **`ModelProvenance`** `{provider, model, family, entries, source}`: a **Pi-session** reviewer writes `ReviewResult` as JSON to a steward-provided file outside the checkout (schema-validated) and provenance comes from its session log's successful assistant messages (`source: pi-session-log`); a **durable** reviewer calls the code-owned `report_verdict` tool (spec 06c item 11) and provenance comes from the child conversation's assistant entries (`source: durable-entries`). Either way the steward records `steward.reviews` with `sha`, the result and the provenance; the family check runs on **every** successful assistant entry (a fallback can change family); any same-family entry => verdict refused and the review re-run; a `headSha` that differs from the reviewed SHA => rejected. Acceptance (run for **both kinds**): same-family config refused by doctor and launch; valid result recorded with provenance; malformed result rejected; missing result => reviewer failed (no verdict); a same-family fallback entry refuses the verdict; new commit voids the verdict.
@@ -21,6 +22,7 @@ Depends on: spec 06 (PRs exist; `approval/nonce.ts` with `release`) and spec 04 
 10. **Docs**: `docs/operator.md` (approval flow, the nonce, why GitHub labels/comments are not approvals under a shared identity, threat model limits).
 
 ## Risk controls
+
 - The reviewer and producer families differ; verify from the launch spec **and** the recorded `ModelProvenance` (session log or durable entries); refuse otherwise.
 - The nonce is the only approval secret and is out-of-band (desktop/command only); a worker session never sees it, and the agent-readable inbox and GitHub never carry it. Because workers share the operator's OS user and token, this defends against accidents and prompt injection, not a fully compromised worker (documented).
 - The gate does not read forgeable GitHub signals (G6). `durable/hold` can only block.
@@ -28,7 +30,9 @@ Depends on: spec 06 (PRs exist; `approval/nonce.ts` with `release`) and spec 04 
 - No merge call exists in this slice's executor path.
 
 ## Out of scope
+
 Merging by the steward; enabling `auto-when-safe`; the web console.
 
 ## Done when
+
 CI green; live PR shows the gate report and waits; at least two resolution paths proven; user accepts report format, notification flow and the shared-identity approval behaviour (Q10).

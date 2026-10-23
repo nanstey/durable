@@ -1,3 +1,60 @@
-import { existsSync, openSync, closeSync, unlinkSync, writeFileSync } from "node:fs"; import { join } from "node:path"; import { loadAgent,loadMachine } from "../config/load.ts"; import { durableHome } from "../config/paths.ts"; import { startApi } from "../api/server.ts"; import { openState,saveState,audit } from "./state.ts";
-export function run(agentId:string){const def=loadAgent(agentId),machine=loadMachine();if(!machine.agents.some(a=>(typeof a==="string"?a:a.id)===agentId))throw Error("agent is not assigned to this machine");const dir=join(durableHome(),"agents",agentId);const lock=join(dir,"lock");let fd:number;try{fd=openSync(lock,"wx");writeFileSync(fd,String(process.pid));}catch{throw Error("steward already running");}const assignment=machine.agents.find(a=>(typeof a==="string"?a:a.id)===agentId);const port=typeof assignment==="object"&&assignment.port?assignment.port:(machine.daemon?.portBase||4700);const server=startApi({agent:agentId,machine:machine.name,profile:def.profile,port});let state=openState(agentId);const tick=setInterval(()=>{state=openState(agentId);if(!state.paused){audit(agentId,{event:"tick"});saveState(agentId,state);}},1000);const close=()=>{clearInterval(tick);server.close();closeSync(fd);if(existsSync(lock))unlinkSync(lock);};process.once("SIGTERM",close);process.once("SIGINT",close);}
-if(process.argv[1]?.endsWith("main.ts")&&process.argv[2])run(process.argv[2]);
+import {
+	closeSync,
+	existsSync,
+	openSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import { startApi } from "../api/server.ts";
+import { loadAgent, loadMachine } from "../config/load.ts";
+import { durableHome } from "../config/paths.ts";
+import { audit, openState, saveState } from "./state.ts";
+export function run(agentId: string) {
+	const def = loadAgent(agentId),
+		machine = loadMachine();
+	if (
+		!machine.agents.some((a) => (typeof a === "string" ? a : a.id) === agentId)
+	)
+		throw Error("agent is not assigned to this machine");
+	const dir = join(durableHome(), "agents", agentId);
+	const lock = join(dir, "lock");
+	let fd: number;
+	try {
+		fd = openSync(lock, "wx");
+		writeFileSync(fd, String(process.pid));
+	} catch {
+		throw Error("steward already running");
+	}
+	const assignment = machine.agents.find(
+		(a) => (typeof a === "string" ? a : a.id) === agentId,
+	);
+	const port =
+		typeof assignment === "object" && assignment.port
+			? assignment.port
+			: machine.daemon?.portBase || 4700;
+	const server = startApi({
+		agent: agentId,
+		machine: machine.name,
+		profile: def.profile,
+		port,
+	});
+	let state = openState(agentId);
+	const tick = setInterval(() => {
+		state = openState(agentId);
+		if (!state.paused) {
+			audit(agentId, { event: "tick" });
+			saveState(agentId, state);
+		}
+	}, 1000);
+	const close = () => {
+		clearInterval(tick);
+		server.close();
+		closeSync(fd);
+		if (existsSync(lock)) unlinkSync(lock);
+	};
+	process.once("SIGTERM", close);
+	process.once("SIGINT", close);
+}
+if (process.argv[1]?.endsWith("main.ts") && process.argv[2])
+	run(process.argv[2]);

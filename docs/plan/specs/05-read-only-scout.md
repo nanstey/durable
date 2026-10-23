@@ -7,6 +7,7 @@ Revision 2: renumbered (was 04). `GET /v1/queue` and the SSE `queue` frames exte
 Depends on: spec 04 (client, notifier) and spec 03 (API).
 
 ## Checklist
+
 1. **Source interface** `sources/types.ts`: `Source.poll(): Promise<Candidate[]>`; `Candidate = { ref, kind, repo, title, author, authorAssociation, labels, updatedAt, bodyRef, url, state }`. Bodies are stored as references and never logged. Acceptance: type tests via fixtures.
 2. **GitHub issues** `sources/githubIssues.ts`: `gh issue list --json ... --label ...` with the agent env; pagination; `exclude` labels; conditional requests or a minimum interval; rate-limit remaining read from `gh api rate_limit` and logged. Acceptance: fixture-driven tests (stub `gh`).
 3. **Own PRs** `sources/githubPrs.ts`: PRs authored by the declared login with labels `durable/agent:<id>`, summarised needs (failing checks, changes requested, behind base, conflicts). Acceptance: fixtures.
@@ -19,13 +20,16 @@ Depends on: spec 04 (client, notifier) and spec 03 (API).
 10. **Live run** on the pilot scope (a low-risk pilot repo of the operator's choice; the skills repo is a candidate; read-only token): queue is plausible; record API request count per tick and rate-limit headroom; tune `pollSeconds`.
 
 ## Risk controls
+
 - Run this slice with a profile whose fine-grained token is read-only (Contents R, Issues R, Pull requests R, Metadata R); doctor warns if write permissions are present while no writer slice is enabled (advisory). Operator-identity reach makes this the safest first live run.
 - Issue/PR text is untrusted: truncated, never executed, never placed in a prompt unless the author is trusted.
 - Respect rate limits: minimum interval, backoff with jitter.
 - Audit logs counts and ids, not bodies.
 
 ## Out of scope
+
 Claims, labels, comments, worktrees, workers, gate.
 
 ## Done when
+
 CI green; live queue reviewed by the user; thresholds tuned in the agent file.
