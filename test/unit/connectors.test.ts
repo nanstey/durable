@@ -8,9 +8,9 @@ import { ConnectorMediator } from "../../src/connectors/mediation.ts";
 import { ConnectorProviders } from "../../src/connectors/select.ts";
 import { validateAgent } from "../../src/config/schema.ts";
 
-const definition = () =>
+const definition = (id = "agent") =>
 	validateAgent({
-		id: "agent",
+		id,
 		profile: "work",
 		limits: { maxToolCalls: 3, dailyDollars: 2 },
 		connectors: [
@@ -27,7 +27,7 @@ const definition = () =>
 			},
 		],
 	});
-function buildMediator() {
+function buildMediator(id = `agent-${Math.random().toString(36).slice(2)}`) {
 	const fake = new FakeConnectorProvider({
 		calendar: {
 			connection: "work-calendar",
@@ -40,8 +40,9 @@ function buildMediator() {
 	});
 	return {
 		fake,
+		agent: id,
 		mediator: new ConnectorMediator(
-			definition(),
+			definition(id),
 			new ConnectorProviders([fake]),
 		),
 	};
@@ -91,30 +92,39 @@ test("connector schema defaults empty and rejects unsafe writes", () => {
 	);
 });
 test("connector mediation is profile-bound, allowlisted and untrusted", async () => {
-	const { fake, mediator } = buildMediator();
-	const result = await mediator.invoke(call(), new AbortController().signal);
+	const { fake, mediator, agent } = buildMediator();
+	const result = await mediator.invoke(
+		call({ agent }),
+		new AbortController().signal,
+	);
 	assert.equal(result.untrusted, true);
 	assert.match(result.content, /Ignore prior instructions/);
 	assert.equal(fake.calls.length, 1);
 	await assert.rejects(
 		() =>
-			mediator.invoke(call({ profile: "other" }), new AbortController().signal),
+			mediator.invoke(
+				call({ agent, profile: "other" }),
+				new AbortController().signal,
+			),
 		/profile mismatch/,
 	);
 	await assert.rejects(
 		() =>
-			mediator.invoke(call({ tool: "missing" }), new AbortController().signal),
+			mediator.invoke(
+				call({ agent, tool: "missing" }),
+				new AbortController().signal,
+			),
 		/allowlisted/,
 	);
 });
 test("connector write, call budget and cancellation fail closed", async () => {
-	const { mediator } = buildMediator();
+	const { mediator, agent } = buildMediator();
 	await mediator.invoke(
-		call({ tool: "create", access: "write" }),
+		call({ agent, tool: "create", access: "write" }),
 		new AbortController().signal,
 	);
 	await assert.rejects(
-		() => mediator.invoke(call(), new AbortController().signal),
+		() => mediator.invoke(call({ agent }), new AbortController().signal),
 		/budget exhausted/,
 	);
 	const slow = new FakeConnectorProvider({
@@ -127,10 +137,10 @@ test("connector write, call budget and cancellation fail closed", async () => {
 	const controller = new AbortController();
 	controller.abort(Error("cancelled"));
 	await assert.rejects(() =>
-		new ConnectorMediator(definition(), new ConnectorProviders([slow])).invoke(
-			call(),
-			controller.signal,
-		),
+		new ConnectorMediator(
+			definition(agent),
+			new ConnectorProviders([slow]),
+		).invoke(call({ agent }), controller.signal),
 	);
 });
 test("connector mediation writes redacted audit records", async (t) => {
@@ -142,9 +152,9 @@ test("connector mediation writes redacted audit records", async (t) => {
 		else process.env.DURABLE_HOME = prior;
 		rmSync(root, { recursive: true, force: true });
 	});
-	const { mediator } = buildMediator();
+	const { mediator, agent } = buildMediator("agent");
 	await mediator.invoke(
-		call({ input: { token: "ghp_not-a-real-token" } }),
+		call({ agent, input: { token: "ghp_not-a-real-token" } }),
 		new AbortController().signal,
 	);
 	const { readFileSync } = await import("node:fs");

@@ -26,6 +26,7 @@ export type WorkItemTask = {
 	briefText?: string;
 	resume?: boolean;
 	finished?: boolean;
+	reviewFailures?: Record<string, number>;
 	review?: {
 		id: string;
 		kind: "pi-session" | "durable-conversation";

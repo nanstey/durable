@@ -151,7 +151,7 @@ export class Notifier {
 			agent: this.options.agent,
 			event: "approval-needed",
 			target,
-			title: "Durable release approval",
+			title: "Durable approval required",
 		};
 		const configured = rule(this.definition, event);
 		let delivered = false;

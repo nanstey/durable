@@ -359,13 +359,61 @@ export class Github implements WorkGithub {
 		};
 	}
 	async readyPr(repo: string, number: number, item: string) {
-		await this.request(
-			repo,
-			`repos/${repo}/pulls/${number}`,
-			"PATCH",
-			{ draft: false },
-			item,
+		const [owner, name] = repo.split("/");
+		const query = `mutation($owner: String!, $name: String!, $number: Int!) {
+			repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } }
+		}`;
+		const lookup = await this.options.processes.launch(
+			[
+				"gh",
+				"api",
+				"graphql",
+				"-f",
+				`query=${query}`,
+				"-F",
+				`owner=${owner}`,
+				"-F",
+				`name=${name}`,
+				"-F",
+				`number=${number}`,
+			],
+			this.options.env,
+			{ item },
 		);
+		if (lookup.exitCode !== 0) throw Error("GitHub pull request lookup failed");
+		const id = (
+			JSON.parse(lookup.stdout) as {
+				data?: { repository?: { pullRequest?: { id?: string } } };
+			}
+		).data?.repository?.pullRequest?.id;
+		if (!id) throw Error("GitHub pull request node ID is unavailable");
+		const mutation =
+			"mutation($pullRequestId: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) { pullRequest { isDraft } } }";
+		const result = await this.options.processes.launch(
+			[
+				"gh",
+				"api",
+				"graphql",
+				"-f",
+				`query=${mutation}`,
+				"-f",
+				`pullRequestId=${id}`,
+			],
+			this.options.env,
+			{ item },
+		);
+		if (result.exitCode !== 0)
+			throw Error("GitHub could not mark pull request ready");
+		const draft = (
+			JSON.parse(result.stdout) as {
+				data?: {
+					markPullRequestReadyForReview?: {
+						pullRequest?: { isDraft?: boolean };
+					};
+				};
+			}
+		).data?.markPullRequestReadyForReview?.pullRequest?.isDraft;
+		if (draft !== false) throw Error("GitHub pull request is still draft");
 	}
 	async mirrorGate(
 		repo: string,
@@ -376,7 +424,13 @@ export class Github implements WorkGithub {
 	) {
 		const marker = `<!-- durable-gate sha=${sha} -->`;
 		const comments = await this.listComments(repo, number);
-		if (!comments.some((comment) => comment.body.includes(marker)))
+		if (
+			!comments.some(
+				(comment) =>
+					comment.body.includes(marker) &&
+					comment.login?.toLowerCase() === this.options.login.toLowerCase(),
+			)
+		)
 			await this.createComment(repo, number, `${marker}\n${report}`);
 		try {
 			await this.request(
@@ -384,9 +438,9 @@ export class Github implements WorkGithub {
 				`repos/${repo}/statuses/${sha}`,
 				"POST",
 				{
-					state: "success",
+					state: "pending",
 					context: "durable/review",
-					description: "Durable review complete",
+					description: "Durable review awaits human approval",
 				},
 				item,
 			);
