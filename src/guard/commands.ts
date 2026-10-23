@@ -3,8 +3,12 @@ export const blockedWorkerCommandPatterns: ReadonlyArray<RegExp> = [
 	/\bgh\s+pr\s+merge\b/i,
 	/\bgh\s+api\b.*\bmerge\b/i,
 	/\bgh\b.*\s--admin\b/i,
-	/\bgit\s+push\b.*(?:\s--force(?:-with-lease)?\b|\s-f\b)/i,
-	/\bgit\s+push\b.*\b(?:main|master)\b/i,
+	/\bgh\b.*\s--force\b/i,
+	/\bgit\s+push\b/i,
+	/\bgit\s+(?:merge|rebase|worktree)\b/i,
+	/\bgit\s+reset\s+--hard\b/i,
+	/\bgit\s+(?:switch|checkout)\b/i,
+	/(?:^|[;&|]\s*)cd\s+(?:\/|~)/i,
 ];
 export function blockedWorkerCommand(command: string): boolean {
 	return blockedWorkerCommandPatterns.some((pattern) => pattern.test(command));
