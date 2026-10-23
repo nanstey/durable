@@ -219,6 +219,7 @@ export async function run(
 			models: dependencies.models,
 			extensions: dependencies.extensions,
 			work,
+			notifyDue: () => notifier.due(),
 			checkoutFor: (repo) => checkoutFor(machine, repo),
 		});
 		localToken(agent);

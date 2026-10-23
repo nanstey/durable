@@ -26,6 +26,8 @@ export type AgentDef = {
 		labels?: string[];
 		exclude?: string[];
 		trustedAuthors?: string[];
+		blockedAuthors?: string[];
+		updatedBefore?: number;
 		own?: boolean;
 		glob?: string;
 		statusField?: string;

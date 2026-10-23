@@ -39,7 +39,7 @@ export interface WorkerKind {
 	readonly name: "pi-session" | "durable-conversation";
 	start(job: JobSpec): Promise<WorkerHandle>;
 	status(handle: WorkerHandle): Promise<"running" | "exited" | "unknown">;
-	result(handle: WorkerHandle): Promise<{ status: string }>;
+	result(handle: WorkerHandle): Promise<{ status: string; cost?: number }>;
 	interrupt(handle: WorkerHandle, mode: "soft" | "hard"): Promise<void>;
 	steer?(handle: WorkerHandle, text: string): Promise<void>;
 	transcript(handle: WorkerHandle): AsyncIterable<string>;

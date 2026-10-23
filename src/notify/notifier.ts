@@ -80,6 +80,7 @@ export type NotifierOptions = {
 	desktop?: DesktopNotifier;
 	inbox?: InboxChannel;
 	profileLogin?: string;
+	env?: NodeJS.ProcessEnv;
 };
 export class Notifier {
 	private readonly options: NotifierOptions;
@@ -90,6 +91,7 @@ export class Notifier {
 	private readonly desktop: DesktopNotifier;
 	private readonly inbox: InboxChannel;
 	private readonly login?: string;
+	private readonly env?: NodeJS.ProcessEnv;
 	constructor(options: NotifierOptions) {
 		this.options = options;
 		this.now = options.now ?? Date.now;
@@ -99,6 +101,7 @@ export class Notifier {
 		this.desktop = options.desktop ?? new NotifySendNotifier();
 		this.inbox = options.inbox ?? machineInbox;
 		this.login = options.profileLogin ?? this.profileLogin();
+		this.env = options.env;
 	}
 	private profileLogin(): string | undefined {
 		try {
@@ -248,6 +251,7 @@ export class Notifier {
 						pending.payload,
 						channel.targetLogin ?? "",
 						this.login,
+						this.env,
 					);
 					if (result === "skipped-self")
 						audit(this.options.agent, {
