@@ -10,6 +10,8 @@ import { resolveProfile } from "../identity/profiles.ts";
 import { workerToolEnv } from "../identity/workerTools.ts";
 import { Notifier } from "../notify/notifier.ts";
 import { type JobSpec, WorkerKindRegistry } from "../workers/kind.ts";
+import { MemoryDurableAnchor } from "../workers/durable/anchor.ts";
+import { DurableConversationKind } from "../workers/durableConversation.ts";
 import { PiSessionKind } from "../workers/piSession.ts";
 import { WorkerRegistry } from "../workers/registry.ts";
 import { agentDir } from "./files.ts";
@@ -106,6 +108,7 @@ export function setupWorkers(options: SetupOptions) {
 			throw Error("dispatch paused");
 	};
 	const kinds = new WorkerKindRegistry();
+	kinds.register(new DurableConversationKind(new MemoryDurableAnchor()));
 	kinds.register(
 		new PiSessionKind(dispatcher, join(agentDir(agent), "launchers"), {
 			check: async (item) => {
