@@ -12,7 +12,7 @@ import { durableHome } from "../config/paths.ts";
 import { startConsole } from "../console/main.ts";
 import { ensureConsoleConfig } from "../console/registry.ts";
 import { ConsoleServiceManager } from "../platform/service/console.ts";
-import { SystemdUserServiceManager } from "../platform/service/systemdUser.ts";
+import { selectServiceManager } from "../platform/service/select.ts";
 import { resumeLocal } from "../steward/killswitch.ts";
 import { assignedPort, run } from "../steward/main.ts";
 import { attachTui } from "../tui/main.ts";
@@ -388,10 +388,13 @@ for (const action of ["enable", "disable", "start", "stop", "logs"] as const) {
 				const report = doctorCommand(agent);
 				if (!report.ok) throw Error(formatDoctor(report));
 			}
-			const manager = new SystemdUserServiceManager({
-				dryRun: args["dry-run"],
+			const manager = selectServiceManager({
 				home: process.env.DURABLE_HOME ? durableHome() : undefined,
 			});
+			if (args["dry-run"] && action !== "logs") {
+				console.log(`durable ${action} ${agent}`);
+				return;
+			}
 			if (action === "logs")
 				for await (const line of manager.logs(agent))
 					process.stdout.write(line);

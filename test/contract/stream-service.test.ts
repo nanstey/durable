@@ -5,6 +5,7 @@ import test from "node:test";
 import { execa } from "execa";
 import { createApi } from "../../src/api/routes.ts";
 import { createToken, revokeToken } from "../../src/api/tokens.ts";
+import { selectServiceManager } from "../../src/platform/service/select.ts";
 import {
 	SystemdUserServiceManager,
 	unitText,
@@ -46,6 +47,22 @@ test("ServiceManager installs units, enables, stops, disables, reads logs and st
 		),
 	);
 	assert.ok(commands.some((args) => args[0] === "journalctl"));
+});
+test("non-Linux service selection skips with a clear Linux-only message", async () => {
+	const messages: string[] = [];
+	const write = console.log;
+	console.log = (message: string) => messages.push(message);
+	try {
+		const service = selectServiceManager({ platform: "darwin" });
+		await service.enable("fixture");
+		assert.match(
+			(await service.status("fixture")).text,
+			/Linux with systemd --user/,
+		);
+	} finally {
+		console.log = write;
+	}
+	assert.match(messages.join("\n"), /skipping/);
 });
 test("service failure is explicit; inactive status is not treated as a crash", async () => {
 	const service = new SystemdUserServiceManager({

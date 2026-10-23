@@ -85,7 +85,12 @@ export const agentSchema = object(
 		version: { const: 1 },
 		description: text,
 		network: object({ bind: { const: "loopback" } }),
-		schedule: object({ pollSeconds: positive, quietHours: text }),
+		schedule: object({
+			pollSeconds: positive,
+			leaseSeconds: positive,
+			leaseGraceSeconds: { type: "integer", minimum: 0 },
+			quietHours: text,
+		}),
 		connectors: { type: "array", items: connector, default: [] },
 		limits: object({
 			maxConcurrentWorkers: positive,

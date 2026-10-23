@@ -8,7 +8,7 @@ import {
 import type { WorkerHandle, WorkerKindRegistry } from "../workers/kind.ts";
 import type { WorkerRegistry } from "../workers/registry.ts";
 import { selectWorkerKind } from "../workers/select.ts";
-import { type ClaimGithub, claim } from "./claims.ts";
+import { type ClaimGithub, type ClaimLeasePolicy, claim } from "./claims.ts";
 import { intakeNumber } from "./github.ts";
 import type { WorkItem } from "./workItems.ts";
 
@@ -56,6 +56,7 @@ export type TaskDependencies = {
 	check?: () => Promise<void>;
 	persist?: (task: WorkItemTask) => Promise<void>;
 	now?: () => number;
+	claimLeasePolicy?: Partial<ClaimLeasePolicy>;
 };
 
 async function claimItem(
@@ -78,6 +79,7 @@ async function claimItem(
 				login: deps.login,
 			},
 			(deps.now ?? Date.now)(),
+			deps.claimLeasePolicy,
 		);
 		if (result.state === "lost") {
 			item.outcome = "parked";
