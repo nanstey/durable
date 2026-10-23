@@ -188,6 +188,11 @@ export async function run(
 			processes,
 			models: dependencies.models,
 			extensions: dependencies.extensions,
+			checkoutFor: (repo) =>
+				machine.checkouts?.overrides?.[repo] ??
+				(machine.checkouts?.root
+					? join(machine.checkouts.root, repo)
+					: undefined),
 		});
 		localToken(agent);
 		const server = startApi({

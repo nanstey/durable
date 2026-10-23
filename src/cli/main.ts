@@ -14,6 +14,7 @@ import { assignedPort, run } from "../steward/main.ts";
 import { doctorCommand, formatDoctor } from "./doctor.ts";
 import { notifyCommand } from "./notify.ts";
 import { profileCommand } from "./profile.ts";
+import { queueCommand } from "./queue.ts";
 
 const agentArg = {
 	agent: { type: "positional", description: "Agent assigned to this machine" },
@@ -76,6 +77,13 @@ subCommands.run = defineCommand({
 subCommands.steward = defineCommand({
 	meta: { name: "steward" },
 	subCommands: { run: subCommands.run },
+});
+subCommands.queue = defineCommand({
+	meta: { name: "queue" },
+	args: agentArg,
+	async run({ args }) {
+		console.log(await queueCommand(selected(args.agent), args["dry-run"]));
+	},
 });
 subCommands.pause = defineCommand({
 	meta: { name: "pause" },

@@ -114,6 +114,32 @@
           },
           "readyValue": {
             "type": "string"
+          },
+          "requiredLabels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "maxItems": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxSize": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxAgeMs": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "checkout": {
+            "type": "string"
           }
         },
         "required": [
