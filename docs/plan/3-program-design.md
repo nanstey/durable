@@ -330,7 +330,7 @@ step()
 ```
 phase claim        intent → claims.claim → lost? release, end
 phase brief        scout child conversation (read-only) → brief document
-phase spec         pipeline/spec.ts opens intent-first idempotent draft spec PR from read-only scout text, keyed by work-item id; when code-owned eligibility size reaches complexityThreshold: code-owned human approval wait. Missing size/judge disabled: skip when specApproval=false, else needs-human; denied/expired → parked
+phase spec         pipeline/spec.ts opens intent-first idempotent draft spec PR from read-only scout text, keyed by work-item id; when code-owned eligibility size reaches complexityThreshold and specApproval=true: code-owned human approval wait (with specApproval=false the spec PR is still opened and dispatch proceeds). Missing size/judge disabled: skip when specApproval=false, else needs-human; denied/expired → parked
 phase dispatch     intent → dispatcher.createWorkspace(spec) → kind = workers/select(def, role) → kind.start(ws, JobSpec{env=buildAgentEnv(...,"worker"), limits, skills})
                      [durable kind: create run-worker (background task) → child conversation in the steward; dispatcher.openViewer when workers.durable.viewer=on-start]
 phase await-pr     loop: sleep → dispatch/monitor: kind.status + GitHub PR lookup + hold/kill-switch/limits watch
