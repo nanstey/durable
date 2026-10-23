@@ -77,6 +77,13 @@ function detailPanel() {
 		for (const entry of Array.isArray(value) ? value : value?.items ?? []) {
 			const row = textBlock(entry);
 			section.append(row);
+			if (label === "Scout queue" && entry.workItem && detail.scopeSummary?.includes("pause")) {
+				const hold = element("button", "Hold item");
+				hold.addEventListener("click", () => {
+					if (confirm("Hold this item? Wait for held before editing.")) api(selected.device, `/items/${encodeURIComponent(entry.workItem)}/hold`, "POST", {}).then(load).catch(() => {});
+				});
+				section.append(hold);
+			}
 			if (label === "Inbox" && entry.id && !entry.acked) {
 				const ack = element("button", "Acknowledge");
 				ack.addEventListener("click", () => api(selected.device, `/inbox/${encodeURIComponent(entry.id)}/ack`, "POST", {}).then(load));
@@ -105,7 +112,7 @@ function draw() {
 	controls.append(create);
 	root.append(controls);
 	const layout = element("div", undefined, "layout");
-	layout.append(fleet(), detailPanel(), renderChat(selected?.node, state, (path, method, body) => api(selected.device, path, method, body)));
+	layout.append(fleet(), detailPanel(), renderChat(selected?.node, { ...state, scopes: state.details.get(selected?.device)?.scopeSummary }, (path, method, body) => api(selected.device, path, method, body)));
 	root.append(layout, element("footer", "Console controls chat, pause, and reads only. It cannot approve or resume agents."));
 }
 
@@ -156,11 +163,12 @@ async function load(reconnect = true) {
 	state.details = new Map();
 	for (const device of boot.devices.filter((entry) => entry.status === "online")) {
 		try {
-			const [treeData, budget, queue, inbox, audit] = await Promise.all([
-				api(device.id, "/conversations?tree=true"), api(device.id, "/budget"), api(device.id, "/queue"), api(device.id, "/inbox"), api(device.id, "/audit"),
+			const [treeData, budget, queue, inbox, audit, info] = await Promise.all([
+				api(device.id, "/conversations?tree=true"), api(device.id, "/budget"), api(device.id, "/queue"), api(device.id, "/inbox"), api(device.id, "/audit"), api(device.id, "/device"),
 			]);
 			state.nodes.push(...treeData.nodes.map((node) => ({ ...node, device: device.id })));
-			state.details.set(device.id, { budget, queue, inbox, audit });
+			state.details.set(device.id, { budget, queue, inbox, audit, scopeSummary: info.scopeSummary });
+			if (selected?.device === device.id) selected.node = state.nodes.find((node) => node.device === device.id && node.id === selected.node.id) ?? selected.node;
 		} catch { /* device status remains visible */ }
 	}
 	draw();

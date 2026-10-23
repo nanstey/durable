@@ -2,8 +2,9 @@
 
 The Hono API binds a literal loopback address only (`127.0.0.1` by default).
 Other binds fail with an “available from slice 11” diagnostic. `/healthz` is
-public; every `/v1` request requires `Authorization: Bearer <token>` (or
-`X-Durable-Token` for a proxy). Supplying both headers is rejected.
+public. `/v1` requests require `Authorization: Bearer <token>` (or
+`X-Durable-Token` for a proxy), except hold release, which requires an approval
+nonce and rejects either bearer header. Supplying both headers is rejected.
 Client types are exported from `src/api/types.ts`.
 
 ## Routes and authority
@@ -27,6 +28,20 @@ Client types are exported from `src/api/types.ts`.
 | POST `/v1/inbox/<id>/ack` | read | Persist acknowledgement |
 | GET `/v1/budget` | read | UTC-day usage and stopped state |
 | POST `/v1/pause` | pause | Write disabled state, abort model work, terminate containment |
+| GET `/v1/items` | read | Persistent work items, attempts and PR state; no credentials |
+| GET `/v1/items/<item>/hold` | read | Current holding/held fence and verification instructions |
+| POST `/v1/items/<item>/hold` | pause | Fence immediately; return 202 while draining to held |
+| POST `/v1/items/<item>/hold/verify` | pause | Containment proof where supported; advisory process inspection otherwise |
+| POST `/v1/items/<item>/release/request` | pause | Deliver a release nonce to safe channels; never return it |
+| POST `/v1/items/<item>/release` | nonce only | `{code}`; action/item/hold-epoch bound, single-use, five-minute expiry; bearer headers forbidden |
+| POST `/v1/items/<item>/retry` | chat | Enqueue explicit retry; current eligibility, holds and budgets still apply |
+| POST `/v1/conversations/<id>/open` | read | Orca viewer handle or command fallback |
+| GET `/v1/workers` | read | Kind, capabilities, liveness and suspected human-session advisory |
+| GET `/v1/workers/events` | read | Worker SSE |
+| GET `/v1/workers/<id>/transcript` | read | Worker transcript frames |
+| POST `/v1/workers/<id>/steer` | chat | Screened `{body}`; 501 when unsupported |
+| POST `/v1/workers/<id>/interrupt` | pause | `{mode: soft\|hard}`; intentional cancellation never automatically resumes |
+| POST `/v1/workers/stop` | pause | Stop workers with outcome stopped; keep the steward running |
 
 `/v1/sessions/<id>/{transcript,events,tasks,messages,abort}` are aliases of the
 conversation routes. `/v1/transcript` and `/v1/messages` target the main
@@ -39,7 +54,8 @@ chat/scout threads belongs to the client/conversation slice, so
 workers. Reviewer nodes never advertise steering.
 
 No bearer scope authorizes approve, agent resume, enrollment, policy verification
-or hold release. Those POST paths return 403. There is no token-display endpoint,
+or hold release. Those POST paths reject bearer authorization with 403; only
+hold release has an implemented nonce-authorized route. There is no token-display endpoint,
 shell, file-browser, configuration or arbitrary passthrough route.
 
 ## Message contract

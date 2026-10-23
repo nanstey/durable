@@ -122,6 +122,49 @@ test("notifier holds quiet-hour notifications until delivery is allowed", async 
 	await notifier.due();
 	assert.equal(desktop.notices.length, 1);
 });
+test("release nonce delivery bypasses unsafe channels, persistence, quiet-hour queues and dedup", async (t) => {
+	setup(t);
+	const desktop = new FakeDesktop();
+	let inbox = 0;
+	const options = {
+		agent: "a",
+		definition: {
+			profile: "p",
+			schedule: { quietHours: "00:00-00:00 UTC" },
+			notify: { "approval-needed": ["desktop", "inbox", "github"] },
+		},
+		machine: {
+			name: "machine",
+			agents: ["a"],
+			channels: {
+				desktop: { kind: "desktop" as const },
+				inbox: { kind: "inbox" as const },
+				github: { kind: "github" as const, targetLogin: "operator-login" },
+			},
+		},
+		inbox: () => {
+			inbox++;
+		},
+	};
+	const notifier = new Notifier({ ...options, desktop });
+	assert.equal(await notifier.approvalNonce("item", "release-code"), true);
+	assert.equal(desktop.notices[0].nonce, "release-code");
+	assert.equal(inbox, 0);
+	assert.equal(
+		JSON.stringify(notifier.status()).includes("release-code"),
+		false,
+	);
+	const unsafe = new Notifier({
+		...options,
+		desktop: {
+			nonceSafe: false,
+			notify: async () => {
+				throw Error("unsafe backend must never receive a nonce");
+			},
+		},
+	});
+	assert.equal(await unsafe.approvalNonce("item", "release-code"), false);
+});
 test("stale items are parked without a privileged action", async () => {
 	const calls: string[] = [];
 	const stale = await parkStale(

@@ -30,6 +30,28 @@ export class SystemdContainment implements Containment {
 		this.mount = mount;
 		this.graceMs = graceMs;
 	}
+	hostedEnv(env: NodeJS.ProcessEnv) {
+		return {
+			...env,
+			XDG_RUNTIME_DIR:
+				process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.()}`,
+		};
+	}
+	hostedArgv(record: Invocation, argv: string[]) {
+		return [
+			"systemd-run",
+			"--user",
+			"--scope",
+			"--collect",
+			"--quiet",
+			"--slice",
+			record.slice,
+			"--unit",
+			record.unit,
+			"--",
+			...argv,
+		];
+	}
 	spawn(
 		record: Invocation,
 		hash: string,

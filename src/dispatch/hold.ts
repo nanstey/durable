@@ -1,3 +1,50 @@
+import type {
+	HostedProcess,
+	ProcessSpec,
+	WorkerDispatcher,
+	Workspace,
+	WorkspaceSpec,
+} from "./types.ts";
+
+/** Apply the persisted fence to every daemon workspace/process write, including cleanup. */
+export function fencedDispatcher(
+	dispatcher: WorkerDispatcher,
+	agent: string,
+	fenced: (item: string) => boolean,
+): WorkerDispatcher {
+	const check = (workspace: Workspace | WorkspaceSpec) => {
+		const item = workspace.id.replace(`durable-${agent}-`, "");
+		if (fenced(item))
+			throw Object.assign(Error("item is human-held"), { code: "held" });
+	};
+	return new Proxy(dispatcher, {
+		get(target, property) {
+			if (property === "createWorkspace")
+				return async (spec: WorkspaceSpec) => {
+					check(spec);
+					return target.createWorkspace(spec);
+				};
+			if (property === "removeWorkspace")
+				return async (workspace: Workspace, options?: { held?: boolean }) => {
+					check(workspace);
+					return target.removeWorkspace(workspace, options);
+				};
+			if (property === "hostProcess")
+				return async (spec: ProcessSpec) => {
+					check(spec.workspace);
+					return target.hostProcess(spec);
+				};
+			if (property === "sendInput" && target.sendInput)
+				return async (process: HostedProcess, text: string) => {
+					check(process.workspace);
+					return target.sendInput!(process, text);
+				};
+			const value = Reflect.get(target, property, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
+
 export type Hold = {
 	item: string;
 	holdEpoch: number;

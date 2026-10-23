@@ -1,11 +1,22 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { accessSync, constants } from "node:fs";
+import {
+	accessSync,
+	constants,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import { isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
 	Containment,
 	Invocation,
 	Launch,
 } from "../platform/containment.ts";
+import { unconfirmedHoldReason } from "../platform/holdAdvice.ts";
+import { workspaceWriters } from "../platform/workspaceWriters.ts";
 import { audit } from "./audit.ts";
 import { agentDir, loadJson, saveJson } from "./files.ts";
 import { queueInbox } from "./inbox.ts";
@@ -14,10 +25,14 @@ import { disabled } from "./killswitch.ts";
 type Fence = {
 	state: "holding" | "held" | "recovery";
 	holdEpoch: number;
+	by?: string;
+	via?: string;
+	reason?: string;
 };
 type ProcJournal = {
 	invocations: Invocation[];
 	holds: Record<string, Fence>;
+	epochs?: Record<string, number>;
 };
 export type FaultHook = (
 	boundary: string,
@@ -53,6 +68,77 @@ export class ProcessManager {
 	snapshot() {
 		return structuredClone(this.journal);
 	}
+	beginHold(item: string, by: string, via: string) {
+		if (
+			this.journal.holds[item]?.state !== "recovery" &&
+			this.journal.holds[item]
+		)
+			return this.journal.holds[item];
+		this.journal.epochs ??= {};
+		const holdEpoch =
+			Math.max(
+				this.journal.epochs[item] ?? 0,
+				this.journal.holds[item]?.holdEpoch ?? 0,
+			) + 1;
+		this.journal.epochs[item] = holdEpoch;
+		this.journal.holds[item] = { state: "holding", holdEpoch, by, via };
+		saveJson(this.path, this.journal);
+		return this.journal.holds[item];
+	}
+	async finishHold(item: string) {
+		const hold = this.journal.holds[item];
+		if (!hold) throw Error("hold fence missing");
+		const records = this.journal.invocations.filter(
+			(record) => record.item === item,
+		);
+		const units = records.map((record) => record.slice);
+		let empty = false;
+		try {
+			empty = await this.terminate({ item });
+		} catch {
+			queueInbox(this.agent, "escalation");
+		}
+		if (empty && this.backend.confirmed) {
+			hold.state = "held";
+			delete hold.reason;
+		} else {
+			hold.state = "holding";
+			hold.reason = unconfirmedHoldReason(this.backend.confirmed, units);
+		}
+		saveJson(this.path, this.journal);
+		return structuredClone(hold);
+	}
+	async verifyHold(item: string, workspace?: string) {
+		const hold = this.journal.holds[item];
+		if (!hold) throw Error("item is not held");
+		const records = this.journal.invocations.filter(
+			(record) => record.item === item,
+		);
+		const confirmedEmpty =
+			this.backend.confirmed &&
+			(
+				await Promise.all(records.map((record) => this.backend.empty(record)))
+			).every(Boolean);
+		if (confirmedEmpty && hold.state === "holding" && hold.reason) {
+			hold.state = "held";
+			delete hold.reason;
+			saveJson(this.path, this.journal);
+		}
+		return {
+			...hold,
+			confirmedEmpty,
+			slices: records.map((record) => record.slice),
+			writers: workspace ? await workspaceWriters(workspace) : [],
+			advisory:
+				"cwd/open-file inspection cannot find future absolute-path writers with cwd /. Without cgroup v2 confirmation, force-stop Termux or reboot (cgroup v1 Linux: reboot) before editing.",
+		};
+	}
+	releaseHold(item: string, epoch: number) {
+		if (this.journal.holds[item]?.holdEpoch !== epoch)
+			throw Error("hold epoch changed");
+		delete this.journal.holds[item];
+		saveJson(this.path, this.journal);
+	}
 	private async persist(
 		record: Invocation,
 		action: string,
@@ -83,7 +169,7 @@ export class ProcessManager {
 			});
 			return true;
 		}
-		if (record.item)
+		if (record.item && !this.journal.holds[record.item])
 			this.journal.holds[record.item] = {
 				state: "recovery",
 				holdEpoch: (this.journal.holds[record.item]?.holdEpoch ?? 0) + 1,
@@ -117,6 +203,106 @@ export class ProcessManager {
 				clean = false;
 		}
 		return clean;
+	}
+	/** Register a terminal-hosted gate before releasing any worker code. */
+	async host<T>(
+		command: string,
+		env: NodeJS.ProcessEnv,
+		opts: { item: string; attemptId: string },
+		start: (argv: string[], env: NodeJS.ProcessEnv) => Promise<T>,
+	): Promise<T> {
+		if (this.fenced(opts.item) || disabled(this.agent, this.quiet))
+			throw Error("host refused by safety fence");
+		const invocationId = randomUUID();
+		const label = createHash("sha256")
+			.update(`${this.agent}:${opts.item}:${opts.attemptId}`)
+			.digest("hex")
+			.slice(0, 20);
+		const record: Invocation = {
+			invocationId,
+			item: opts.item,
+			attemptId: opts.attemptId,
+			unit: `durable-${label}-${invocationId}.scope`,
+			slice: `durable-${label}.slice`,
+			marker: invocationId,
+			state: "intent",
+		};
+		const directory = join(agentDir(this.agent), "gates", invocationId);
+		mkdirSync(directory, { recursive: true, mode: 0o700 });
+		const token = randomBytes(32).toString("hex");
+		const argv = [
+			process.execPath,
+			fileURLToPath(new URL("../../bin/durable-host-gate", import.meta.url)),
+			directory,
+			createHash("sha256").update(token).digest("hex"),
+			resolveExecutable(command, env.PATH ?? ""),
+		];
+		const active = { record, cancelled: false };
+		this.active.set(invocationId, active);
+		const check = () => {
+			if (
+				active.cancelled ||
+				this.fenced(opts.item) ||
+				disabled(this.agent, this.quiet)
+			)
+				throw Error("host cancelled before gate release");
+		};
+		try {
+			await this.persist(record, "intent", () =>
+				this.journal.invocations.push(record),
+			);
+			check();
+			const hosted = await start(
+				this.backend.hostedArgv?.(record, argv) ?? argv,
+				{
+					...(this.backend.hostedEnv?.(env) ?? env),
+					DURABLE_INVOCATION: record.marker,
+				},
+			);
+			const deadline = Date.now() + 15000;
+			const identityPath = join(directory, "identity.json");
+			while (!existsSync(identityPath)) {
+				check();
+				if (Date.now() >= deadline) throw Error("host gate identity timed out");
+				await new Promise((resolve) => setTimeout(resolve, 25));
+			}
+			const identity = JSON.parse(
+				readFileSync(identityPath, "utf8"),
+			) as Partial<Invocation>;
+			if (
+				!identity.pid ||
+				!identity.startTime ||
+				(this.backend.confirmed && !identity.cgroup?.includes(record.unit))
+			)
+				throw Error("host gate containment identity invalid");
+			await this.persist(record, "registered", () =>
+				Object.assign(record, {
+					pid: identity.pid,
+					pgid: identity.pgid,
+					startTime: identity.startTime,
+					cgroup: identity.cgroup,
+					state: "registered",
+				}),
+			);
+			await this.persist(record, "releasing", () => {
+				record.state = "releasing";
+			});
+			check();
+			writeFileSync(join(directory, "release.tmp"), token, {
+				mode: 0o600,
+				flag: "wx",
+			});
+			renameSync(join(directory, "release.tmp"), join(directory, "release"));
+			await this.persist(record, "running", () => {
+				record.state = "running";
+			});
+			return hosted;
+		} catch (error) {
+			await this.cleanup(record);
+			throw error;
+		} finally {
+			this.active.delete(invocationId);
+		}
 	}
 	async launch(
 		argv: string[],

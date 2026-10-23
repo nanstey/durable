@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import {
+	assembleWorkerBrief,
+	createScoutBrief,
+} from "../../src/scout/brief.ts";
 import { applyJudgment } from "../../src/scout/judge.ts";
 import { GitHubIssuesSource } from "../../src/sources/githubIssues.ts";
 import { GitHubPrsSource } from "../../src/sources/githubPrs.ts";
-import { LocalFilesSource } from "../../src/sources/localFiles.ts";
+import {
+	LocalFilesSource,
+	readLocalBody,
+} from "../../src/sources/localFiles.ts";
 import type { Candidate } from "../../src/sources/types.ts";
 
 const candidate: Candidate = {
@@ -19,6 +26,20 @@ const candidate: Candidate = {
 	labels: ["ready"],
 	updatedAt: "2026-01-01T00:00:00Z",
 };
+test("trusted scout brief has a stable safety and attribution snapshot", () => {
+	assert.throws(() => createScoutBrief(candidate, false, "brief"), /untrusted/);
+	const brief = assembleWorkerBrief({
+		brief: createScoutBrief(candidate, true, "Implement the change."),
+		branch: "durable/agent/item",
+		agent: "agent",
+		item: "item",
+		login: "operator-login",
+	});
+	assert.equal(
+		brief,
+		`# Durable worker brief\n\nLoad \`idea-to-pr\` and run it in autopilot mode for this task. This workspace is isolated.\nStop at a draft PR, even if a loaded workflow normally proceeds to merge.\n\n- Do not merge a pull request.\n- Do not force-push or push to a default or protected branch.\n- Create a draft PR only, with the required durable label and marker.\n- Do not read, print, or add secrets to files, commits, or PR text.\n\n## Task\n\nitem\n\nImplement the change.\n\n## Attribution\n\nBranch: \`durable/agent/item\`\nCommit trailer: \`Durable-Agent: agent\`\nPR label: \`durable/agent:agent\`\nPR marker: \`<!-- durable-item agent=agent item=item -->\`\nPR footer: \`Opened by durable agent agent for operator-login; not yet reviewed by a human.\`\n`,
+	);
+});
 test("GitHub sources map fixtures and never invoke a write command", async () => {
 	const calls: string[][] = [];
 	const run = async (args: string[]) => {
@@ -82,6 +103,11 @@ test("local source accepts ready front matter and rejects a symlink escape", asy
 		assert.deepEqual(
 			entries.map((entry) => entry.ref),
 			["org/repo:items/ready.md"],
+		);
+		assert.match(await readLocalBody(entries[0], root), /body/);
+		await assert.rejects(
+			readLocalBody({ ...entries[0], bodyRef: "file:items/escape.md" }, root),
+			/escapes/,
 		);
 	} finally {
 		await rm(root, { recursive: true, force: true });

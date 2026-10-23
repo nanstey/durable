@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { durableHome } from "../config/paths.ts";
 import { audit } from "./audit.ts";
-import { agentDir } from "./files.ts";
+import { agentDir, loadJson, saveJson } from "./files.ts";
 
 export function quietHours(
 	spec: string | undefined,
@@ -47,6 +48,12 @@ export function disabled(
 export function pauseFile(agent: string) {
 	writeFileSync(join(agentDir(agent), "disabled"), "paused\n", { mode: 0o600 });
 }
+export function resumeRequest(agent: string) {
+	return loadJson<{ id: string } | undefined>(
+		join(agentDir(agent), "resume-request.json"),
+		() => undefined,
+	)?.id;
+}
 export function resumeLocal(agent: string, tty = Boolean(process.stdin.isTTY)) {
 	if (!tty)
 		throw Error(
@@ -54,5 +61,6 @@ export function resumeLocal(agent: string, tty = Boolean(process.stdin.isTTY)) {
 		);
 	const path = join(agentDir(agent), "disabled");
 	if (existsSync(path)) unlinkSync(path);
+	saveJson(join(agentDir(agent), "resume-request.json"), { id: randomUUID() });
 	audit(agent, { event: "resumed", actor: "human", via: "tty" });
 }

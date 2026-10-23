@@ -1,6 +1,7 @@
 # Durable worker brief
 
-Use the `idea-to-pr` workflow for this task. This workspace is isolated.
+Load `idea-to-pr` and run it in autopilot mode for this task. This workspace is isolated.
+Stop at a draft PR, even if a loaded workflow normally proceeds to merge.
 
 - Do not merge a pull request.
 - Do not force-push or push to a default or protected branch.
@@ -14,4 +15,7 @@ Use the `idea-to-pr` workflow for this task. This workspace is isolated.
 ## Attribution
 
 Branch: `{{branch}}`
+Commit trailer: `Durable-Agent: {{agent}}`
+PR label: `durable/agent:{{agent}}`
+PR marker: `<!-- durable-item agent={{agent}} item={{item}} -->`
 PR footer: `Opened by durable agent {{agent}} for {{login}}; not yet reviewed by a human.`

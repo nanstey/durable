@@ -166,14 +166,57 @@ A work item completes only when GitHub confirms its primary PR is merged, or whe
 the steward records it cancelled or parked. Handoff alone is not completion.
 
 Workers are capped by `limits.maxConcurrentWorkers`, `limits.maxWorkersPerDay`,
-and `limits.itemMinutes`. Quiet hours and pause prevent new dispatch. A timed-out
-worker is interrupted and requires human attention; intentional cancellation is
-never silently resumed.
+and `limits.itemMinutes`. Quiet hours prevent new dispatch but do not stop running
+workers. Pause, disabled files and `DURABLE_DISABLED=1` prevent dispatch and stop
+running attempts with outcome `paused`. A TTY-authorized `durable resume <agent>`
+requeues paused items; global/environment stops and budgets still apply.
+`durable stop <agent> --workers` ends attempts without stopping the daemon.
+`durable stop <agent>` shuts down the service without recording cancellation, so
+unfinished work can recover on restart. `durable retry <agent> <item>` enqueues
+an explicit retry under the current eligibility rules and budgets.
 
 For a Pi-session worker, view the terminal through Orca where available.
 `durable open` asks the configured dispatcher for a viewer and prints a fallback
 command if a terminal cannot be opened. Draft PRs use `durable/<agent>/<item>`, a
 `durable/agent:<agent>` label, and a Durable-Agent commit trailer.
+
+## Human ownership and viewers
+
+Use `durable open <conversation>` with one assigned agent, or
+`durable open <agent>/<conversation>`, for the steward, chat, scout or worker.
+The dispatcher opens an Orca viewer where available; otherwise the CLI prints a
+`durable attach` command. Closing a viewer never stops work. `GET /v1/workers`
+and a running-daemon `durable doctor <agent>` report foreign terminals as
+`suspected human session`. This is advisory, not a lock.
+
+Before editing a worker workspace:
+
+```sh
+durable hold <agent> <item>
+durable hold <agent> <item> --verify
+durable release <agent> <item>
+durable release <agent> <item> --code <code>
+```
+
+Hold commits a fence before draining the worker. The API immediately returns
+`202 {state: holding}`; the CLI waits for `held`. Only confirmed, recursively
+empty containment permits `held`. A timeout or failed kill leaves the item
+`holding`, with an escalation and instructions; do not edit merely because the
+steward stopped. Restart preserves the fence and finishes an interrupted hold
+before resuming tasks. The claim remains attached to the item.
+
+On cgroup v2 Linux, `--verify` reports authoritative containment emptiness. If a
+slice cannot be stopped, follow the reported `systemctl --user stop <slice>`
+instruction and confirm `cgroup.events` has `populated 0`. On Android or cgroup v1,
+process inspection is advisory only: future absolute-path writers with cwd `/`
+can be invisible. Exclusive ownership requires force-stopping Termux in Android
+Settings or rebooting; cgroup v1 Linux requires a reboot.
+
+Release requires a local TTY and an action/item/hold-epoch-bound, single-use code
+with a five-minute expiry. The first release command sends it only to a configured
+nonce-safe desktop or command channel. Repeat with `--code`. No bearer scope can
+release a hold, and no API response, inbox entry or audit line contains the code.
+Release re-reads PR state and starts a new attempt or returns to review.
 
 The two required low-risk pilot runs (Orca and git-process), terminal input check,
 viewer check, and steward crash drill require an operator and are listed in

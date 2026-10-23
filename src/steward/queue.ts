@@ -11,6 +11,7 @@ export type QueueItem = Candidate & {
 	reasons: string[];
 	firstSeen: number;
 	lastSeen: number;
+	workItem?: string;
 };
 export type Queue = { items: Record<string, QueueItem> };
 

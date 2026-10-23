@@ -6,9 +6,8 @@ import {
 	revokeToken,
 	type Scope,
 } from "../api/tokens.ts";
-import { loadMachine } from "../config/load.ts";
 import { DurableClient } from "../client/client.ts";
-import { attachTui } from "../tui/main.ts";
+import { loadMachine } from "../config/load.ts";
 import { durableHome } from "../config/paths.ts";
 import { startConsole } from "../console/main.ts";
 import { ensureConsoleConfig } from "../console/registry.ts";
@@ -16,6 +15,7 @@ import { ConsoleServiceManager } from "../platform/service/console.ts";
 import { SystemdUserServiceManager } from "../platform/service/systemdUser.ts";
 import { resumeLocal } from "../steward/killswitch.ts";
 import { assignedPort, run } from "../steward/main.ts";
+import { attachTui } from "../tui/main.ts";
 import { doctorCommand, formatDoctor } from "./doctor.ts";
 import { notifyCommand } from "./notify.ts";
 import { profileCommand } from "./profile.ts";
@@ -105,6 +105,100 @@ subCommands.attach = defineCommand({
 		await attachTui(clientFor(agent), conversation);
 	},
 });
+subCommands.retry = defineCommand({
+	meta: { name: "retry" },
+	args: { ...remoteArgs, item: { type: "positional", required: true } },
+	async run({ args }) {
+		print(
+			await clientFor(args.agent).request(
+				`/v1/items/${encodeURIComponent(args.item)}/retry`,
+				{ method: "POST" },
+			),
+			args.json,
+		);
+	},
+});
+subCommands.open = defineCommand({
+	meta: { name: "open" },
+	args: { target: { type: "positional", required: true } },
+	async run({ args }) {
+		const parts = args.target.split("/", 2);
+		const agent = parts.length === 2 ? parts[0] : selected();
+		const client = clientFor(agent);
+		const conversation = parts.length === 2 ? parts[1] : parts[0];
+		const result = await client.request<{
+			kind: string;
+			command?: string;
+			handle?: string;
+		}>(`/v1/conversations/${encodeURIComponent(conversation)}/open`, {
+			method: "POST",
+		});
+		console.log(result.command ?? result.handle);
+	},
+});
+for (const action of ["hold", "release"] as const) {
+	subCommands[action] = defineCommand({
+		meta: { name: action },
+		args: {
+			agent: { type: "positional", required: true },
+			item: { type: "positional" },
+			verify: { type: "boolean" },
+			code: { type: "string" },
+		},
+		async run({ args }) {
+			const agent = args.item ? selected(args.agent) : selected();
+			const item = args.item ?? args.agent;
+			const path = `/v1/items/${encodeURIComponent(item)}`;
+			const client = clientFor(agent);
+			if (action === "release") {
+				if (!process.stdin.isTTY || !process.stdout.isTTY)
+					throw Error("release requires a local TTY");
+				if (!args.code) {
+					await client.request(`${path}/release/request`, { method: "POST" });
+					console.log(
+						"Release code sent to the configured nonce-safe channel; repeat with --code.",
+					);
+				} else {
+					const response = await fetch(
+						`http://127.0.0.1:${assignedPort(agent)}${path}/release`,
+						{
+							method: "POST",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify({ code: args.code }),
+							signal: AbortSignal.timeout(15000),
+						},
+					);
+					if (!response.ok)
+						throw Error(
+							"release refused; credential is invalid, expired or for a different hold",
+						);
+					console.log("released");
+				}
+				return;
+			}
+			if (args.verify) {
+				print(await client.request(`${path}/hold/verify`, { method: "POST" }));
+				return;
+			}
+			await client.request(`${path}/hold`, { method: "POST" });
+			const deadline = Date.now() + 60000;
+			while (Date.now() < deadline) {
+				const hold = await client.request<{ state: string; reason?: string }>(
+					`${path}/hold`,
+				);
+				if (hold.state === "held") {
+					console.log("held");
+					return;
+				}
+				if (hold.reason) throw Error(`holding: ${hold.reason}`);
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+			throw Error(
+				"holding: exclusive ownership is not confirmed; do not edit yet. Run hold --verify.",
+			);
+		},
+	});
+}
 subCommands.chat = defineCommand({
 	meta: { name: "chat" },
 	subCommands: {
@@ -176,10 +270,16 @@ for (const action of ["enable", "disable", "start", "stop", "logs"] as const) {
 			...(action === "stop" ? { workers: { type: "boolean" as const } } : {}),
 		},
 		async run({ args }) {
-			if ("workers" in args && args.workers)
-				throw Error(
-					"worker-only stop requires the worker dispatcher (slice 6); the service was not stopped",
-				);
+			if ("workers" in args && args.workers) {
+				if (args["dry-run"]) console.log("POST /v1/workers/stop");
+				else
+					print(
+						await clientFor(args.agent).request("/v1/workers/stop", {
+							method: "POST",
+						}),
+					);
+				return;
+			}
 			const agent = selected(args.agent);
 			assignedPort(agent);
 			if (action === "enable" && !args["dry-run"]) {
@@ -256,8 +356,23 @@ subCommands.doctor = defineCommand({
 		id: { type: "positional", required: true },
 		json: { type: "boolean" },
 	},
-	run({ args }) {
+	async run({ args }) {
 		const report = doctorCommand(args.id);
+		try {
+			const { workers } = await clientFor(args.id).request<{
+				workers: Array<{ id: string; suspectedHumanSession?: boolean }>;
+			}>("/v1/workers", { signal: AbortSignal.timeout(2000) });
+			for (const worker of workers)
+				if (worker.suspectedHumanSession)
+					report.checks.push({
+						name: `workspace:${worker.id}`,
+						ok: true,
+						warning: true,
+						detail: "suspected human session; hold the item before editing",
+					});
+		} catch {
+			/* Offline doctor remains usable when the daemon is not running. */
+		}
 		console.log(
 			args.json ? JSON.stringify(report, null, 2) : formatDoctor(report),
 		);

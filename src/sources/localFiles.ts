@@ -1,5 +1,4 @@
-import { readFile, realpath, stat } from "node:fs/promises";
-import { glob } from "node:fs/promises";
+import { glob, readFile, realpath, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { parse } from "yaml";
 import type { Candidate, Source } from "./types.ts";
@@ -24,6 +23,22 @@ async function insideCheckout(path: string, checkout: string) {
 		!relative(root, file).startsWith("..") &&
 		!resolve(file).startsWith("..")
 	);
+}
+
+export async function readLocalBody(
+	candidate: Candidate,
+	checkout: string,
+): Promise<string> {
+	if (
+		!checkout ||
+		candidate.kind !== "file" ||
+		!candidate.bodyRef?.startsWith("file:")
+	)
+		throw Error("local intake body reference missing");
+	const path = resolve(checkout, candidate.bodyRef.slice(5));
+	if (!(await insideCheckout(path, checkout)))
+		throw Error("local intake body escapes checkout");
+	return readFile(path, "utf8");
 }
 
 export class LocalFilesSource implements Source {

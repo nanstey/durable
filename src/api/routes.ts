@@ -1,12 +1,15 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import type { ApprovalNonces } from "../approval/nonce.ts";
 import type { AgentDef } from "../config/schema.ts";
+import type { WorkerDispatcher, Workspace } from "../dispatch/types.ts";
 import { audit, readAudit } from "../steward/audit.ts";
 import {
 	isStartableConversationKind,
 	startableConversationKinds,
 } from "../steward/conversations.ts";
 import type { StewardHarness } from "../steward/harness.ts";
+import type { ProcessManager } from "../steward/procs.ts";
 import type { WorkerRegistry } from "../workers/registry.ts";
 import { type ApiEnv, auth } from "./auth.ts";
 import { ApiError, bodyHash, validateMessage } from "./chat.ts";
@@ -22,6 +25,11 @@ export function createApi(opts: {
 	definition: AgentDef;
 	startedAt?: number;
 	workers?: WorkerRegistry;
+	processes?: ProcessManager;
+	nonces?: ApprovalNonces;
+	deliverNonce?: (item: string, code: string) => Promise<boolean>;
+	dispatcher?: WorkerDispatcher;
+	viewerWorkspace?: Workspace;
 }) {
 	const app = new Hono<ApiEnv>();
 	const { harness } = opts;
@@ -31,10 +39,21 @@ export function createApi(opts: {
 		const durable = await harness.tree();
 		const parentId =
 			durable.find((node) => node.kind === "steward")?.id ?? null;
+		const holds = opts.processes?.snapshot().holds ?? {};
 		return [
 			...durable,
 			...(opts.workers ? await opts.workers.tree(parentId) : []),
-		];
+		].map((node) =>
+			node.item && holds[node.item]
+				? {
+						...node,
+						status:
+							holds[node.item].state === "held"
+								? ("held" as const)
+								: ("holding" as const),
+					}
+				: node,
+		);
 	}
 	app.use("*", auth(opts.agent));
 	app.use(
@@ -191,7 +210,9 @@ export function createApi(opts: {
 		const value = (await c.req.json()) as { mode?: unknown };
 		if (value.mode !== "soft" && value.mode !== "hard")
 			throw new ApiError("invalid", "mode must be soft or hard");
-		await opts.workers.interrupt(c.req.param("id"), value.mode);
+		if (harness.workRuntime)
+			await harness.interruptWorker(c.req.param("id"), value.mode);
+		else await opts.workers.interrupt(c.req.param("id"), value.mode);
 		audit(opts.agent, {
 			event: "worker-interrupt",
 			actor: "human",
@@ -200,6 +221,102 @@ export function createApi(opts: {
 			mode: value.mode,
 		});
 		return c.json({ interrupted: true }, 202);
+	});
+	app.post("/v1/items/:id/retry", async (c) => {
+		await harness.requestWork(c.req.param("id"));
+		return c.json({ queued: true }, 202);
+	});
+	app.get("/v1/items", async (c) => c.json(await harness.workItems()));
+	app.post("/v1/workers/stop", async (c) => {
+		await harness.workRuntime?.stop("stopped");
+		return c.json({ stopped: true });
+	});
+	async function requireItem(id: string) {
+		const item = (await harness.workItems()).items[id];
+		if (!item || !harness.workRuntime || !opts.processes)
+			throw new ApiError("not_found", "work item not found", 404);
+		return item;
+	}
+	app.get("/v1/items/:id/hold", async (c) => {
+		await requireItem(c.req.param("id"));
+		return c.json(
+			opts.processes!.snapshot().holds[c.req.param("id")] ?? {
+				state: "released",
+			},
+		);
+	});
+	app.post("/v1/items/:id/hold", async (c) => {
+		const item = c.req.param("id");
+		await requireItem(item);
+		const actor = c.get("actor");
+		// Fence is synchronously committed by hold() before this acknowledgement.
+		void harness
+			.workRuntime!.hold(item, actor.client, "api")
+			.catch(() => audit(opts.agent, { event: "hold-failed", item }));
+		return c.json({ state: opts.processes!.snapshot().holds[item].state }, 202);
+	});
+	app.post("/v1/items/:id/hold/verify", async (c) => {
+		const item = await requireItem(c.req.param("id"));
+		return c.json(
+			await opts.processes!.verifyHold(
+				item.id,
+				item.attempts.at(-1)?.worker?.process.workspace.path,
+			),
+		);
+	});
+	app.post("/v1/items/:id/release/request", async (c) => {
+		const item = c.req.param("id");
+		await requireItem(item);
+		const hold = opts.processes!.snapshot().holds[item];
+		if (!hold || !opts.nonces || !opts.deliverNonce)
+			throw new ApiError("invalid", "item has no releasable hold");
+		const code = opts.nonces.issue("release", item, hold.holdEpoch);
+		if (!(await opts.deliverNonce(item, code)))
+			throw new ApiError(
+				"unavailable",
+				"configure a nonce-safe desktop or command approval channel",
+				503,
+			);
+		return c.json({ requested: true }, 202);
+	});
+	app.post("/v1/items/:id/release", async (c) => {
+		const item = c.req.param("id");
+		await requireItem(item);
+		const value = (await c.req.json()) as { code?: unknown };
+		const hold = opts.processes!.snapshot().holds[item];
+		if (
+			!hold ||
+			typeof value.code !== "string" ||
+			value.code.length > 256 ||
+			!opts.nonces?.verify("release", item, hold.holdEpoch, value.code)
+		)
+			throw new ApiError(
+				"forbidden",
+				"invalid or expired release credential",
+				403,
+			);
+		await harness.releaseItem(item, hold.holdEpoch);
+		return c.json({ released: true });
+	});
+	app.post("/v1/conversations/:id/open", async (c) => {
+		const selected = await node(c.req.param("id"));
+		const workspace =
+			selected.source === "dispatcher" && opts.workers
+				? (await opts.workers.get(selected.id)).handle.job.workspace
+				: undefined;
+		return c.json(
+			harness.workRuntime
+				? await harness.openConversation(selected.id, workspace)
+				: opts.dispatcher && opts.viewerWorkspace
+					? await opts.dispatcher.openViewer(opts.viewerWorkspace, {
+							title: `durable:${opts.agent}/${selected.id}`,
+							command: `durable attach ${opts.agent}/${selected.id}`,
+						})
+					: {
+							kind: "command",
+							command: `durable attach ${opts.agent}/${selected.id}`,
+						},
+		);
 	});
 	app.get("/v1/inbox", async (c) => c.json((await harness.snapshot()).inbox));
 	app.post("/v1/inbox/:id/ack", async (c) => {
@@ -315,7 +432,8 @@ export function createApi(opts: {
 			if (selected.source === "dispatcher") {
 				if (!opts.workers)
 					throw new ApiError("not_found", "worker not found", 404);
-				await opts.workers.interrupt(id, "soft");
+				if (harness.workRuntime) await harness.interruptWorker(id, "soft");
+				else await opts.workers.interrupt(id, "soft");
 			} else await harness.abort(id);
 			audit(opts.agent, {
 				event: "abort-turn",

@@ -11,6 +11,8 @@
 	"files": [
 		"bin/",
 		"src/",
+		"pi-extension/",
+		"templates/",
 		"schema/",
 		"examples/",
 		"units/",

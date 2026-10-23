@@ -6,6 +6,15 @@ export function renderChat(node, state, request) {
 	for (const entry of state.transcript ?? []) panel.append(textBlock(entry.model ?? entry.data ?? entry.body ?? entry));
 	if (!node) return panel;
 	const worker = node.kind.includes("worker");
+	if (node.item && state.scopes?.includes("pause")) {
+		const hold = element("button", node.status === "held" ? "Held" : node.status === "holding" ? "Holding: do not edit yet" : "Hold item");
+		hold.disabled = ["held", "holding"].includes(node.status);
+		hold.addEventListener("click", () => {
+			if (confirm("Stop Durable writers before taking ownership? Wait for held before editing."))
+				request(`/items/${encodeURIComponent(node.item)}/hold`, "POST", {}).catch(() => {});
+		});
+		panel.append(hold);
+	}
 	const composer = document.createElement("form");
 	const input = document.createElement("textarea");
 	input.name = "message";
@@ -30,7 +39,7 @@ export function renderChat(node, state, request) {
 		abort.type = "button";
 		abort.addEventListener("click", () => {
 			if (confirm(`${worker ? "Interrupt" : "Abort"} this work?`))
-				request(worker ? `/workers/${encodeURIComponent(node.id)}/interrupt` : `/conversations/${encodeURIComponent(node.id)}/abort`, "POST", {}).catch(() => {});
+				request(worker ? `/workers/${encodeURIComponent(node.id)}/interrupt` : `/conversations/${encodeURIComponent(node.id)}/abort`, "POST", worker ? { mode: "soft" } : {}).catch(() => {});
 		});
 		composer.append(abort);
 	}

@@ -18,7 +18,6 @@ export function exhausted(budget: Budget, limits: Record<string, number> = {}) {
 	);
 }
 
-// fallow-ignore-next-line unused-export
 export function canDispatch(options: {
 	running: number;
 	startedToday: number;
@@ -37,7 +36,6 @@ export function canDispatch(options: {
 	);
 }
 
-// fallow-ignore-next-line unused-export
 export function itemTimedOut(
 	startedAt: number,
 	itemMinutes: number | undefined,

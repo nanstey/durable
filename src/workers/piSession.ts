@@ -13,16 +13,36 @@ export class PiSessionKind implements WorkerKind {
 	readonly name = "pi-session" as const;
 	private readonly dispatcher: WorkerDispatcher;
 	private readonly launcherRoot: string;
-	constructor(dispatcher: WorkerDispatcher, launcherRoot: string) {
+	private readonly safety?: {
+		check: (item: string) => Promise<void>;
+		prepare?: (job: JobSpec) => Promise<void>;
+		host: (
+			command: string,
+			job: JobSpec,
+			start: (
+				argv: string[],
+				env?: NodeJS.ProcessEnv,
+			) => Promise<WorkerHandle["process"]>,
+		) => Promise<WorkerHandle["process"]>;
+	};
+	constructor(
+		dispatcher: WorkerDispatcher,
+		launcherRoot: string,
+		safety?: PiSessionKind["safety"],
+	) {
+		this.safety = safety;
 		this.dispatcher = dispatcher;
 		this.launcherRoot = launcherRoot;
 	}
 	async start(job: JobSpec): Promise<WorkerHandle> {
+		await this.safety?.check(job.item);
+		await this.safety?.prepare?.(job);
 		const env = {
 			...job.env,
 			DURABLE_WORKER: "1",
 			DURABLE_AGENT: job.agent,
 			DURABLE_ITEM: job.item,
+			DURABLE_INVOCATION: job.env.DURABLE_INVOCATION ?? "",
 			...(job.piDir ? { PI_CODING_AGENT_DIR: job.piDir } : {}),
 		};
 		const dir = join(this.launcherRoot, job.id);
@@ -30,8 +50,9 @@ export class PiSessionKind implements WorkerKind {
 		const script = writeLauncher(
 			dir,
 			launcherScript({
-				path: dir,
+				path: job.workspace.path,
 				briefPath: brief,
+				resume: job.resume,
 				env,
 				model: job.model,
 				headless: this.dispatcher.capabilities().attach !== "interactive",
@@ -41,14 +62,19 @@ export class PiSessionKind implements WorkerKind {
 		await import("node:fs/promises").then(({ writeFile }) =>
 			writeFile(brief, job.briefText, { mode: 0o600 }),
 		);
-		const process = await this.dispatcher.hostProcess({
-			id: job.id,
-			workspace: job.workspace,
-			command: script,
-			env,
-			title: `durable:${job.agent}/${job.item}`,
-			headless: this.dispatcher.capabilities().attach !== "interactive",
-		});
+		const start = (argv: string[], hostedEnv: NodeJS.ProcessEnv = env) =>
+			this.dispatcher.hostProcess({
+				id: job.id,
+				workspace: job.workspace,
+				command: argv[0],
+				args: argv.slice(1),
+				env: hostedEnv,
+				title: `durable:${job.agent}/${job.item}/${job.id}`,
+				headless: this.dispatcher.capabilities().attach !== "interactive",
+			});
+		const process = this.safety
+			? await this.safety.host(script, { ...job, env }, start)
+			: await start([script]);
 		return { id: job.id, job, process, startedAt: Date.now() };
 	}
 	async status(handle: WorkerHandle) {
@@ -79,7 +105,7 @@ export class PiSessionKind implements WorkerKind {
 		}
 	}
 	async resume(handle: WorkerHandle): Promise<WorkerHandle> {
-		const job = { ...handle.job, id: `${handle.id}-resume` };
+		const job = { ...handle.job, id: `${handle.id}-resume`, resume: true };
 		return this.start(job);
 	}
 	describe(handle: WorkerHandle) {

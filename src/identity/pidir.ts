@@ -8,6 +8,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ResolvedProfile } from "./profiles.ts";
 
 const dirs = [
@@ -32,7 +33,11 @@ export function createDerivedPiDir(
 		throw new Error(
 			"unsafe derived auth.json: remove credentials or file symlink before continuing",
 		);
-	writeFileSync(join(target, "settings.json"), "{}\n", { mode: 0o600 });
+	writeFileSync(
+		join(target, "settings.json"),
+		`${JSON.stringify({ extensions: [fileURLToPath(new URL("../../pi-extension/durable-worker-guard.ts", import.meta.url))] })}\n`,
+		{ mode: 0o600 },
+	);
 	writeFileSync(
 		join(target, "auth-profiles.json"),
 		`${JSON.stringify({ defaultProfile: profile.name })}\n`,

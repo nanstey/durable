@@ -1,11 +1,14 @@
 import type { ConsoleDevice } from "./registry.ts";
 
 const readRoutes = [
+	/^\/v1\/items(?:\/[^/?]+\/hold)?$/,
 	/^\/v1\/(?:device|budget|queue|inbox|audit|conversations)(?:\/[^/?]+)?(?:\/(?:transcript|events))?$/,
 	/^\/v1\/workers(?:\/[^/?]+)?$/,
 	/^\/v1\/(?:events|sessions)(?:\/[^/?]+)?(?:\/(?:transcript|events))?$/,
 ];
 const writeRoutes = [
+	/^\/v1\/items\/[^/?]+\/hold(?:\/verify)?$/,
+	/^\/v1\/conversations\/[^/?]+\/open$/,
 	/^\/v1\/conversations$/,
 	/^\/v1\/(?:conversations|sessions)\/[^/?]+\/(?:messages|abort)$/,
 	/^\/v1\/messages$/,
