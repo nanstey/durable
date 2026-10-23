@@ -1,11 +1,11 @@
 import { join } from "node:path";
 import { ApprovalNonces } from "../approval/nonce.ts";
-import { issueNonce } from "../gate/approval.ts";
 import { loadManifest } from "../config/manifest.ts";
 import { piAgentDir } from "../config/paths.ts";
 import type { AgentDef, MachineCfg } from "../config/schema.ts";
 import { fencedDispatcher } from "../dispatch/hold.ts";
 import { selectDispatcher } from "../dispatch/select.ts";
+import { issueNonce } from "../gate/approval.ts";
 import { buildAgentEnv } from "../identity/env.ts";
 import { createDerivedPiDir } from "../identity/pidir.ts";
 import { resolveProfile } from "../identity/profiles.ts";
@@ -147,6 +147,11 @@ export function setupWorkers(options: SetupOptions) {
 						processes,
 					}),
 					github: new WorkerGithubCli({ env: identity.stewardEnv, processes }),
+					prDiff: (job) =>
+						new WorkerGithubCli({
+							env: identity.stewardEnv,
+							processes,
+						}).prDiff(job),
 					shellEnv: (job) =>
 						buildAgentEnv(identity.profile, "durable-shell", {
 							agent,

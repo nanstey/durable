@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { collectReview, type RunningReview } from "../../src/gate/review.ts";
 import { FakeDispatcher } from "../../src/dispatch/fake.ts";
+import {
+	collectReview,
+	launchReviewer,
+	type RunningReview,
+} from "../../src/gate/review.ts";
 import type { WorkerHandle, WorkerKind } from "../../src/workers/kind.ts";
+import { WorkerKindRegistry } from "../../src/workers/kind.ts";
 import { WorkerRegistry } from "../../src/workers/registry.ts";
 
 const definition = {
@@ -27,6 +32,7 @@ function running(
 		repo: "acme/api",
 		baseRef: "main",
 		headSha: "head",
+		pr: 1,
 		producer: definition.models.worker,
 		workspace: { id: "workspace", repo: "acme/api", branch: "review" },
 		briefText: "Review.",
@@ -144,6 +150,116 @@ for (const kind of ["pi-session", "durable-conversation"] as const)
 		);
 		assert.equal(stored.provenance.entries, 1);
 	});
+
+test("launches a reviewer with the PR SHA and opposite worker family", async () => {
+	let launched: WorkerHandle | undefined;
+	const kind = reviewer("pi-session", async () => ({ status: "exited" }), []);
+	kind.start = async (job) => {
+		const handle: WorkerHandle = {
+			id: job.id,
+			job,
+			process: { id: job.id, handle: job.id, workspace: job.workspace },
+			startedAt: 1,
+		};
+		launched = handle;
+		return handle;
+	};
+	const kinds = new WorkerKindRegistry();
+	kinds.register(kind);
+	const registry = new WorkerRegistry();
+	const dispatcher = new FakeDispatcher();
+	const skillsRoot = mkdtempSync(join(tmpdir(), "durable-skills-"));
+	mkdirSync(join(skillsRoot, "skills", "review-code"), { recursive: true });
+	writeFileSync(
+		join(skillsRoot, "skills", "review-code", "SKILL.md"),
+		"# review",
+	);
+	await launchReviewer(
+		definition,
+		{ name: "fixture", agents: ["agent"] },
+		registry,
+		dispatcher,
+		kinds,
+		{
+			...running("pi-session", "result.json"),
+			id: "review-sha",
+		},
+		skillsRoot,
+	);
+	assert.equal(launched?.job.role, "reviewer");
+	assert.equal(launched?.job.reviewedHeadSha, "head");
+	assert.equal(launched?.job.reviewedPr, 1);
+	assert.equal(launched?.job.reviewedFamily, "openai");
+});
+
+test("refuses a verdict for a stale head SHA", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "durable-review-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const active = running("pi-session", join(root, "result.json"));
+	writeFileSync(
+		active.outputFile,
+		JSON.stringify({
+			verdict: "approve",
+			risk: "low",
+			summary: "OK",
+			headSha: "new-head",
+		}),
+	);
+	const registry = new WorkerRegistry();
+	const fake = new FakeDispatcher();
+	const workspace = await fake.createWorkspace(active.workspace);
+	registry.register(
+		reviewer("pi-session", async () => ({ status: "exited" }), [
+			JSON.stringify({
+				role: "assistant",
+				provider: "anthropic",
+				model: "claude",
+			}),
+		]),
+		{
+			id: active.id,
+			job: {
+				...active,
+				workspace,
+				role: "reviewer",
+				model: definition.models.reviewer,
+			},
+			process: { id: active.id, handle: active.id, workspace },
+			startedAt: 1,
+		},
+	);
+	await assert.rejects(
+		() => collectReview(active, registry, definition),
+		/head SHA does not match/,
+	);
+});
+
+test("fails closed when the reviewer exits without a verdict", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "durable-review-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const active = running("durable-conversation", join(root, "result.json"));
+	const registry = new WorkerRegistry();
+	const fake = new FakeDispatcher();
+	const workspace = await fake.createWorkspace(active.workspace);
+	registry.register(
+		reviewer("durable-conversation", async () => ({ status: "exited" }), []),
+		{
+			id: active.id,
+			job: {
+				...active,
+				workspace,
+				role: "reviewer",
+				model: definition.models.reviewer,
+			},
+			process: { id: active.id, handle: active.id, workspace },
+			startedAt: 1,
+		},
+	);
+	await assert.rejects(
+		() => collectReview(active, registry, definition),
+		/failed without a verdict/,
+	);
+});
 
 test("refuses a same-family fallback assistant entry", async (t) => {
 	const root = mkdtempSync(join(tmpdir(), "durable-review-"));

@@ -25,6 +25,14 @@ export type WorkItemTask = {
 	briefText?: string;
 	resume?: boolean;
 	finished?: boolean;
+	review?: {
+		id: string;
+		kind: "pi-session" | "durable-conversation";
+		headSha: string;
+		pr: number;
+		producer: ModelDef;
+		outputFile: string;
+	};
 };
 export type TaskDependencies = {
 	agent: string;

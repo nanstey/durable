@@ -419,6 +419,34 @@ export class HardenedWorkerGit implements WorkerGit {
 }
 
 export class WorkerGithubCli implements WorkerGithub {
+	/** Fetch the PR diff only while its head remains the SHA assigned to this review. */
+	async prDiff(job: JobSpec): Promise<string> {
+		if (!job.repo || !job.reviewedPr || !job.reviewedHeadSha)
+			throw Error("review diff requires repository, PR and reviewed SHA");
+		const path = `repos/${job.repo}/pulls/${job.reviewedPr}`;
+		const head = async () =>
+			(
+				await this.request<{ head?: { sha?: string } }>(
+					path,
+					"GET",
+					{},
+					job.item,
+					job.id,
+				)
+			).head?.sha;
+		if ((await head()) !== job.reviewedHeadSha)
+			throw Error("pull request head changed before review diff fetch");
+		const result = await this.options.processes.launch(
+			["gh", "api", path, "--header", "Accept: application/vnd.github.diff"],
+			this.options.env,
+			{ item: job.item, attemptId: job.id },
+		);
+		if (result.exitCode !== 0) throw Error("GitHub review diff request failed");
+		if ((await head()) !== job.reviewedHeadSha)
+			throw Error("pull request head changed during review diff fetch");
+		return result.stdout;
+	}
+
 	private readonly options: {
 		env: NodeJS.ProcessEnv;
 		processes: Pick<ProcessManager, "launch">;

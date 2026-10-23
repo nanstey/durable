@@ -1,15 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { familyFor, providerFor } from "../config/agent.ts";
-import type { ModelDef } from "../config/schema.ts";
+import type { AgentDef, MachineCfg, ModelDef } from "../config/schema.ts";
 import type { WorkspaceSpec } from "../dispatch/types.ts";
-import type { WorkerRegistry } from "../workers/registry.ts";
-import { selectWorkerKind } from "../workers/select.ts";
-import type { AgentDef, MachineCfg } from "../config/schema.ts";
 import {
-	parseReviewResult,
 	type ModelProvenance,
+	parseReviewResult,
 	type ReviewResult,
 } from "../workers/durable/review.ts";
+import type { WorkerRegistry } from "../workers/registry.ts";
+import { selectWorkerKind } from "../workers/select.ts";
 
 export type StewardReview = {
 	sha: string;
@@ -23,6 +22,7 @@ export type ReviewerLaunch = {
 	repo: string;
 	baseRef: string;
 	headSha: string;
+	pr: number;
 	producer: ModelDef;
 	workspace: WorkspaceSpec;
 	briefText: string;
@@ -46,7 +46,6 @@ export function reviewerModel(definition: AgentDef): ModelDef {
 }
 
 /** Launch a reviewer through the same dispatcher and kind registry as workers. */
-// fallow-ignore-next-line unused-export
 export async function launchReviewer(
 	definition: AgentDef,
 	machine: MachineCfg,
@@ -54,9 +53,16 @@ export async function launchReviewer(
 	dispatcher: import("../dispatch/types.ts").WorkerDispatcher,
 	kinds: import("../workers/kind.ts").WorkerKindRegistry,
 	input: ReviewerLaunch,
+	skillsRoot?: string,
 ): Promise<RunningReview> {
 	const model = reviewerModel(definition);
-	const kind = selectWorkerKind(kinds, definition, machine, "reviewer");
+	const kind = selectWorkerKind(
+		kinds,
+		definition,
+		machine,
+		"reviewer",
+		skillsRoot,
+	);
 	await workers.launch(dispatcher, kind, {
 		id: input.id,
 		agent: input.agent,
@@ -64,6 +70,7 @@ export async function launchReviewer(
 		repo: input.repo,
 		baseRef: input.baseRef,
 		reviewedHeadSha: input.headSha,
+		reviewedPr: input.pr,
 		reviewedFamily: familyFor(input.producer),
 		role: "reviewer",
 		briefText: input.briefText,
