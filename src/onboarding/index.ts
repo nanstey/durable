@@ -84,15 +84,15 @@ async function interactiveAnswers(root?: string): Promise<InteractiveResult> {
 				: []),
 			{
 				value: "device",
-				label: `${hasToken ? "2" : "1"}. replace with browser sign-in (GitHub CLI device flow; requests repo scope, which grants broad private-repository access)`,
+				label: `${hasToken ? "2" : "1"}. ${hasToken ? "replace with browser sign-in" : "sign in with your browser"} (opens after the remaining questions; GitHub CLI device flow; requests repo scope, which grants broad private-repository access)`,
 			},
 			{
 				value: "paste",
-				label: `${hasToken ? "3" : "2"}. replace by pasting a fine-grained token`,
+				label: `${hasToken ? "3" : "2"}. ${hasToken ? "replace by pasting" : "paste"} a fine-grained token`,
 			},
 			{ value: "skip", label: `${hasToken ? "4" : "3"}. skip for now` },
 		],
-		initialValue: hasToken ? "bind" : "skip",
+		initialValue: hasToken ? "bind" : "device",
 	});
 	if (!["bind", "device", "paste", "skip"].includes(String(github)))
 		throw Error("onboarding cancelled");
