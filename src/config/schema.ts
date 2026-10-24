@@ -88,6 +88,8 @@ export type AgentDef = {
 					specApproval?: boolean;
 					complexityThreshold?: "medium" | "large";
 				};
+				/** Disabled unless this repository explicitly opts in. */
+				improve?: { enabled?: boolean; repeatThreshold?: number };
 			};
 		}>;
 	};
