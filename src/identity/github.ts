@@ -39,25 +39,46 @@ export function githubDeviceToken(
 	const config = mkdtempSync(join(tmpdir(), "durable-gh-"));
 	chmodSync(config, 0o700);
 	try {
-		const env = {
+		// gh needs HOME (git config) and the desktop session variables to open a
+		// browser. None of these carry credentials; GH_TOKEN and friends are not
+		// forwarded, so the ambient gh login stays untouched.
+		const env: Record<string, string | undefined> = {
 			PATH: process.env.PATH,
+			HOME: process.env.HOME,
+			TERM: process.env.TERM,
+			DISPLAY: process.env.DISPLAY,
+			WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
+			XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+			DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
+			BROWSER: process.env.BROWSER,
 			GH_CONFIG_DIR: config,
+			// gh offers to set up git credentials; keep that inside the temp dir so
+			// the operator's own git config is never modified.
+			GIT_CONFIG_GLOBAL: join(config, "gitconfig"),
+			GIT_CONFIG_SYSTEM: "/dev/null",
 			GH_HOST: "github.com",
 		};
-		run(
-			[
-				"auth",
-				"login",
-				"--web",
-				"--hostname",
-				"github.com",
-				"--scopes",
-				"repo",
-				"--git-protocol",
-				"https",
-			],
-			env,
-		);
+		// gh can finish authentication and still exit non-zero on a later step
+		// (git protocol setup, no browser opener). The token read-back below is
+		// the real success test, so a login failure alone is not fatal.
+		try {
+			run(
+				[
+					"auth",
+					"login",
+					"--web",
+					"--hostname",
+					"github.com",
+					"--scopes",
+					"repo",
+					"--git-protocol",
+					"https",
+				],
+				env,
+			);
+		} catch {
+			// verified by the token read-back
+		}
 		const token = run(["auth", "token", "--hostname", "github.com"], env);
 		if (!token) throw Error("device flow cancelled or failed");
 		return token;
