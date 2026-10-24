@@ -74,13 +74,16 @@ export function resumeRequest(agent: string) {
 		() => undefined,
 	)?.id;
 }
+export function resumeApproved(agent: string, via: "tty" | "passkey") {
+	const path = join(agentDir(agent), "disabled");
+	if (existsSync(path)) unlinkSync(path);
+	saveJson(join(agentDir(agent), "resume-request.json"), { id: randomUUID() });
+	audit(agent, { event: "resumed", actor: "human", via });
+}
 export function resumeLocal(agent: string, tty = Boolean(process.stdin.isTTY)) {
 	if (!tty)
 		throw Error(
 			"resume requires a local TTY; bearer tokens cannot resume an agent",
 		);
-	const path = join(agentDir(agent), "disabled");
-	if (existsSync(path)) unlinkSync(path);
-	saveJson(join(agentDir(agent), "resume-request.json"), { id: randomUUID() });
-	audit(agent, { event: "resumed", actor: "human", via: "tty" });
+	resumeApproved(agent, "tty");
 }

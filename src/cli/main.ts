@@ -7,6 +7,7 @@ import {
 	type Scope,
 } from "../api/tokens.ts";
 import { DurableClient } from "../client/client.ts";
+import { ApprovalWebAuthn } from "../approval/webauthn.ts";
 import { loadAgent, loadMachine } from "../config/load.ts";
 import {
 	applyOrganization,
@@ -602,6 +603,63 @@ subCommands.queue = defineCommand({
 	args: agentArg,
 	async run({ args }) {
 		console.log(await queueCommand(selected(args.agent), args["dry-run"]));
+	},
+});
+subCommands.approval = defineCommand({
+	meta: { name: "approval" },
+	subCommands: {
+		enroll: defineCommand({
+			meta: { name: "enroll" },
+			args: { agent: { type: "positional" } },
+			run({ args }) {
+				if (!process.stdin.isTTY || !process.stdout.isTTY)
+					throw Error("passkey enrollment requires a local TTY");
+				const agent = selected(args.agent);
+				const approval = loadMachine().approval;
+				if (!approval?.rpId || !approval.origin)
+					throw Error("machine approval.rpId and approval.origin are required");
+				console.log(
+					`Enrollment code: ${new ApprovalWebAuthn(agent, { rpId: approval.rpId, origin: approval.origin }).issueEnrollmentCode()}`,
+				);
+			},
+		}),
+		list: defineCommand({
+			meta: { name: "list" },
+			args: { agent: { type: "positional" } },
+			run({ args }) {
+				const agent = selected(args.agent);
+				const approval = loadMachine().approval;
+				if (!approval?.rpId || !approval.origin)
+					throw Error("passkeys are not configured");
+				print(
+					new ApprovalWebAuthn(agent, {
+						rpId: approval.rpId,
+						origin: approval.origin,
+					}).list(),
+				);
+			},
+		}),
+		revoke: defineCommand({
+			meta: { name: "revoke" },
+			args: {
+				agent: { type: "positional" },
+				id: { type: "positional", required: true },
+			},
+			run({ args }) {
+				const agent = selected(args.agent);
+				const approval = loadMachine().approval;
+				if (!approval?.rpId || !approval.origin)
+					throw Error("passkeys are not configured");
+				if (
+					!new ApprovalWebAuthn(agent, {
+						rpId: approval.rpId,
+						origin: approval.origin,
+					}).revoke(args.id)
+				)
+					throw Error("passkey not found");
+				console.log("revoked");
+			},
+		}),
 	},
 });
 subCommands.pause = defineCommand({

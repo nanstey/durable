@@ -94,6 +94,28 @@ test("proxy injects the daemon token and does not forward browser credentials", 
 	}
 });
 
+test("console relays passkey requests without a daemon bearer token", async () => {
+	const original = globalThis.fetch;
+	let authorization = "unexpected";
+	globalThis.fetch = async (_input, init) => {
+		authorization = new Headers(init?.headers).get("authorization") ?? "";
+		return Response.json({ ok: true });
+	};
+	try {
+		await proxyDaemon(
+			{ id: "local", url: "http://127.0.0.1:7330", token: "private" },
+			new Request(
+				"http://127.0.0.1:4319/api/devices/local/v1/approvals/challenge",
+				{ method: "POST", body: "{}" },
+			),
+			"/v1/approvals/challenge",
+		);
+		assert.equal(authorization, "");
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
 test("monitor distinguishes daemon device states", async () => {
 	const monitor = new DeviceMonitor(
 		[

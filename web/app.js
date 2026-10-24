@@ -96,6 +96,52 @@ function detailPanel() {
 	return panel;
 }
 
+function base64url(value) {
+	const text = atob(value.replace(/-/g, "+").replace(/_/g, "/"));
+	return Uint8Array.from(text, (char) => char.charCodeAt(0));
+}
+function json(value) {
+	if (value instanceof ArrayBuffer) return btoa(String.fromCharCode(...new Uint8Array(value))).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+	if (ArrayBuffer.isView(value)) return json(value.buffer);
+	if (Array.isArray(value)) return value.map(json);
+	if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, json(item)]));
+	return value;
+}
+async function passkey(device, action, item, enrollmentCode) {
+	const issued = await api(device, "/approvals/challenge", "POST", { action, item, enrollmentCode });
+	const options = issued.publicKey;
+	options.challenge = base64url(options.challenge);
+	for (const credential of options.allowCredentials ?? options.excludeCredentials ?? []) credential.id = base64url(credential.id);
+	if (options.user?.id) options.user.id = base64url(options.user.id);
+	const credential = action === "enroll"
+		? await navigator.credentials.create({ publicKey: options })
+		: await navigator.credentials.get({ publicKey: options });
+	return api(device, "/approvals/assert", "POST", { action, item, challengeId: issued.challengeId, response: json(credential) });
+}
+function approvals() {
+	const panel = element("section", undefined, "approvals");
+	panel.append(element("h2", "Approvals"));
+	if (!selected) { panel.append(element("p", "Select an agent to review approvals.")); return panel; }
+	const queue = state.details.get(selected.device)?.items ?? [];
+	const pending = queue.filter((item) => item.gate?.state === "waiting-approval");
+	for (const item of pending) {
+		const gate = item.gate;
+		const row = element("section");
+		row.append(element("h3", `PR #${gate.pr ?? "?"}: ${item.id}`), textBlock({ headSha: gate.sha, reasons: gate.reasons, verdict: item.review?.verdict }));
+		const approve = element("button", "Confirm with passkey");
+		approve.addEventListener("click", () => { if (confirm(`Approve ${item.id} at ${gate.sha}?`)) passkey(selected.device, "approve", item.id).then(load).catch(() => {}); });
+		row.append(approve); panel.append(row);
+	}
+	for (const item of queue.filter((candidate) => candidate.outcome === "held")) {
+		const release = element("button", `Release ${item.id} with passkey`);
+		release.addEventListener("click", () => { if (confirm(`Release human hold for ${item.id}?`)) passkey(selected.device, "release", item.id).then(load).catch(() => {}); });
+		panel.append(release);
+	}
+	const resume = element("button", "Resume agent with passkey");
+	resume.addEventListener("click", () => { if (confirm("Resume this agent?")) passkey(selected.device, "resume", selected.device).then(load).catch(() => {}); });
+	panel.append(resume);
+	return panel;
+}
 function draw() {
 	root.replaceChildren();
 	root.append(element("h1", "Durable console"));
@@ -112,8 +158,8 @@ function draw() {
 	controls.append(create);
 	root.append(controls);
 	const layout = element("div", undefined, "layout");
-	layout.append(fleet(), detailPanel(), renderChat(selected?.node, { ...state, scopes: state.details.get(selected?.device)?.scopeSummary }, (path, method, body) => api(selected.device, path, method, body)));
-	root.append(layout, element("footer", "Console controls chat, pause, and reads only. It cannot approve or resume agents."));
+	layout.append(fleet(), detailPanel(), approvals(), renderChat(selected?.node, { ...state, scopes: state.details.get(selected?.device)?.scopeSummary }, (path, method, body) => api(selected.device, path, method, body)));
+	root.append(layout, element("footer", "Passkey approvals are verified by the daemon; the console only relays browser assertions."));
 }
 
 function newConversation() {
@@ -163,11 +209,11 @@ async function load(reconnect = true) {
 	state.details = new Map();
 	for (const device of boot.devices.filter((entry) => entry.status === "online")) {
 		try {
-			const [treeData, budget, queue, inbox, audit, info] = await Promise.all([
-				api(device.id, "/conversations?tree=true"), api(device.id, "/budget"), api(device.id, "/queue"), api(device.id, "/inbox"), api(device.id, "/audit"), api(device.id, "/device"),
+			const [treeData, budget, queue, items, inbox, audit, info] = await Promise.all([
+				api(device.id, "/conversations?tree=true"), api(device.id, "/budget"), api(device.id, "/queue"), api(device.id, "/items"), api(device.id, "/inbox"), api(device.id, "/audit"), api(device.id, "/device"),
 			]);
 			state.nodes.push(...treeData.nodes.map((node) => ({ ...node, device: device.id })));
-			state.details.set(device.id, { budget, queue, inbox, audit, scopeSummary: info.scopeSummary });
+			state.details.set(device.id, { budget, queue, items: Object.values(items.items ?? {}), inbox, audit, scopeSummary: info.scopeSummary });
 			if (selected?.device === device.id) selected.node = state.nodes.find((node) => node.device === device.id && node.id === selected.node.id) ?? selected.node;
 		} catch { /* device status remains visible */ }
 	}
