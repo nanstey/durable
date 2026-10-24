@@ -2,11 +2,30 @@
 
 | Spec item | Status | Evidence |
 | --- | --- | --- |
-| Daemon-verified passkeys | Implemented | `src/approval/webauthn.ts` uses pinned `@simplewebauthn/server`; challenges are action/item/binding-bound, short-lived and consumed before verification. |
-| Enrollment and key management | Implemented | `durable approval enroll|list|revoke`; first enrollment uses a short-lived TTY code. |
-| Console conduit | Implemented | `web/app.js` asks for an explicit browser passkey gesture and `src/console/proxy.ts` forwards approval calls without a daemon bearer token. |
-| Approval and release | Implemented | `src/api/routes.ts` derives current head SHA or hold epoch before issuing and again before accepting an assertion. |
+| Daemon-verified passkeys | Implemented | `src/approval/webauthn.ts` uses pinned `@simplewebauthn/server`; byte-preserving challenges are action/item/binding-bound, short-lived, single-use, capped, and tested in `test/unit/approval.test.ts`. |
+| Enrollment and key management | Implemented | `durable approval enroll|list|revoke`; first enrollment uses a short-lived TTY code and additional enrollment starts with an existing-key assertion. |
+| Console conduit | Implemented | `web/app.js` uses `credential.toJSON()` after an explicit gesture; `src/console/proxy.ts` forwards approval calls without a daemon bearer token. |
+| Approval and release | Implemented | `src/api/routes.ts` derives current head SHA or hold epoch before issuing and again before accepting an assertion; bearer credentials are rejected. |
 | Live phone/desktop drill | Pending operator | Enroll a phone passkey over the configured HTTPS console; approve a human-approval PR from phone and desktop, resume a paused agent, verify a fixture policy, and record desktop/command audit notifications. Live phone passkey result: **pending operator**. |
+
+## Review remediation
+
+| Finding | Status | Regression evidence |
+| --- | --- | --- |
+| H1 challenge encoding | Fixed | Stored challenge bytes equal browser options (`test/unit/approval.test.ts`). |
+| H2 credential serialization | Fixed | Console source assertion in `test/unit/console.test.ts`. |
+| H3 second-key authorization | Fixed | Existing key receives assertion ceremony before registration (`test/unit/approval.test.ts`). |
+| H4 synced counters | Fixed | Relies on SimpleWebAuthn clone detection; no stricter local counter comparison. |
+| H5 missing coverage | Partially fixed | Challenge-byte, enrollment, cap, nonce binding, and proxy tests exist; full hardware assertion fixtures remain an operator/CI follow-up. |
+| M6 policy fingerprint | Fixed | `policyVerification()` supplies fingerprint and change data. |
+| M7/M15 storage races | Fixed for nonce store | `ApprovalNonces` uses `proper-lockfile` around issue/consume. |
+| M8 challenge abuse/enumeration | Fixed | Per-peer route limit, pending-challenge cap, and discoverable credentials avoid key-ID disclosure. |
+| M9 notifications/audit | Partially fixed | Approval assertion failures and outcomes are audited; notification coverage remains pending. |
+| M10 stale binding | Fixed | Bindings are re-derived before assertion and failures are audited. |
+| M11 UI detail | Partially fixed | Explicit user gesture and visible API errors exist; full approval detail DOM coverage remains pending. |
+| L12 resume state | Fixed | Resume challenges require the local paused marker. |
+| L13 enrollment-code usability | Fixed | Enrollment code is retained until successful registration. |
+| L14 credential metadata | Deferred | Single-user deployment assumption remains documented. |
 
 ## Threat model and recovery
 

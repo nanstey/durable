@@ -25,6 +25,7 @@ type Challenge = {
 	challenge: string;
 	expiresAt: number;
 	kind: "assertion" | "registration";
+	secondEnrollment?: boolean;
 };
 type Key = {
 	id: string;
@@ -44,6 +45,7 @@ export class ApprovalWebAuthn {
 	private readonly agent: string;
 	private readonly config: { rpId: string; origin: string };
 	private readonly now: () => number;
+	private static readonly maxChallenges = 20;
 	constructor(
 		agent: string,
 		config: { rpId: string; origin: string },
@@ -96,7 +98,12 @@ export class ApprovalWebAuthn {
 		item: string,
 		binding: Binding,
 		kind: Challenge["kind"],
+		secondEnrollment = false,
 	) {
+		if (Object.keys(state.challenges).length >= ApprovalWebAuthn.maxChallenges)
+			throw Object.assign(Error("too many pending passkey challenges"), {
+				code: "rate_limited",
+			});
 		const id = randomBytes(18).toString("base64url");
 		const challenge = randomBytes(32).toString("base64url");
 		state.challenges[id] = {
@@ -106,11 +113,12 @@ export class ApprovalWebAuthn {
 			challenge,
 			expiresAt: this.now() + 2 * 60_000,
 			kind,
+			secondEnrollment,
 		};
 		return { id, challenge };
 	}
 	private async authenticationOptions(
-		state: Store,
+		_state: Store,
 		issued: { id: string; challenge: string },
 	) {
 		return {
@@ -118,11 +126,10 @@ export class ApprovalWebAuthn {
 			kind: "assertion" as const,
 			options: await generateAuthenticationOptions({
 				rpID: this.config.rpId,
-				challenge: issued.challenge,
-				allowCredentials: state.keys.map((key) => ({
-					id: key.id,
-					transports: key.transports as never,
-				})),
+				challenge: Buffer.from(issued.challenge, "base64url"),
+				// Discoverable credentials avoid exposing enrolled credential IDs to
+				// callers of the deliberately unauthenticated challenge endpoint.
+				allowCredentials: [],
 				userVerification: "required",
 			}),
 		};
@@ -139,7 +146,7 @@ export class ApprovalWebAuthn {
 				rpID: this.config.rpId,
 				userName: this.agent,
 				userID: new TextEncoder().encode(this.agent),
-				challenge: issued.challenge,
+				challenge: Buffer.from(issued.challenge, "base64url"),
 				excludeCredentials: state.keys.map((key) => ({ id: key.id })),
 				authenticatorSelection: {
 					residentKey: "preferred",
@@ -171,7 +178,6 @@ export class ApprovalWebAuthn {
 					Error("valid enrollment code required for first passkey"),
 					{ code: "forbidden" },
 				);
-			delete state.enrollment;
 		}
 		if (enrollment && state.keys.length > 0) {
 			const issued = this.challenge(state, action, item, binding, "assertion");
@@ -240,10 +246,7 @@ export class ApprovalWebAuthn {
 				transports: key.transports as never,
 			},
 		});
-		if (
-			!verified.verified ||
-			verified.authenticationInfo.newCounter <= key.counter
-		)
+		if (!verified.verified)
 			throw Object.assign(Error("passkey assertion refused"), {
 				code: "forbidden",
 			});
@@ -262,6 +265,7 @@ export class ApprovalWebAuthn {
 			this.agent,
 			"enroll",
 			"registration",
+			true,
 		);
 		this.save(state);
 		return this.registrationOptions(state, issued);
@@ -276,6 +280,13 @@ export class ApprovalWebAuthn {
 			"enroll",
 			"registration",
 		);
+		if (
+			(challenge.secondEnrollment && state.keys.length === 0) ||
+			(!challenge.secondEnrollment && state.keys.length > 0)
+		)
+			throw Object.assign(Error("passkey enrollment state changed"), {
+				code: "forbidden",
+			});
 		const verified = await verifyRegistrationResponse({
 			response,
 			expectedChallenge: challenge.challenge,
@@ -294,6 +305,7 @@ export class ApprovalWebAuthn {
 			counter: credential.counter,
 			transports: response.response.transports,
 		});
+		if (!challenge.secondEnrollment) delete state.enrollment;
 		this.save(state);
 		return credential.id;
 	}

@@ -108,13 +108,6 @@ function base64url(value) {
 	const text = atob(value.replace(/-/g, "+").replace(/_/g, "/"));
 	return Uint8Array.from(text, (char) => char.charCodeAt(0));
 }
-function json(value) {
-	if (value instanceof ArrayBuffer) return btoa(String.fromCharCode(...new Uint8Array(value))).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-	if (ArrayBuffer.isView(value)) return json(value.buffer);
-	if (Array.isArray(value)) return value.map(json);
-	if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, json(item)]));
-	return value;
-}
 async function passkey(device, action, item, enrollmentCode) {
 	let issued = await api(device, "/approvals/challenge", "POST", { action, item, enrollmentCode });
 	while (true) {
@@ -125,7 +118,7 @@ async function passkey(device, action, item, enrollmentCode) {
 		const credential = issued.kind === "registration"
 			? await navigator.credentials.create({ publicKey: options })
 			: await navigator.credentials.get({ publicKey: options });
-		const result = await api(device, "/approvals/assert", "POST", { action, item, kind: issued.kind, challengeId: issued.challengeId, response: json(credential) });
+		const result = await api(device, "/approvals/assert", "POST", { action, item, kind: issued.kind, challengeId: issued.challengeId, response: credential.toJSON() });
 		if (result.approved) return result;
 		issued = result;
 	}

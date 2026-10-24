@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { ApprovalWebAuthn } from "../../src/approval/webauthn.ts";
@@ -22,10 +22,6 @@ test("first passkey enrollment consumes a TTY code, while another key starts wit
 		(await approval.options("enroll", "agent", "enroll", code)).kind,
 		"registration",
 	);
-	await assert.rejects(
-		approval.options("enroll", "agent", "enroll", code),
-		/enrollment code/,
-	);
 
 	mkdirSync(join(agentDir("agent"), "approval"), { recursive: true });
 	saveJson(join(agentDir("agent"), "approval", "webauthn.json"), {
@@ -34,9 +30,33 @@ test("first passkey enrollment consumes a TTY code, while another key starts wit
 	});
 	const second = await approval.options("enroll", "agent", "enroll");
 	assert.equal(second.kind, "assertion");
-	assert.deepEqual(
-		second.options.allowCredentials?.map((key) => key.id),
-		["existing"],
-	);
+	assert.deepEqual(second.options.allowCredentials, []);
 	now += 1;
+});
+
+test("WebAuthn options preserve the stored challenge bytes without exposing enrolled credentials", async () => {
+	const approval = new ApprovalWebAuthn("bytes", config);
+	const issued = await approval.options("resume", "bytes", "resume");
+	const stored = JSON.parse(
+		readFileSync(join(agentDir("bytes"), "approval", "webauthn.json"), "utf8"),
+	) as { challenges: Record<string, { challenge: string }> };
+	assert.equal(
+		issued.options.challenge,
+		stored.challenges[issued.id]?.challenge,
+	);
+	assert.deepEqual(
+		("allowCredentials" in issued.options && issued.options.allowCredentials) ||
+			[],
+		[],
+	);
+});
+
+test("WebAuthn limits outstanding unauthenticated challenges", async () => {
+	const approval = new ApprovalWebAuthn("limited", config);
+	for (let index = 0; index < 20; index++)
+		await approval.options("resume", "limited", "resume");
+	await assert.rejects(
+		approval.options("resume", "limited", "resume"),
+		(error: { code?: string }) => error.code === "rate_limited",
+	);
 });

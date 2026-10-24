@@ -94,6 +94,13 @@ test("proxy injects the daemon token and does not forward browser credentials", 
 	}
 });
 
+test("console serializes browser passkeys with the platform JSON serializer", () => {
+	assert.match(
+		readFileSync("web/app.js", "utf8"),
+		/response: credential\.toJSON\(\)/,
+	);
+});
+
 test("console relays passkey requests without a daemon bearer token", async () => {
 	const original = globalThis.fetch;
 	let authorization = "unexpected";

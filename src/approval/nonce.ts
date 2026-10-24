@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { lockSync } from "proper-lockfile";
 import { dirname, join } from "node:path";
 import { agentDir, loadJson, saveJson } from "../steward/files.ts";
 
@@ -14,6 +15,7 @@ export class ApprovalNonces {
 		this.now = now;
 		this.path = join(agentDir(agent), "approval", "nonces.json");
 		mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
+		if (!existsSync(this.path)) saveJson(this.path, {});
 	}
 	private digest(
 		action: string,
@@ -26,19 +28,24 @@ export class ApprovalNonces {
 			.digest("hex");
 	}
 	issue(action: string, item: string, binding: string | number): string {
-		const code = randomBytes(24).toString("base64url");
-		const records = loadJson<Record<string, NonceRecord>>(
-			this.path,
-			() => ({}),
-		);
-		for (const [key, value] of Object.entries(records))
-			if (value.expiresAt <= this.now()) delete records[key];
-		records[JSON.stringify([action, item, binding])] = {
-			hash: this.digest(action, item, binding, code),
-			expiresAt: this.now() + 5 * 60000,
-		};
-		saveJson(this.path, records);
-		return code;
+		const release = lockSync(this.path);
+		try {
+			const code = randomBytes(24).toString("base64url");
+			const records = loadJson<Record<string, NonceRecord>>(
+				this.path,
+				() => ({}),
+			);
+			for (const [key, value] of Object.entries(records))
+				if (value.expiresAt <= this.now()) delete records[key];
+			records[JSON.stringify([action, item, binding])] = {
+				hash: this.digest(action, item, binding, code),
+				expiresAt: this.now() + 5 * 60000,
+			};
+			saveJson(this.path, records);
+			return code;
+		} finally {
+			release();
+		}
 	}
 	verify(
 		action: string,
@@ -46,21 +53,29 @@ export class ApprovalNonces {
 		binding: string | number,
 		code: string,
 	): boolean {
-		const records = loadJson<Record<string, NonceRecord>>(
-			this.path,
-			() => ({}),
-		);
-		const key = JSON.stringify([action, item, binding]);
-		const record = records[key];
-		const actual = Buffer.from(this.digest(action, item, binding, code), "hex");
-		if (
-			!record ||
-			record.expiresAt <= this.now() ||
-			!timingSafeEqual(Buffer.from(record.hash, "hex"), actual)
-		)
-			return false;
-		delete records[key];
-		saveJson(this.path, records);
-		return true;
+		const release = lockSync(this.path);
+		try {
+			const records = loadJson<Record<string, NonceRecord>>(
+				this.path,
+				() => ({}),
+			);
+			const key = JSON.stringify([action, item, binding]);
+			const record = records[key];
+			const actual = Buffer.from(
+				this.digest(action, item, binding, code),
+				"hex",
+			);
+			if (
+				!record ||
+				record.expiresAt <= this.now() ||
+				!timingSafeEqual(Buffer.from(record.hash, "hex"), actual)
+			)
+				return false;
+			delete records[key];
+			saveJson(this.path, records);
+			return true;
+		} finally {
+			release();
+		}
 	}
 }
