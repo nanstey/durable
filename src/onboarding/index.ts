@@ -1,4 +1,4 @@
-import { confirm, multiselect, select } from "@clack/prompts";
+import { confirm, multiselect, select, text } from "@clack/prompts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,15 +27,28 @@ export type OnboardResult = {
 };
 
 async function interactiveAnswers(): Promise<OnboardAnswers> {
-	const profile = await select({
+	const choice = await select({
 		message: "Start a profile (recommended: work)",
 		options: [
 			{ value: "work", label: "1. work — recommended default" },
 			{ value: "personal", label: "2. personal" },
+			{ value: "__custom", label: "3. another name (type it)" },
 		],
 		initialValue: "work",
 	});
-	if (typeof profile !== "string") throw Error("onboarding cancelled");
+	if (typeof choice !== "string") throw Error("onboarding cancelled");
+	let profile = choice;
+	if (choice === "__custom") {
+		const typed = await text({
+			message: "Profile name (letters, digits, . _ -)",
+			validate: (value) =>
+				/^[A-Za-z0-9._-]+$/.test(value ?? "")
+					? undefined
+					: "Use letters, digits, '.', '_' or '-'",
+		});
+		if (typeof typed !== "string") throw Error("onboarding cancelled");
+		profile = typed;
+	}
 	const github = await select({
 		message: "GitHub identity (recommended: configure later)",
 		options: [
