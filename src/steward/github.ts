@@ -171,6 +171,7 @@ export class Github implements WorkGithub {
 					body: string;
 					user?: { login?: string };
 					author_association?: string;
+					updated_at?: string;
 				}>
 			>(
 				repo,
@@ -182,6 +183,7 @@ export class Github implements WorkGithub {
 					body: comment.body,
 					login: comment.user?.login,
 					authorAssociation: comment.author_association,
+					updatedAt: comment.updated_at,
 				})),
 			);
 			const item = this.issueItem(repo, issue);

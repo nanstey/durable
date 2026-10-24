@@ -46,6 +46,8 @@ export function createApi(opts: {
 	const app = new Hono<ApiEnv>();
 	const { harness } = opts;
 	const startedAt = opts.startedAt ?? Date.now();
+	const approvalRequestAt = new Map<string, number>();
+	const approvalRequestWindowMs = 60_000;
 	if (opts.peerCheck && opts.peerCheck.mode !== "off")
 		app.use("*", async (c, next) => {
 			if (c.req.path === "/healthz") return next();
@@ -121,11 +123,13 @@ export function createApi(opts: {
 					? 404
 					: code === "conflict" || code === "busy"
 						? 409
-						: code === "unavailable"
-							? 503
-							: code === "not-enrolled" || code === "not_supported"
-								? 501
-								: 500;
+						: code === "rate_limited"
+							? 429
+							: code === "unavailable"
+								? 503
+								: code === "not-enrolled" || code === "not_supported"
+									? 501
+									: 500;
 		if (status === 500) audit(opts.agent, { event: "api-error" });
 		return c.json(
 			{
@@ -334,6 +338,13 @@ export function createApi(opts: {
 	});
 	app.post("/v1/gate/:item/approve/request", async (c) => {
 		const item = (await harness.workItems()).items[c.req.param("item")];
+		const last = approvalRequestAt.get(c.req.param("item"));
+		if (last !== undefined && Date.now() - last < approvalRequestWindowMs)
+			throw new ApiError(
+				"rate_limited",
+				"approval request already sent recently",
+				429,
+			);
 		if (
 			!item?.gate ||
 			item.gate.state !== "waiting-approval" ||
@@ -348,10 +359,12 @@ export function createApi(opts: {
 				"configure a nonce-safe desktop or command approval channel",
 				503,
 			);
+		approvalRequestAt.set(item.id, Date.now());
 		audit(opts.agent, {
 			event: "approval-nonce-requested",
 			item: item.id,
 			sha: item.gate.sha,
+			actor: c.get("actor").client,
 		});
 		return c.json({ requested: true }, 202);
 	});
