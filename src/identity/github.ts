@@ -11,6 +11,26 @@ export type GithubDeviceRunner = (
 	env: NodeJS.ProcessEnv,
 ) => string;
 
+const AMBIENT_GH_AUTH = [
+	"GH_TOKEN",
+	"GITHUB_TOKEN",
+	"GH_ENTERPRISE_TOKEN",
+	"GITHUB_ENTERPRISE_TOKEN",
+	"GH_CONFIG_DIR",
+	"GH_HOST",
+];
+
+/**
+ * Environment for gh subprocesses: the operator's normal environment (version
+ * managers such as mise wrap gh and hang without it) minus any ambient GitHub
+ * auth, so only the credential we pass explicitly is used.
+ */
+function ghBaseEnv(): Record<string, string | undefined> {
+	const env: Record<string, string | undefined> = { ...process.env };
+	for (const name of AMBIENT_GH_AUTH) delete env[name];
+	return env;
+}
+
 const deviceRunner: GithubDeviceRunner = (args, env) => {
 	// The login step must talk to the operator: gh prints the one-time code and
 	// waits for Enter. Only the token read-back is captured.
@@ -43,14 +63,7 @@ export function githubDeviceToken(
 		// browser. None of these carry credentials; GH_TOKEN and friends are not
 		// forwarded, so the ambient gh login stays untouched.
 		const env: Record<string, string | undefined> = {
-			PATH: process.env.PATH,
-			HOME: process.env.HOME,
-			TERM: process.env.TERM,
-			DISPLAY: process.env.DISPLAY,
-			WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
-			XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
-			DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
-			BROWSER: process.env.BROWSER,
+			...ghBaseEnv(),
 			GH_CONFIG_DIR: config,
 			// gh offers to set up git credentials; keep that inside the temp dir so
 			// the operator's own git config is never modified.
@@ -100,7 +113,7 @@ export const runGithub: GithubRunner = (args, token) => {
 		reject: false,
 		extendEnv: false,
 		env: {
-			PATH: process.env.PATH,
+			...ghBaseEnv(),
 			GH_TOKEN: token,
 			GH_PROMPT_DISABLED: "1",
 			GH_HOST: "github.com",
