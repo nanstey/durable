@@ -6,10 +6,10 @@ import { profileCommand } from "../cli/profile.ts";
 import { readSecrets } from "../identity/env.ts";
 import { resolveProfile } from "../identity/profiles.ts";
 import { readAnswers, type OnboardAnswers } from "./answers.ts";
-import { applyPlan, type GithubSetup } from "./apply.ts";
+import { applyPlan, type GithubSetup, type ProviderSetup } from "./apply.ts";
 import { renderDiff } from "./diff.ts";
 import { createPlan, plannedFiles } from "./plan.ts";
-import { checkPrerequisites, formatPrerequisites } from "./prerequisites.ts";
+import { checkPrerequisites } from "./prerequisites.ts";
 import { onboardingStatePath, type OnboardingState } from "./state.ts";
 
 const defaults: OnboardAnswers = { profile: "work", github: "skip" };
@@ -22,6 +22,7 @@ export type OnboardOptions = {
 	root?: string;
 	stateFile?: string;
 	github?: GithubSetup;
+	providers?: ProviderSetup;
 };
 export type OnboardResult = {
 	output: string;
@@ -207,16 +208,34 @@ export async function onboard(
 					}
 				: options.github?.env,
 		},
+		providers: options.providers,
 	});
-	const prerequisites = formatPrerequisites(checkPrerequisites(root));
-	const github = result.githubLogin
-		? `\nGitHub: bound as ${result.githubLogin.replace("GitHub login: ", "")}`
-		: "";
-	const status = result.pending.length
-		? `Profile ${plan.profile} is pending operator setup.\n${result.pending.join("\n")}\nResume: durable onboard --yes`
-		: `Profile ${plan.profile} completed. Next stage: organization (reserved).\nResume: durable onboard --yes`;
+	const failedPrerequisite = checkPrerequisites(root).find(
+		(check) => !check.ok,
+	);
+	const checklist = [
+		`Profile ${plan.profile}: ${result.profileCreated ? "created" : "selected"}`,
+		result.githubLogin
+			? `GitHub: bound as ${result.githubLogin.replace("GitHub login: ", "")}`
+			: result.githubSkipped
+				? "GitHub: skipped"
+				: "GitHub: failed (see fix below)",
+		...(result.providers.length === 0
+			? ["Providers: skipped"]
+			: result.providers.map((provider) =>
+					provider.state === "ready"
+						? `Provider ${provider.provider}: ready`
+						: `Provider ${provider.provider}: failed`,
+				)),
+	];
+	const fixes = [
+		...(failedPrerequisite
+			? [`Prerequisite: ${failedPrerequisite.detail}`]
+			: []),
+		...result.pending,
+	];
 	return {
-		output: `${prerequisites}\n\n${status}${github}`,
+		output: [...checklist, ...fixes, "Next: durable onboard"].join("\n"),
 		state: result.state,
 		pending: result.pending,
 	};

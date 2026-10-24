@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { profileCommand } from "../cli/profile.ts";
 import { writeSecret } from "../identity/env.ts";
 import {
@@ -8,19 +9,28 @@ import {
 } from "../identity/github.ts";
 import { createModelsFor } from "../identity/modelAuth.ts";
 import { resolveProfile } from "../identity/profiles.ts";
+import { loginProvider, type ProviderLogin } from "./providers.ts";
 import type { OnboardingPlan } from "./plan.ts";
 import { loadState, saveState, type OnboardingState } from "./state.ts";
+
+export type ProviderStatus =
+	| { provider: string; state: "ready" }
+	| { provider: string; state: "failed"; fix: string };
 
 export type ApplyResult = {
 	state: OnboardingState;
 	pending: string[];
 	githubLogin?: string;
+	githubSkipped?: boolean;
+	providers: ProviderStatus[];
+	profileCreated: boolean;
 };
 export type GithubSetup = {
 	run?: GithubRunner;
 	deviceRun?: GithubDeviceRunner;
 	env?: NodeJS.ProcessEnv;
 };
+export type ProviderSetup = { login?: ProviderLogin };
 
 const tokenPattern = /^(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+$/i;
 
@@ -61,6 +71,7 @@ export async function applyPlan(
 		stateFile?: string;
 		demo?: boolean;
 		github?: GithubSetup;
+		providers?: ProviderSetup;
 	} = {},
 ): Promise<ApplyResult> {
 	const state = loadState(options.stateFile);
@@ -68,7 +79,15 @@ export async function applyPlan(
 		state?.completedStages.includes("profile") &&
 		state.planHash === plan.hash
 	)
-		return { state, pending: [] };
+		return {
+			state,
+			pending: [],
+			providers: plan.providers.map((provider) => ({
+				provider,
+				state: "ready",
+			})),
+			profileCreated: false,
+		};
 	const profile = resolveProfile(plan.profile, options.root);
 	const existed = existsSync(profile.manifestFile);
 	if (!existed) profileCommand("init", plan.profile, { root: options.root });
@@ -85,11 +104,18 @@ export async function applyPlan(
 			completedStages: ["profile"],
 		};
 		saveState(complete, options.stateFile);
-		return { state: complete, pending: [] };
+		return {
+			state: complete,
+			pending: [],
+			providers: [],
+			profileCreated: !existed,
+		};
 	}
 
 	const pending: string[] = [];
+	const providers: ProviderStatus[] = [];
 	let githubLogin: string | undefined;
+	let githubSkipped = false;
 	try {
 		let token: string | undefined;
 		if (plan.github === "device")
@@ -106,10 +132,7 @@ export async function applyPlan(
 				);
 			writeSecret(profile.secretsFile, "GH_TOKEN", token);
 		}
-		if (plan.github === "skip")
-			pending.push(
-				`GitHub: skipped; resume durable onboard after browser sign-in or storing GH_TOKEN for ${plan.profile}`,
-			);
+		if (plan.github === "skip") githubSkipped = true;
 		else {
 			githubLogin = bindGithub(plan.profile, options.root, options.github?.run);
 		}
@@ -120,10 +143,23 @@ export async function applyPlan(
 		try {
 			await createModelsFor(profile, [provider]);
 		} catch {
-			pending.push(
-				`Provider ${provider}: select profile ${plan.profile} in Pi and run /login; then resume durable onboard`,
-			);
+			try {
+				if (!options.providers?.login && !process.stdin.isTTY)
+					throw Error("interactive provider login requires a terminal");
+				mkdirSync(dirname(profile.authFile), { recursive: true, mode: 0o700 });
+				await (options.providers?.login ?? loginProvider)(profile, provider);
+				chmodSync(profile.authFile, 0o600);
+				await createModelsFor(profile, [provider]);
+				providers.push({ provider, state: "ready" });
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : "login failed";
+				const fix = `Provider ${provider}: ${detail}; retry durable onboard`;
+				providers.push({ provider, state: "failed", fix });
+				pending.push(fix);
+			}
+			continue;
 		}
+		providers.push({ provider, state: "ready" });
 	}
 	const next: OnboardingState = {
 		version: 1,
@@ -132,5 +168,12 @@ export async function applyPlan(
 		completedStages: pending.length ? [] : ["profile"],
 	};
 	saveState(next, options.stateFile);
-	return { state: next, pending, githubLogin };
+	return {
+		state: next,
+		pending,
+		githubLogin,
+		githubSkipped,
+		providers,
+		profileCreated: !existed,
+	};
 }
