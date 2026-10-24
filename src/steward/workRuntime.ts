@@ -105,6 +105,11 @@ export class WorkRuntime {
 		this.options = options;
 		this.store = store;
 		this.now = options.now ?? Date.now;
+		options.processes.setWriteFence(async (id) => {
+			const item = (await this.store.load()).work.items[id];
+			if (!item) throw Error("work-item claim fence missing");
+			await this.ensureClaimHeld(item);
+		});
 	}
 	private policySource(repo: string) {
 		const definition = this.options.definition.scope?.repos?.find(
@@ -471,18 +476,21 @@ export class WorkRuntime {
 				...repoDefinition?.merge?.tighten,
 			},
 		});
-		const githubFacts = await collectFacts(
-			{
-				repo: item.repo,
-				number: pr.number,
-				profileLogin: this.options.login,
-				protectedLocations: source.protectedLocations({
-					slug: item.repo,
-					base: repoDefinition?.base,
-				}),
-			},
-			sha,
-		);
+		const readFacts = () =>
+			collectFacts(
+				{
+					repo: item.repo,
+					number: pr.number,
+					profileLogin: this.options.login,
+					protectedLocations: source.protectedLocations({
+						slug: item.repo,
+						base: repoDefinition?.base,
+					}),
+				},
+				sha,
+				this.options.github.prView?.bind(this.options.github),
+			);
+		const githubFacts = await readFacts();
 		const facts =
 			githubFacts &&
 			(await this.gateFacts(
@@ -551,18 +559,7 @@ export class WorkRuntime {
 				);
 			// Re-read all GitHub-computed facts immediately before merge; head pinning
 			// alone does not protect against a changed base, draft state or checks.
-			const finalGithubFacts = await collectFacts(
-				{
-					repo: item.repo,
-					number: pr.number,
-					profileLogin: this.options.login,
-					protectedLocations: source.protectedLocations({
-						slug: item.repo,
-						base: repoDefinition?.base,
-					}),
-				},
-				sha,
-			);
+			const finalGithubFacts = await readFacts();
 			if (!finalGithubFacts)
 				return this.recordMergeFailure(
 					state,
@@ -738,7 +735,9 @@ export class WorkRuntime {
 			const spec = await this.options.github.createSpecPr({
 				repo: item.repo,
 				item: item.id,
-				branch: specBranch(this.options.agent, item.id),
+				branch: this.options.claimOwner
+					? `${this.branch(item)}-spec`
+					: specBranch(this.options.agent, item.id),
 				base:
 					this.options.definition.scope?.repos?.find(
 						(repo) => repo.slug === item.repo,
@@ -800,6 +799,30 @@ export class WorkRuntime {
 			item: item.id,
 		});
 	}
+	private workerEnv(item: WorkItem): NodeJS.ProcessEnv {
+		const o = this.options;
+		return {
+			...o.env,
+			DURABLE_ITEM: item.id,
+			DURABLE_BRANCH: this.branch(item),
+			DURABLE_CLAIM: JSON.stringify({
+				target: {
+					repo: item.repo,
+					issue:
+						item.candidate.kind === "file"
+							? 0
+							: intakeNumber(item.candidate.ref),
+					agent: o.agent,
+					owner: o.claimOwner,
+					login: o.login,
+					lease: item.claim?.lease ?? "",
+				},
+				commentId: item.claim?.commentId,
+				policy: this.leasePolicy(),
+				local: item.candidate.kind === "file",
+			}),
+		};
+	}
 	private taskDependencies(state: WorkState, item: WorkItem): TaskDependencies {
 		const o = this.options;
 		const model = o.definition.models?.worker;
@@ -817,7 +840,8 @@ export class WorkRuntime {
 			definition: o.definition,
 			machine: o.machine,
 			model,
-			env: { ...o.env, DURABLE_ITEM: item.id },
+			branch: this.branch(item),
+			env: this.workerEnv(item),
 			piDir: o.piDir,
 			skillsRoot: o.skillsRoot,
 			checkout: o.checkoutFor(item.repo),
@@ -826,6 +850,7 @@ export class WorkRuntime {
 			check: async () => {
 				await o.check();
 				if (o.processes.fenced(item.id)) throw Error("item held");
+				await this.ensureClaimHeld(item);
 			},
 			persist: async (intent) => {
 				state.tasks[item.id] = intent;
@@ -908,17 +933,15 @@ export class WorkRuntime {
 			login: o.login,
 		};
 		const observed = await readClaim(o.github, target, now, this.leasePolicy());
-		const expiredWithoutWinner = observed.state === "lost" && !observed.winner;
-		if (!expiredWithoutWinner && observed.state === "lost") {
-			await o.github.deleteComment?.(item.repo, item.claim.commentId, item.id);
+		if (
+			observed.state === "lost" ||
+			observed.commentId !== item.claim.commentId
+		) {
 			audit(o.agent, { event: "claim-lost", item: item.id });
 			await this.cancel(state, item, "interrupted");
 			throw Error("claim lease lost");
 		}
-		if (
-			!expiredWithoutWinner &&
-			Date.parse(item.claim.lease) - now >= this.leasePolicy().durationMs / 2
-		)
+		if (Date.parse(item.claim.lease) - now >= this.leasePolicy().durationMs / 2)
 			return;
 		const lease = new Date(now + this.leasePolicy().durationMs).toISOString();
 		const result = await claim(
@@ -931,8 +954,6 @@ export class WorkRuntime {
 			await this.cancel(state, item, "interrupted");
 			throw Error("claim lease lost");
 		}
-		if (expiredWithoutWinner)
-			await o.github.deleteComment?.(item.repo, item.claim.commentId, item.id);
 		item.claim.commentId = result.commentId;
 		item.claim.lease = lease;
 		await this.store.save(state);
@@ -1031,14 +1052,15 @@ export class WorkRuntime {
 				workspace: attempt.worker.process.workspace,
 				model,
 				limits: o.definition.limits ?? {},
-				env: o.env,
+				env: this.workerEnv(item),
 				piDir: o.piDir,
 			},
 		};
 		o.workers.register(o.kinds.get(attempt.worker.kind), handle, o.dispatcher);
 	}
 	private branch(item: WorkItem) {
-		return `durable/${this.options.agent}/${item.id}`;
+		const token = this.options.claimOwner && item.claim?.commentId;
+		return `durable/${this.options.agent}/${item.id}${token ? `-claim-${token}` : ""}`;
 	}
 	private async ensureClaimHeld(item: WorkItem) {
 		if (!item.claim || item.candidate.kind === "file") return;
@@ -1055,7 +1077,8 @@ export class WorkRuntime {
 			this.now(),
 			this.leasePolicy(),
 		);
-		if (held.state !== "won") throw Error("claim lease lost");
+		if (held.state !== "won" || held.commentId !== item.claim.commentId)
+			throw Error("claim lease lost");
 	}
 	private async cancel(
 		state: WorkState,

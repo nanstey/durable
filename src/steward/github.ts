@@ -1,6 +1,6 @@
 import type { PrMonitorGithub } from "../dispatch/monitor.ts";
 import { audit } from "./audit.ts";
-import type { ClaimComment, ClaimGithub } from "./claims.ts";
+import { parseClaim, type ClaimComment, type ClaimGithub } from "./claims.ts";
 import type { ProcessManager } from "./procs.ts";
 
 export type PullRequest = {
@@ -13,6 +13,8 @@ export type PullRequest = {
 	commitAuthors?: string[];
 };
 export interface WorkGithub extends ClaimGithub, PrMonitorGithub {
+	/** Profile-owned gh pr view used by the runtime's fact collector. */
+	prView?(args: string[]): Promise<string>;
 	readPr(repo: string, number: number): Promise<PullRequest>;
 	runGh?(args: string[], item: string): Promise<void>;
 	allowedMergeMethods?(
@@ -66,6 +68,7 @@ export class Github implements WorkGithub {
 		method = "GET",
 		fields: Record<string, unknown> = {},
 		item?: string,
+		claimArbitration = false,
 	): Promise<T> {
 		const args = ["gh", "api", path, "--method", method];
 		for (const [key, value] of Object.entries(fields)) {
@@ -87,6 +90,7 @@ export class Github implements WorkGithub {
 		const result = await this.options.processes.launch(args, this.options.env, {
 			item,
 			allowWhenDisabled: !write,
+			claimArbitration,
 		});
 		if (write)
 			audit(this.options.agent, {
@@ -102,6 +106,35 @@ export class Github implements WorkGithub {
 				"GitHub request failed; inspect connectivity and repository permissions",
 			);
 		return (result.stdout.trim() ? JSON.parse(result.stdout) : undefined) as T;
+	}
+	async prView(args: string[]): Promise<string> {
+		const result = await this.options.processes.launch(
+			["gh", ...args],
+			this.options.env,
+			{ allowWhenDisabled: true },
+		);
+		if (result.exitCode !== 0) throw Error("GitHub pull request read failed");
+		return result.stdout;
+	}
+	// fallow-ignore-next-line unused-class-member -- invoked through ClaimGithub by lease arbitration.
+	async serverNow(repo: string): Promise<number> {
+		const result = await this.options.processes.launch(
+			[
+				"gh",
+				"api",
+				`repos/${repo}`,
+				"--include",
+				"--header",
+				"Cache-Control: no-cache",
+			],
+			this.options.env,
+			{ allowWhenDisabled: true },
+		);
+		const date = /^date:\s*(.+)$/im.exec(result.stdout)?.[1];
+		const now = Date.parse(date ?? "");
+		if (result.exitCode !== 0 || !Number.isFinite(now))
+			throw Error("GitHub server clock unavailable; claim writes refused");
+		return now;
 	}
 	private issueItem(repo: string, issue: number) {
 		return this.options.itemForIssue(repo, issue);
@@ -162,6 +195,7 @@ export class Github implements WorkGithub {
 			"POST",
 			{ body },
 			this.issueItem(repo, issue),
+			Boolean(parseClaim(body)),
 		);
 	}
 	async listComments(repo: string, issue: number) {

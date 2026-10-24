@@ -219,10 +219,22 @@ test("supported worker git/gh tools enforce commit trailer, draft attribution, o
 	const bin = join(home, "bin");
 	mkdirSync(bin);
 	const recorded = join(home, "args.json");
+	const comments = join(home, "comments.json");
+	const lease = new Date(Date.now() + 7200000).toISOString();
+	writeFileSync(
+		comments,
+		JSON.stringify([
+			{
+				id: 1,
+				body: `<!-- durable-claim agent=agent lease=${lease} owner=installation -->`,
+				user: { login: "operator-login" },
+			},
+		]),
+	);
 	for (const tool of ["git", "gh"]) {
 		writeFileSync(
 			join(bin, tool),
-			`#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(recorded)}, JSON.stringify(process.argv.slice(2)));\n`,
+			`#!${process.execPath}\nconst fs = require('node:fs'); const args = process.argv.slice(2);\nif (args.includes('--include')) console.log('HTTP/2 200 OK\\nDate: ' + new Date().toUTCString() + '\\n\\n{}');\nelse if (args[0] === 'api' && args[1].includes('/comments?')) console.log(fs.readFileSync(${JSON.stringify(comments)}, 'utf8'));\nelse fs.writeFileSync(${JSON.stringify(recorded)}, JSON.stringify(args));\n`,
 		);
 		chmodSync(join(bin, tool), 0o700);
 	}
@@ -231,6 +243,18 @@ test("supported worker git/gh tools enforce commit trailer, draft attribution, o
 	});
 	env.DURABLE_WORKER = "1";
 	env.DURABLE_ITEM = "item";
+	env.DURABLE_CLAIM = JSON.stringify({
+		target: {
+			repo: "acme/repo",
+			issue: 1,
+			agent: "agent",
+			owner: "installation",
+			login: "operator-login",
+			lease,
+		},
+		commentId: 1,
+		policy: { durationMs: 7200000, graceMs: 300000 },
+	});
 	writeFileSync(env.DURABLE_FENCE_FILE!, JSON.stringify({ holds: {} }));
 	await execa("git", ["commit", "-m", "change"], { env, extendEnv: false });
 	assert.deepEqual(JSON.parse(readFileSync(recorded, "utf8")).slice(-2), [
@@ -257,6 +281,27 @@ test("supported worker git/gh tools enforce commit trailer, draft attribution, o
 	await assert.rejects(
 		execa("git", ["push", "origin", "main"], { env, extendEnv: false }),
 	);
+	// A different claim id fences the still-running worker, even under the same login.
+	writeFileSync(
+		comments,
+		JSON.stringify([
+			{
+				id: 2,
+				body: `<!-- durable-claim agent=agent lease=${lease} owner=winner -->`,
+				user: { login: "operator-login" },
+			},
+		]),
+	);
+	for (const [tool, args] of [
+		["gh", ["pr", "create", "--title", "Late", "--body", "Late"]],
+		["gh", ["issue", "comment", "1", "--body", "Late"]],
+		["gh", ["issue", "edit", "1", "--add-label", "Late"]],
+	] as const) {
+		await assert.rejects(
+			execa(tool, [...args], { env, extendEnv: false }),
+			/claim lease lost/,
+		);
+	}
 	writeFileSync(
 		env.DURABLE_FENCE_FILE!,
 		JSON.stringify({ holds: { item: { state: "held" } } }),

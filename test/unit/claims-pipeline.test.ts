@@ -246,6 +246,50 @@ test("a killed worker is replaced once, on a fresh takeover attempt, for both wo
 		]);
 	}
 });
+test("server-relative leases ignore both directions of machine clock skew", async () => {
+	for (const skew of [-86_400_000, 86_400_000]) {
+		let server = 1_000_000;
+		const github = new FakeGithub() as FakeGithub & {
+			serverNow: () => Promise<number>;
+		};
+		github.serverNow = async () => server;
+		const create = github.createComment.bind(github);
+		github.createComment = async (...args) => {
+			const comment = await create(...args);
+			Object.assign(comment, { updatedAt: new Date(server).toISOString() });
+			return comment;
+		};
+		const target = { repo: "acme/repo", issue: 1, agent: "agent" };
+		const policy = { durationMs: 1000, graceMs: 100 };
+		const a = {
+			...target,
+			owner: "a",
+			lease: new Date(server + skew + 1000).toISOString(),
+		};
+		const b = {
+			...target,
+			owner: "b",
+			lease: new Date(server - skew + 1000).toISOString(),
+		};
+		assert.equal((await claim(github, a, server + skew, policy)).state, "won");
+		server += 1099;
+		assert.equal((await claim(github, b, server - skew, policy)).state, "lost");
+		assert.equal(
+			(await readClaim(github, a, server + skew, policy)).state,
+			"won",
+		);
+		server += 1;
+		assert.equal((await claim(github, b, server - skew, policy)).state, "won");
+		assert.equal(
+			(await readClaim(github, a, server + skew, policy)).state,
+			"lost",
+		);
+		assert.equal(
+			(await readClaim(github, b, server - skew, policy)).state,
+			"won",
+		);
+	}
+});
 test("pipeline defaults and rejects missing mandatory stages", () => {
 	assert.deepEqual(selectPipeline(), defaultPipeline);
 	assert.throws(() =>

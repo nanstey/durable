@@ -49,6 +49,11 @@ export class ProcessManager {
 	private backend: Containment;
 	private fault: FaultHook;
 	private quiet?: string;
+	private writeFence?: (item: string) => Promise<void>;
+	/** WorkRuntime installs the remote claim/token check at the process boundary. */
+	setWriteFence(check: (item: string) => Promise<void>) {
+		this.writeFence = check;
+	}
 	constructor(
 		agent: string,
 		backend: Containment,
@@ -213,6 +218,7 @@ export class ProcessManager {
 	): Promise<T> {
 		if (this.fenced(opts.item) || disabled(this.agent, this.quiet))
 			throw Error("host refused by safety fence");
+		await this.writeFence?.(opts.item);
 		const invocationId = randomUUID();
 		const label = createHash("sha256")
 			.update(`${this.agent}:${opts.item}:${opts.attemptId}`)
@@ -287,6 +293,7 @@ export class ProcessManager {
 			await this.persist(record, "releasing", () => {
 				record.state = "releasing";
 			});
+			await this.writeFence?.(opts.item);
 			check();
 			writeFileSync(join(directory, "release.tmp"), token, {
 				mode: 0o600,
@@ -312,6 +319,8 @@ export class ProcessManager {
 			attemptId?: string;
 			task?: string;
 			allowWhenDisabled?: boolean;
+			/** Only claim-marker arbitration may run before a lease is held. */
+			claimArbitration?: boolean;
 		} = {},
 	) {
 		if (!argv.length || this.fenced(opts.item))
@@ -353,6 +362,9 @@ export class ProcessManager {
 			);
 			await this.fault("before:spawn", record);
 			assertAllowed();
+			if (opts.item && !opts.allowWhenDisabled && !opts.claimArbitration)
+				await this.writeFence?.(opts.item);
+			assertAllowed();
 			launch = this.backend.spawn(
 				record,
 				createHash("sha256").update(token).digest("hex"),
@@ -369,6 +381,8 @@ export class ProcessManager {
 				record.state = "releasing";
 			});
 			await this.fault("before:token-write", record);
+			if (opts.item && !opts.allowWhenDisabled && !opts.claimArbitration)
+				await this.writeFence?.(opts.item);
 			assertAllowed();
 			const release = launch.release;
 			await new Promise<void>((resolve, reject) =>
