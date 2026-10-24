@@ -45,6 +45,7 @@ export class ApprovalWebAuthn {
 	private readonly agent: string;
 	private readonly config: { rpId: string; origin: string };
 	private readonly now: () => number;
+	private static readonly maxChallenges = 20;
 	constructor(
 		agent: string,
 		config: { rpId: string; origin: string },
@@ -99,6 +100,10 @@ export class ApprovalWebAuthn {
 		kind: Challenge["kind"],
 		secondEnrollment = false,
 	) {
+		if (Object.keys(state.challenges).length >= ApprovalWebAuthn.maxChallenges)
+			throw Object.assign(Error("too many pending passkey challenges"), {
+				code: "rate_limited",
+			});
 		const id = randomBytes(18).toString("base64url");
 		const challenge = randomBytes(32).toString("base64url");
 		state.challenges[id] = {
@@ -113,7 +118,7 @@ export class ApprovalWebAuthn {
 		return { id, challenge };
 	}
 	private async authenticationOptions(
-		state: Store,
+		_state: Store,
 		issued: { id: string; challenge: string },
 	) {
 		return {
@@ -122,10 +127,9 @@ export class ApprovalWebAuthn {
 			options: await generateAuthenticationOptions({
 				rpID: this.config.rpId,
 				challenge: Buffer.from(issued.challenge, "base64url"),
-				allowCredentials: state.keys.map((key) => ({
-					id: key.id,
-					transports: key.transports as never,
-				})),
+				// Discoverable credentials avoid exposing enrolled credential IDs to
+				// callers of the deliberately unauthenticated challenge endpoint.
+				allowCredentials: [],
 				userVerification: "required",
 			}),
 		};

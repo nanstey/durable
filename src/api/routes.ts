@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { Hono } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { bodyLimit } from "hono/body-limit";
@@ -16,6 +18,7 @@ import type { WorkerDispatcher, Workspace } from "../dispatch/types.ts";
 import { collectMetrics } from "../metrics/collect.ts";
 import { groupOutcomes } from "../improve/group.ts";
 import { audit, readAudit } from "../steward/audit.ts";
+import { agentDir } from "../steward/files.ts";
 import { resumeApproved } from "../steward/killswitch.ts";
 import {
 	isStartableConversationKind,
@@ -52,6 +55,10 @@ export function createApi(opts: {
 	const { harness } = opts;
 	const startedAt = opts.startedAt ?? Date.now();
 	const approvalRequestAt = new Map<string, number>();
+	const passkeyChallengeRequests = new Map<
+		string,
+		{ count: number; since: number }
+	>();
 	const approvalRequestWindowMs = 60_000;
 	if (opts.peerCheck && opts.peerCheck.mode !== "off")
 		app.use("*", async (c, next) => {
@@ -501,7 +508,11 @@ export function createApi(opts: {
 	});
 	async function passkeyBinding(action: ApprovalAction, item: string) {
 		if (action === "enroll") return { item: opts.agent, binding: "enroll" };
-		if (action === "resume") return { item: opts.agent, binding: "resume" };
+		if (action === "resume") {
+			if (!existsSync(join(agentDir(opts.agent), "disabled")))
+				throw new ApiError("invalid", "agent is not paused", 400);
+			return { item: opts.agent, binding: "resume" };
+		}
 		if (action === "approve") {
 			const work = (await harness.workItems()).items[item];
 			if (!work?.gate || work.gate.state !== "waiting-approval")
@@ -547,25 +558,41 @@ export function createApi(opts: {
 			typeof value.item !== "string"
 		)
 			throw new ApiError("invalid", "action and item are required", 400);
+		const address = getConnInfo(c).remote.address ?? "unknown";
+		const now = Date.now();
+		const attempts = passkeyChallengeRequests.get(address);
+		const window =
+			attempts && now - attempts.since < approvalRequestWindowMs
+				? attempts
+				: { count: 0, since: now };
+		if (++window.count > 10)
+			throw new ApiError("rate_limited", "too many passkey challenges", 429);
+		passkeyChallengeRequests.set(address, window);
 		const action = value.action as ApprovalAction;
-		const target = await passkeyBinding(action, value.item);
-		const issued = await opts.webauthn.options(
-			action,
-			target.item,
-			target.binding,
-			typeof value.enrollmentCode === "string"
-				? value.enrollmentCode
-				: undefined,
-		);
-		return c.json({
-			challengeId: issued.id,
-			kind: issued.kind,
-			publicKey: issued.options,
-			action,
-			item: target.item,
-			binding: target.binding,
-			...(action === "verify-policy" ? { change: target.change } : {}),
-		});
+		let target: Awaited<ReturnType<typeof passkeyBinding>>;
+		try {
+			target = await passkeyBinding(action, value.item);
+			const issued = await opts.webauthn.options(
+				action,
+				target.item,
+				target.binding,
+				typeof value.enrollmentCode === "string"
+					? value.enrollmentCode
+					: undefined,
+			);
+			return c.json({
+				challengeId: issued.id,
+				kind: issued.kind,
+				publicKey: issued.options,
+				action,
+				item: target.item,
+				binding: target.binding,
+				...(action === "verify-policy" ? { change: target.change } : {}),
+			});
+		} catch (error) {
+			audit(opts.agent, { event: "passkey-refused", action, item: value.item });
+			throw error;
+		}
 	});
 	app.post("/v1/approvals/assert", async (c) => {
 		if (!opts.webauthn)
