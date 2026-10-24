@@ -28,13 +28,24 @@ export type WorkItem = {
 	repo: string;
 	candidate: Candidate;
 	claim?: { agent: string; lease: string; commentId?: number };
+	/** GitHub login used by Durable for commit-author attribution. */
+	workerLogin?: string;
 	attempts: WorkAttempt[];
 	prs: Array<{
 		number: number;
 		url?: string;
 		headSha?: string;
 		primary: boolean;
+		/** Missing in stores created before metrics; it is not inferred. */
+		openedAt?: number;
 		state?: "open" | "merged" | "closed";
+		/** GitHub observations win over local outcome projections in metrics. */
+		github?: {
+			observedAt: number;
+			state: "open" | "merged" | "closed";
+			mergedAt?: string | null;
+			commitAuthors?: string[];
+		};
 	}>;
 	/** Persisted gate state deliberately contains no approval secret. */
 	review?:
@@ -145,7 +156,11 @@ export function recordPrimaryPr(
 	const existing = item.prs.find((entry) => entry.number === pr.number);
 	if (existing) Object.assign(existing, pr);
 	else
-		item.prs.push({ ...pr, primary: !item.prs.some((entry) => entry.primary) });
+		item.prs.push({
+			...pr,
+			primary: !item.prs.some((entry) => entry.primary),
+			openedAt: now,
+		});
 	item.updatedAt = now;
 }
 
@@ -156,12 +171,24 @@ export function reconcilePrs(
 		number: number;
 		state: "open" | "merged" | "closed";
 		headSha?: string;
+		mergedAt?: string | null;
+		commitAuthors?: string[];
 	}>,
 	now: number,
 ): void {
 	for (const observed of prs) {
 		const known = item.prs.find((entry) => entry.number === observed.number);
-		if (known) Object.assign(known, observed);
+		if (known) {
+			Object.assign(known, observed);
+			known.github = {
+				observedAt: now,
+				state: observed.state,
+				mergedAt: observed.mergedAt,
+				...(observed.commitAuthors
+					? { commitAuthors: [...observed.commitAuthors] }
+					: {}),
+			};
+		}
 		if (known?.primary && known.headSha !== item.gate?.sha) delete item.gate;
 		if (known?.primary && known.headSha !== item.review?.sha)
 			delete item.review;

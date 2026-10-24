@@ -5,6 +5,7 @@ const readRoutes = [
 	/^\/v1\/(?:device|budget|queue|inbox|audit|conversations)(?:\/[^/?]+)?(?:\/(?:transcript|events))?$/,
 	/^\/v1\/workers(?:\/[^/?]+)?$/,
 	/^\/v1\/(?:events|sessions)(?:\/[^/?]+)?(?:\/(?:transcript|events))?$/,
+	/^\/v1\/metrics$/,
 	/^\/v1\/organizations\/[^/?]+\/bundle$/,
 ];
 const approvalRoutes = [/^\/v1\/approvals\/(?:challenge|assert)$/];

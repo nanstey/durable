@@ -29,6 +29,7 @@ Client types are exported from `src/api/types.ts`.
 | GET `/v1/budget` | read | UTC-day usage and stopped state |
 | POST `/v1/pause` | pause | Write disabled state, abort model work, terminate containment |
 | GET `/v1/items` | read | Persistent work items, attempts and PR state; no credentials |
+| GET `/v1/metrics?repo=&since=&until=&organization=` | read | Bounded (90-day maximum) per-project operational metrics; unavailable facts are never estimated |
 | GET `/v1/items/<item>/hold` | read | Current holding/held fence and verification instructions |
 | POST `/v1/items/<item>/hold` | pause | Fence immediately; return 202 while draining to held |
 | POST `/v1/items/<item>/hold/verify` | pause | Containment proof where supported; advisory process inspection otherwise |
@@ -107,5 +108,5 @@ Errors use `{error:{code,message}}`. Codes are `unauthorized` (401), `forbidden`
 exception text is not exposed. Invalid tokens return 401; valid tokens with the
 wrong scope return 403.
 
-See [token administration](operator.md#api-access-and-tokens) and
+See [metrics definitions](metrics.md), [token administration](operator.md#api-access-and-tokens) and
 [daemon operation](daemon.md).

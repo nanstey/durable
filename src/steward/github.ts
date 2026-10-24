@@ -9,6 +9,8 @@ export type PullRequest = {
 	url?: string;
 	headSha?: string;
 	mergedAt?: string | null;
+	/** GitHub commit author logins; omitted means the fact is unavailable. */
+	commitAuthors?: string[];
 };
 export interface WorkGithub extends ClaimGithub, PrMonitorGithub {
 	readPr(repo: string, number: number): Promise<PullRequest>;
@@ -218,6 +220,14 @@ export class Github implements WorkGithub {
 			html_url: string;
 			head?: { sha?: string };
 		}>(repo, `repos/${repo}/pulls/${number}`);
+		const commits = await this.request<
+			Array<{ author?: { login?: string } | null }>
+		>(repo, `repos/${repo}/pulls/${number}/commits?per_page=100`)
+			.then((entries) => entries)
+			.catch(() => undefined);
+		const authors = commits
+			?.map((commit) => commit.author?.login)
+			.filter((login): login is string => typeof login === "string");
 		return {
 			number: pr.number,
 			state: pr.merged_at
@@ -228,6 +238,9 @@ export class Github implements WorkGithub {
 			url: pr.html_url,
 			headSha: pr.head?.sha,
 			mergedAt: pr.merged_at,
+			...(authors && authors.length === commits?.length && commits.length < 100
+				? { commitAuthors: authors }
+				: {}),
 		};
 	}
 	async allowedMergeMethods(
