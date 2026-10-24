@@ -20,7 +20,7 @@ const deviceRunner: GithubDeviceRunner = (args, env) => {
 		timeout: 120000,
 		maxBuffer: 1048576,
 	});
-	if (result.error?.code === "ENOENT") throw Error("gh missing");
+	if (result.exitCode === undefined) throw Error("gh missing");
 	if (result.exitCode !== 0) throw Error("device flow cancelled or failed");
 	return result.stdout.trim();
 };
