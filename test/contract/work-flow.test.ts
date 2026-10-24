@@ -422,7 +422,12 @@ test("quiet hours block only new dispatch, daily launch cap is enforced, and a T
 		);
 		await rig.step(86400000);
 		await eventually(() => rig.deps.dispatcher.launches.length === 2);
-		// Either eligible item may win the next slot; no queue-priority contract orders equal candidates.
+		// The old worker's lease expired during the day-long sleep. It must not
+		// resume; the never-dispatched item can acquire a fresh claim/branch.
+		assert.notEqual(
+			rig.deps.dispatcher.launches[0].id,
+			rig.deps.dispatcher.launches[1].id,
+		);
 		assert.equal(
 			(await rig.items()).reduce(
 				(count, item) => count + item.attempts.length,
@@ -432,8 +437,8 @@ test("quiet hours block only new dispatch, daily launch cap is enforced, and a T
 		);
 		assert.equal(
 			(await rig.items())[0].outcome,
-			undefined,
-			"guarded resume requeued paused work",
+			"needs-human",
+			"a previously running worker cannot resume after its claim expires",
 		);
 	} finally {
 		await rig.harness.close();

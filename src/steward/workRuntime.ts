@@ -934,6 +934,18 @@ export class WorkRuntime {
 		};
 		const observed = await readClaim(o.github, target, now, this.leasePolicy());
 		if (
+			observed.state === "lost" &&
+			!observed.winner &&
+			item.attempts.length === 0
+		) {
+			// Capacity can leave an unstarted item queued longer than its lease.
+			// It has no worker/workspace to resume: acquire a new token and branch.
+			delete item.claim;
+			state.tasks[item.id].phase = "claim";
+			await this.store.save(state);
+			return;
+		}
+		if (
 			observed.state === "lost" ||
 			observed.commentId !== item.claim.commentId
 		) {

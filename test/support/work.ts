@@ -103,7 +103,10 @@ class FakeWorkGithub implements WorkGithub {
 	}
 	open(branch: string) {
 		this.write("create-draft-pr");
-		const item = branch.split("/").at(-1)!;
+		const item = branch
+			.split("/")
+			.at(-1)!
+			.replace(/-claim-\d+$/, "");
 		this.pulls.push({
 			number: this.pulls.length + 1,
 			branch,
