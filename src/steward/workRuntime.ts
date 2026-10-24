@@ -46,10 +46,13 @@ import {
 export type WorkState = {
 	work: WorkItems;
 	tasks: Record<string, WorkItemTask>;
+	/** Successful automatic merges, keyed by UTC day for daily-cap enforcement. */
+	mergeLedger?: Record<string, number>;
 };
 export const emptyWorkState = (): WorkState => ({
 	work: emptyWorkItems(),
 	tasks: {},
+	mergeLedger: {},
 });
 export type WorkRuntimeOptions = {
 	agent: string;
@@ -483,6 +486,7 @@ export class WorkRuntime {
 		const facts =
 			githubFacts &&
 			(await this.gateFacts(
+				state,
 				githubFacts,
 				policy,
 				review.result.risk,
@@ -566,6 +570,7 @@ export class WorkRuntime {
 					"unable to refresh merge facts",
 				);
 			const finalFacts = await this.gateFacts(
+				state,
 				finalGithubFacts,
 				policy,
 				review.result.risk,
@@ -603,6 +608,7 @@ export class WorkRuntime {
 					"no allowed merge method before merge",
 				);
 			try {
+				await this.ensureClaimHeld(item);
 				await mergeWhenSafe(
 					this.options.github as Required<
 						Pick<import("../gate/merge.ts").MergeGithub, "readPr" | "runGh">
@@ -622,6 +628,9 @@ export class WorkRuntime {
 					error instanceof Error ? error.message : "merge failed",
 				);
 			}
+			const day = new Date(this.now()).toISOString().slice(0, 10);
+			state.mergeLedger ??= {};
+			state.mergeLedger[day] = (state.mergeLedger[day] ?? 0) + 1;
 			item.gate.state = "wait-human";
 			item.gate.reasons = ["merge-requested"];
 			audit(this.options.agent, { event: "gate-merged", item: item.id, sha });
@@ -825,6 +834,7 @@ export class WorkRuntime {
 		};
 	}
 	private async gateFacts(
+		state: WorkState,
 		githubFacts: GateFacts,
 		policy: EffectivePolicy,
 		risk: Risk,
@@ -838,8 +848,10 @@ export class WorkRuntime {
 			riskAcceptable:
 				policy.maxRisk === undefined ||
 				riskRank[risk] <= riskRank[policy.maxRisk],
-			// No daily-cap policy exists in the accepted policy schema.
-			dailyCapAvailable: true,
+			dailyCapAvailable:
+				policy.dailyCap === undefined ||
+				(state.mergeLedger?.[new Date(this.now()).toISOString().slice(0, 10)] ??
+					0) < policy.dailyCap,
 			coolingOffElapsed:
 				policy.coolingOffMinutes === undefined ||
 				this.now() - reviewedAt >= policy.coolingOffMinutes * 60_000,
@@ -1027,6 +1039,23 @@ export class WorkRuntime {
 	}
 	private branch(item: WorkItem) {
 		return `durable/${this.options.agent}/${item.id}`;
+	}
+	private async ensureClaimHeld(item: WorkItem) {
+		if (!item.claim || item.candidate.kind === "file") return;
+		const held = await readClaim(
+			this.options.github,
+			{
+				repo: item.repo,
+				issue: intakeNumber(item.candidate.ref),
+				agent: this.options.agent,
+				lease: item.claim.lease,
+				owner: this.options.claimOwner,
+				login: this.options.login,
+			},
+			this.now(),
+			this.leasePolicy(),
+		);
+		if (held.state !== "won") throw Error("claim lease lost");
 	}
 	private async cancel(
 		state: WorkState,

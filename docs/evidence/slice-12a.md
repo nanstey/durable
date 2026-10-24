@@ -20,12 +20,12 @@
 | M6 policy fingerprint | Fixed | `policyVerification()` supplies fingerprint and change data. |
 | M7/M15 storage races | Fixed for nonce store | `ApprovalNonces` uses `proper-lockfile` around issue/consume. |
 | M8 challenge abuse/enumeration | Fixed | Per-peer route limit, pending-challenge cap, and discoverable credentials avoid key-ID disclosure. |
-| M9 notifications/audit | Partially fixed | Approval assertion failures and outcomes are audited; notification coverage remains pending. |
+| M9 notifications/audit | Fixed | Successful passkey enrollment, approval, release, resume and policy verification are audited and dispatched through the configured `passkey-approved` notifier rule; notifier failures are audited without changing the completed action. |
 | M10 stale binding | Fixed | Bindings are re-derived before assertion and failures are audited. |
-| M11 UI detail | Partially fixed | Explicit user gesture and visible API errors exist; full approval detail DOM coverage remains pending. |
+| M11 UI detail | Partially fixed | Approval cards render the available PR title, URL, SHA, reasons, verdict, risk and hold epoch through safe DOM text nodes; a browser DOM fixture matrix remains pending. |
 | L12 resume state | Fixed | Resume challenges require the local paused marker. |
 | L13 enrollment-code usability | Fixed | Enrollment code is retained until successful registration. |
-| L14 credential metadata | Deferred | Single-user deployment assumption remains documented. |
+| L14 credential metadata | Fixed | Enrollment persists authenticator device type, backup state and transports with the credential; `durable approval list` exposes the non-secret metadata. |
 
 ## Threat model and recovery
 

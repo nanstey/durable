@@ -121,11 +121,11 @@ Status reflects the current mainline plus the follow-up hardening in this branch
 | Finding | Status | Evidence |
 | --- | --- | --- |
 | H1 | fixed | `src/console/guard.ts`; `test/unit/console.test.ts` spoofed-loopback-host test |
-| H2 | partial | `src/steward/workRuntime.ts` persists review time, enforces cooling-off and risk, and derives the kill-switch fact from `check`; daily-cap policy/schema remains open |
+| H2 | partial | `src/steward/workRuntime.ts` persists review time, derives kill-switch state from `check`, and records successful automatic merges in a UTC daily ledger for the validated `dailyCap` policy field; `requiredChecks` remains stricter-than-requested rather than named-check enforcement. |
 | M1 | fixed | `src/gate/facts.ts` rejects an empty rollup and `src/steward/workRuntime.ts` refreshes facts, `decide`, and auto constraints immediately before merge |
 | M2 | fixed | `src/gate/auto.ts` requires `pathAllow`; gate test covers fail-closed facts |
 | M3 | partial | `src/steward/claims.ts` bounds marker leases by GitHub `updated_at` plus configured duration; cross-machine expiry still relies on local time |
-| M4 | open | takeover still uses the same branch and external writes lack a write-time claim fence |
+| M4 | partial | `src/steward/workRuntime.ts` re-reads the GitHub claim immediately before merge execution. Takeovers still reuse the branch and worker-side external writes lack a claim fence. |
 | M5 | fixed | `src/api/tokens.ts` lists short ids and refuses ambiguous client revocation |
 | M6 | fixed | `src/api/net.ts` has a five-second `whois` timeout and production TTL cache |
 | M7 | fixed | `src/console/guard.ts` requires allowed Serve identity for all methods |

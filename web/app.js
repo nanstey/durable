@@ -132,9 +132,17 @@ function approvals() {
 	for (const item of pending) {
 		const gate = item.gate;
 		const row = element("section");
-		row.append(element("h3", `PR #${gate.pr ?? "?"}: ${item.id}`), textBlock({ headSha: gate.sha, reasons: gate.reasons, verdict: item.review?.verdict }));
+		row.append(element("h3", `PR #${gate.pr ?? "?"}: ${item.id}`), textBlock({
+			title: item.candidate?.title,
+			url: item.candidate?.url,
+			headSha: gate.sha,
+			reasons: gate.reasons,
+			verdict: item.review?.result?.verdict ?? item.review?.verdict,
+			risk: item.review?.result?.risk,
+			holdEpoch: item.holdEpoch,
+		}));
 		const approve = element("button", "Confirm with passkey");
-		approve.addEventListener("click", () => { if (confirm(`Approve ${item.id} at ${gate.sha}?`)) passkey(selected.device, "approve", item.id).then(load).catch(() => {}); });
+		approve.addEventListener("click", () => { if (confirm(`Approve ${item.id} at ${gate.sha}?`)) passkey(selected.device, "approve", item.id).then(load).catch((error) => { state.error = error.message; draw(); }); });
 		row.append(approve); panel.append(row);
 	}
 	for (const item of queue.filter((candidate) => candidate.outcome === "held")) {

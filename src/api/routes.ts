@@ -47,6 +47,7 @@ export function createApi(opts: {
 	nonces?: ApprovalNonces;
 	webauthn?: ApprovalWebAuthn;
 	deliverNonce?: (item: string, code: string) => Promise<boolean>;
+	notifyPasskey?: (action: ApprovalAction, item: string) => Promise<void>;
 	dispatcher?: WorkerDispatcher;
 	viewerWorkspace?: Workspace;
 	peerCheck?: { mode: PeerCheck; allowedPeers: string[] };
@@ -689,6 +690,11 @@ export function createApi(opts: {
 			item: target.item,
 			binding: target.binding,
 		});
+		try {
+			await opts.notifyPasskey?.(action, target.item);
+		} catch {
+			audit(opts.agent, { event: "notify-failed", action, item: target.item });
+		}
 		return c.json({ approved: true });
 	});
 	app.post("/v1/resume", () => {
