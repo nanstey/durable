@@ -4,7 +4,8 @@ import { assertProfileName } from "../config/schema.ts";
 
 export type OnboardAnswers = {
 	profile: string;
-	github?: "pending" | "bind";
+	/** `token-env:<NAME>` reads an environment variable, never a literal token. */
+	github?: "device" | "skip" | "bind" | `token-env:${string}`;
 	providers?: string[];
 	anthropicOAuth?: boolean;
 };
@@ -39,11 +40,16 @@ export function validateAnswers(value: unknown): OnboardAnswers {
 	assertProfileName(answers.profile);
 	if (answers.profile === "default")
 		throw Error("answers.profile must be a named profile");
-	if (
-		answers.github !== undefined &&
-		!["pending", "bind"].includes(String(answers.github))
-	)
-		throw Error("answers.github must be pending or bind");
+	if (answers.github !== undefined) {
+		const github = String(answers.github);
+		if (
+			!["skip", "bind", "device"].includes(github) &&
+			!/^token-env:[A-Za-z_][A-Za-z0-9_]*$/.test(github)
+		)
+			throw Error(
+				"answers.github must be device, skip, bind, or token-env:<VARIABLE>",
+			);
+	}
 	if (
 		answers.providers !== undefined &&
 		(!Array.isArray(answers.providers) ||
