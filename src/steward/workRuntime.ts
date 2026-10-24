@@ -825,7 +825,6 @@ export class WorkRuntime {
 			claimLeasePolicy: this.leasePolicy(),
 			check: async () => {
 				await o.check();
-				await this.ensureClaimHeld(item);
 				if (o.processes.fenced(item.id)) throw Error("item held");
 			},
 			persist: async (intent) => {
@@ -1039,8 +1038,7 @@ export class WorkRuntime {
 		o.workers.register(o.kinds.get(attempt.worker.kind), handle, o.dispatcher);
 	}
 	private branch(item: WorkItem) {
-		const owner = this.options.claimOwner?.slice(0, 12);
-		return `durable/${this.options.agent}/${item.id}${owner ? `-${owner}` : ""}`;
+		return `durable/${this.options.agent}/${item.id}`;
 	}
 	private async ensureClaimHeld(item: WorkItem) {
 		if (!item.claim || item.candidate.kind === "file") return;

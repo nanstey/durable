@@ -125,7 +125,7 @@ Status reflects the current mainline plus the follow-up hardening in this branch
 | M1 | fixed | `src/gate/facts.ts` rejects an empty rollup and `src/steward/workRuntime.ts` refreshes facts, `decide`, and auto constraints immediately before merge |
 | M2 | fixed | `src/gate/auto.ts` requires `pathAllow`; gate test covers fail-closed facts |
 | M3 | partial | `src/steward/claims.ts` bounds marker leases by GitHub `updated_at` plus configured duration; cross-machine expiry still relies on local time |
-| M4 | fixed | `src/steward/workRuntime.ts` suffixes branches with the claim owner and re-reads the GitHub claim immediately before worker writes and merge execution. |
+| M4 | partial | `src/steward/workRuntime.ts` re-reads the GitHub claim immediately before merge execution. Takeovers still reuse the branch and worker-side external writes lack a claim fence. |
 | M5 | fixed | `src/api/tokens.ts` lists short ids and refuses ambiguous client revocation |
 | M6 | fixed | `src/api/net.ts` has a five-second `whois` timeout and production TTL cache |
 | M7 | fixed | `src/console/guard.ts` requires allowed Serve identity for all methods |
