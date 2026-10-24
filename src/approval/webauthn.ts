@@ -24,7 +24,7 @@ type Challenge = {
 	binding: Binding;
 	challenge: string;
 	expiresAt: number;
-	enroll?: boolean;
+	kind: "assertion" | "registration";
 };
 type Key = {
 	id: string;
@@ -95,7 +95,7 @@ export class ApprovalWebAuthn {
 		action: ApprovalAction,
 		item: string,
 		binding: Binding,
-		enroll = false,
+		kind: Challenge["kind"],
 	) {
 		const id = randomBytes(18).toString("base64url");
 		const challenge = randomBytes(32).toString("base64url");
@@ -105,9 +105,48 @@ export class ApprovalWebAuthn {
 			binding,
 			challenge,
 			expiresAt: this.now() + 2 * 60_000,
-			enroll,
+			kind,
 		};
 		return { id, challenge };
+	}
+	private async authenticationOptions(
+		state: Store,
+		issued: { id: string; challenge: string },
+	) {
+		return {
+			id: issued.id,
+			kind: "assertion" as const,
+			options: await generateAuthenticationOptions({
+				rpID: this.config.rpId,
+				challenge: issued.challenge,
+				allowCredentials: state.keys.map((key) => ({
+					id: key.id,
+					transports: key.transports as never,
+				})),
+				userVerification: "required",
+			}),
+		};
+	}
+	private async registrationOptions(
+		state: Store,
+		issued: { id: string; challenge: string },
+	) {
+		return {
+			id: issued.id,
+			kind: "registration" as const,
+			options: await generateRegistrationOptions({
+				rpName: "Durable",
+				rpID: this.config.rpId,
+				userName: this.agent,
+				userID: new TextEncoder().encode(this.agent),
+				challenge: issued.challenge,
+				excludeCredentials: state.keys.map((key) => ({ id: key.id })),
+				authenticatorSelection: {
+					residentKey: "preferred",
+					userVerification: "required",
+				},
+			}),
+		};
 	}
 	async options(
 		action: ApprovalAction,
@@ -134,36 +173,21 @@ export class ApprovalWebAuthn {
 				);
 			delete state.enrollment;
 		}
-		const issued = this.challenge(state, action, item, binding, enrollment);
+		if (enrollment && state.keys.length > 0) {
+			const issued = this.challenge(state, action, item, binding, "assertion");
+			this.save(state);
+			return this.authenticationOptions(state, issued);
+		}
+		const issued = this.challenge(
+			state,
+			action,
+			item,
+			binding,
+			enrollment ? "registration" : "assertion",
+		);
 		this.save(state);
-		if (enrollment)
-			return {
-				id: issued.id,
-				options: await generateRegistrationOptions({
-					rpName: "Durable",
-					rpID: this.config.rpId,
-					userName: this.agent,
-					userID: new TextEncoder().encode(this.agent),
-					challenge: issued.challenge,
-					excludeCredentials: state.keys.map((key) => ({ id: key.id })),
-					authenticatorSelection: {
-						residentKey: "preferred",
-						userVerification: "required",
-					},
-				}),
-			};
-		return {
-			id: issued.id,
-			options: await generateAuthenticationOptions({
-				rpID: this.config.rpId,
-				challenge: issued.challenge,
-				allowCredentials: state.keys.map((key) => ({
-					id: key.id,
-					transports: key.transports as never,
-				})),
-				userVerification: "required",
-			}),
-		};
+		if (enrollment) return this.registrationOptions(state, issued);
+		return this.authenticationOptions(state, issued);
 	}
 	private take(
 		state: Store,
@@ -171,6 +195,7 @@ export class ApprovalWebAuthn {
 		action: ApprovalAction,
 		item: string,
 		binding: Binding,
+		kind: Challenge["kind"],
 	) {
 		const challenge = state.challenges[id];
 		delete state.challenges[id];
@@ -180,7 +205,8 @@ export class ApprovalWebAuthn {
 			challenge.expiresAt <= this.now() ||
 			challenge.action !== action ||
 			challenge.item !== item ||
-			challenge.binding !== binding
+			challenge.binding !== binding ||
+			challenge.kind !== kind
 		)
 			throw Object.assign(
 				Error("invalid, expired, or mismatched passkey challenge"),
@@ -190,13 +216,13 @@ export class ApprovalWebAuthn {
 	}
 	async verifyAssertion(
 		id: string,
-		action: Exclude<ApprovalAction, "enroll">,
+		action: ApprovalAction,
 		item: string,
 		binding: Binding,
 		response: AuthenticationResponseJSON,
 	) {
 		const state = this.load();
-		const challenge = this.take(state, id, action, item, binding);
+		const challenge = this.take(state, id, action, item, binding, "assertion");
 		const key = state.keys.find((candidate) => candidate.id === response.id);
 		if (!key)
 			throw Object.assign(Error("passkey is not enrolled"), {
@@ -224,9 +250,32 @@ export class ApprovalWebAuthn {
 		key.counter = verified.authenticationInfo.newCounter;
 		this.save(state);
 	}
+	async verifyEnrollmentAssertion(
+		id: string,
+		response: AuthenticationResponseJSON,
+	) {
+		await this.verifyAssertion(id, "enroll", this.agent, "enroll", response);
+		const state = this.load();
+		const issued = this.challenge(
+			state,
+			"enroll",
+			this.agent,
+			"enroll",
+			"registration",
+		);
+		this.save(state);
+		return this.registrationOptions(state, issued);
+	}
 	async verifyEnrollment(id: string, response: RegistrationResponseJSON) {
 		const state = this.load();
-		const challenge = this.take(state, id, "enroll", this.agent, "enroll");
+		const challenge = this.take(
+			state,
+			id,
+			"enroll",
+			this.agent,
+			"enroll",
+			"registration",
+		);
 		const verified = await verifyRegistrationResponse({
 			response,
 			expectedChallenge: challenge.challenge,

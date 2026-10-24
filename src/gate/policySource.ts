@@ -20,6 +20,7 @@ export interface RepoPolicySource {
 	resolve(repo: RepoRef): Promise<PolicyResolution>;
 	protectedLocations(repo: RepoRef): readonly ProtectedLocation[];
 	describeChange(repo: RepoRef, since?: string): Promise<ChangeSummary>;
+	recordVerification(repo: RepoRef, fingerprint: string): Promise<void>;
 }
 
 export class NonePolicySource implements RepoPolicySource {
@@ -35,6 +36,14 @@ export class NonePolicySource implements RepoPolicySource {
 		_since?: string,
 	): Promise<ChangeSummary> {
 		return { summary: "No repository policy source is configured." };
+	}
+	async recordVerification(
+		_repo: RepoRef,
+		_fingerprint: string,
+	): Promise<void> {
+		throw Object.assign(Error("repository policy source is not configured"), {
+			code: "unavailable",
+		});
 	}
 }
 
@@ -91,6 +100,15 @@ export class FixturePolicySource implements RepoPolicySource {
 				to: script.resolution.fingerprint,
 			}
 		);
+	}
+	async recordVerification(repo: RepoRef, fingerprint: string): Promise<void> {
+		const script = this.script(repo);
+		if (script.resolution.fingerprint !== fingerprint)
+			throw Object.assign(Error("policy changed before verification"), {
+				code: "conflict",
+			});
+		script.verifiedBy = "approval";
+		script.resolution.state = "verified";
 	}
 }
 
