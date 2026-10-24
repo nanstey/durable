@@ -15,7 +15,12 @@ import { listProviders, resolveProfile } from "../identity/profiles.ts";
 export function profileCommand(
 	command: string,
 	name?: string,
-	options: { root?: string; run?: GithubRunner; dryRun?: boolean } = {},
+	options: {
+		root?: string;
+		run?: GithubRunner;
+		dryRun?: boolean;
+		providers?: string[];
+	} = {},
 ): string {
 	const root = options.root ?? piAgentDir();
 	if (command === "list") {
@@ -56,6 +61,22 @@ export function profileCommand(
 	}
 	const manifest = loadManifest(profile.manifestFile);
 	if (command === "show") return JSON.stringify(manifest, null, 2);
+	if (command === "configure-providers") {
+		if (!options.providers) throw new Error("providers required");
+		const providers = [...new Set(options.providers)].sort();
+		if (JSON.stringify(manifest.providers) !== JSON.stringify(providers)) {
+			if (!options.dryRun) {
+				manifest.providers = providers;
+				writeFileSync(
+					profile.manifestFile,
+					`${JSON.stringify(manifest, null, 2)}\n`,
+					{ mode: 0o600 },
+				);
+				chmodSync(profile.manifestFile, 0o600);
+			}
+		}
+		return `configured providers for ${name}`;
+	}
 	if (command === "bind-github") {
 		const login = githubLogin(profile, options.run);
 		if (!options.dryRun) {

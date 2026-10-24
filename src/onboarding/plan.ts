@@ -33,25 +33,38 @@ export function plannedFiles(
 	root?: string,
 ): PlannedFile[] {
 	const profile = resolveProfile(plan.profile, root);
-	if (existsSync(profile.manifestFile)) return [];
+	const before = existsSync(profile.manifestFile)
+		? readFileSync(profile.manifestFile, "utf8")
+		: "";
+	if (before) {
+		const manifest = JSON.parse(before) as Record<string, unknown>;
+		const providers = Array.isArray(manifest.providers)
+			? manifest.providers
+			: [];
+		if (
+			JSON.stringify(providers) === JSON.stringify(plan.providers) ||
+			plan.providers.length === 0
+		)
+			return [];
+		manifest.providers = plan.providers;
+		return [
+			{
+				path: profile.manifestFile,
+				before,
+				after: `${JSON.stringify(manifest, null, 2)}\n`,
+			},
+		];
+	}
 	const after = `${JSON.stringify(
 		{
 			version: 1,
 			label: plan.profile,
 			github: { host: "github.com", login: "" },
 			git: { name: "", email: "operator@example.invalid" },
-			providers: [],
+			providers: plan.providers,
 		},
 		null,
 		2,
 	)}\n`;
-	return [
-		{
-			path: profile.manifestFile,
-			before: existsSync(profile.manifestFile)
-				? readFileSync(profile.manifestFile, "utf8")
-				: "",
-			after,
-		},
-	];
+	return [{ path: profile.manifestFile, before, after }];
 }

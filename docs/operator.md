@@ -63,6 +63,8 @@ durable onboard --dry-run               # show manifest and private-state change
 durable onboard --demo                  # temporary fake-only profile; no credential handoff
 ```
 
+Before applying, onboarding reports Node, Git, `gh`, systemd-user, and Pi readiness. Missing checks do not cause it to read credentials or guess an identity; complete the indicated repair and rerun. Android/Termux does not require systemd-user and uses the same pure-JavaScript answers and dry-run path.
+
 The answers file is plain YAML or JSON and accepts only non-secret choices:
 
 ```yaml

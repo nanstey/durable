@@ -8,6 +8,7 @@ function lines(value: string): string[] {
 export function renderDiff(
 	files: PlannedFile[],
 	state: OnboardingState,
+	stateFile = "onboarding state",
 ): string {
 	const parts = files.map((file) => {
 		const before = lines(file.before)
@@ -18,8 +19,6 @@ export function renderDiff(
 			.join("\n");
 		return `--- ${file.path}\n+++ ${file.path}\n${before}${before && after ? "\n" : ""}${after}`;
 	});
-	parts.push(
-		`--- onboarding state\n+++ onboarding state\n+${JSON.stringify(state)}`,
-	);
+	parts.push(`--- ${stateFile}\n+++ ${stateFile}\n+${JSON.stringify(state)}`);
 	return parts.join("\n");
 }

@@ -1,9 +1,10 @@
 # Standalone installation
 
 Requirements: Linux with systemd --user, Node **>=22.19.0**, pnpm, Git and
-`gh`. Linux is the only supported daemon platform. Android/Termux is planned for
-spec 14; macOS/launchd is deferred. On other operating systems `durable enable`
-skips service installation and says why.
+`gh`. Linux is the only supported daemon platform. The credential-free onboarding
+answers and dry-run paths are pure JavaScript and also work on Android/Termux;
+service installation remains unavailable there. macOS/launchd is deferred. On
+other operating systems `durable enable` skips service installation and says why.
 
 ```sh
 git clone https://github.com/nanstey/durable.git

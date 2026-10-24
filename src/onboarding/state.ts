@@ -9,9 +9,12 @@ export type OnboardingState = {
 	completedStages: Array<"profile" | "organization" | "agent">;
 };
 
-const statePath = () => join(durableHome(), "onboarding", "state.json");
+export const onboardingStatePath = () =>
+	join(durableHome(), "onboarding", "state.json");
 
-export function loadState(path = statePath()): OnboardingState | undefined {
+export function loadState(
+	path = onboardingStatePath(),
+): OnboardingState | undefined {
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as OnboardingState;
 		if (value.version !== 1 || !Array.isArray(value.completedStages))
@@ -23,7 +26,10 @@ export function loadState(path = statePath()): OnboardingState | undefined {
 	}
 }
 
-export function saveState(state: OnboardingState, path = statePath()): void {
+export function saveState(
+	state: OnboardingState,
+	path = onboardingStatePath(),
+): void {
 	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	chmodSync(dirname(path), 0o700);
 	writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
