@@ -103,6 +103,40 @@ export class WorkRuntime {
 		this.store = store;
 		this.now = options.now ?? Date.now;
 	}
+	private policySource(repo: string) {
+		const definition = this.options.definition.scope?.repos?.find(
+			(candidate) => candidate.slug === repo,
+		);
+		if (!definition)
+			throw Object.assign(Error("repository not found"), { code: "not_found" });
+		const reference = { slug: definition.slug, base: definition.base };
+		return {
+			reference,
+			source: sourceFor(
+				definition.policySource?.kind ?? "none",
+				this.options.fixturePolicies,
+			),
+		};
+	}
+	// fallow-ignore-next-line unused-class-member -- invoked by the HTTP approval route.
+	async policyVerification(repo: string) {
+		const { reference, source } = this.policySource(repo);
+		const resolution = await source.resolve(reference);
+		return {
+			fingerprint: resolution.fingerprint,
+			change: await source.describeChange(reference),
+		};
+	}
+	// fallow-ignore-next-line unused-class-member -- invoked by the HTTP approval route.
+	async verifyPolicy(repo: string, fingerprint: string) {
+		const { reference, source } = this.policySource(repo);
+		const current = await source.resolve(reference);
+		if (current.fingerprint !== fingerprint)
+			throw Object.assign(Error("policy changed before verification"), {
+				code: "conflict",
+			});
+		await source.recordVerification(reference, fingerprint);
+	}
 	private enqueue<T>(run: () => Promise<T>): Promise<T> {
 		const result = this.serial.then(run);
 		this.serial = result.then(

@@ -84,6 +84,25 @@ test("policy source contract: fixture requires non-forgeable verification eviden
 	]);
 });
 
+test("policy source records the accepted fingerprint as passkey verification", async () => {
+	const source = new FixturePolicySource({
+		"acme/repo": {
+			resolution: {
+				state: "unverified",
+				policy,
+				ref: "steward:fixture",
+				fingerprint: "pending",
+			},
+		},
+	});
+	await source.recordVerification({ slug: "acme/repo" }, "pending");
+	assert.equal((await source.resolve({ slug: "acme/repo" })).state, "verified");
+	await assert.rejects(
+		source.recordVerification({ slug: "acme/repo" }, "stale"),
+		/policy changed/,
+	);
+});
+
 test("policy validator refuses unsafe policy shapes", () => {
 	assert.throws(
 		() =>

@@ -449,16 +449,23 @@ export function createApi(opts: {
 				throw new ApiError("invalid", "item has no releasable hold", 400);
 			return { item, binding: hold.holdEpoch };
 		}
-		const repo = opts.definition.scope?.repos?.find(
-			(candidate) => candidate.slug === item,
-		);
-		if (!repo) throw new ApiError("not_found", "repository not found", 404);
-		// A policy verifier must bind to a source fingerprint. Sources are resolved by the steward,
-		// and non-fixture sources currently report their immutable fingerprint through the gate.
-		return {
-			item: repo.slug,
-			binding: `policy:${repo.policySource?.kind ?? "none"}`,
-		};
+		if (!harness.workRuntime)
+			throw new ApiError("unavailable", "work runtime unavailable", 503);
+		try {
+			const policy = await harness.workRuntime.policyVerification(item);
+			return {
+				item,
+				binding: policy.fingerprint,
+				change: policy.change,
+			};
+		} catch (error) {
+			const code = (error as { code?: string }).code;
+			throw new ApiError(
+				code === "not_found" ? "not_found" : "unavailable",
+				error instanceof Error ? error.message : "policy source unavailable",
+				code === "not_found" ? 404 : 503,
+			);
+		}
 	}
 	app.post("/v1/approvals/challenge", async (c) => {
 		if (!opts.webauthn)
@@ -487,10 +494,12 @@ export function createApi(opts: {
 		);
 		return c.json({
 			challengeId: issued.id,
+			kind: issued.kind,
 			publicKey: issued.options,
 			action,
 			item: target.item,
 			binding: target.binding,
+			...(action === "verify-policy" ? { change: target.change } : {}),
 		});
 	});
 	app.post("/v1/approvals/assert", async (c) => {
@@ -500,6 +509,7 @@ export function createApi(opts: {
 			action?: unknown;
 			item?: unknown;
 			challengeId?: unknown;
+			kind?: unknown;
 			response?: never;
 		};
 		if (
@@ -518,12 +528,32 @@ export function createApi(opts: {
 		const action = value.action as ApprovalAction;
 		const target = await passkeyBinding(action, value.item);
 		try {
-			if (action === "enroll")
+			if (action === "enroll") {
+				if (value.kind === "assertion") {
+					const issued = await opts.webauthn.verifyEnrollmentAssertion(
+						value.challengeId,
+						value.response as never,
+					);
+					return c.json({
+						approved: false,
+						challengeId: issued.id,
+						kind: issued.kind,
+						publicKey: issued.options,
+						action,
+						item: target.item,
+					});
+				}
+				if (value.kind !== "registration")
+					throw new ApiError(
+						"invalid",
+						"enrollment response kind is required",
+						400,
+					);
 				await opts.webauthn.verifyEnrollment(
 					value.challengeId,
 					value.response as never,
 				);
-			else
+			} else
 				await opts.webauthn.verifyAssertion(
 					value.challengeId,
 					action,
@@ -547,6 +577,20 @@ export function createApi(opts: {
 		if (action === "release")
 			await harness.releaseItem(target.item, Number(target.binding));
 		if (action === "resume") resumeApproved(opts.agent, "passkey");
+		if (action === "verify-policy")
+			try {
+				await harness.workRuntime?.verifyPolicy(
+					target.item,
+					String(target.binding),
+				);
+			} catch (error) {
+				audit(opts.agent, {
+					event: "passkey-refused",
+					action,
+					item: target.item,
+				});
+				throw error;
+			}
 		audit(opts.agent, {
 			event: action === "enroll" ? "passkey-enrolled" : "passkey-approved",
 			action,

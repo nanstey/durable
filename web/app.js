@@ -108,15 +108,19 @@ function json(value) {
 	return value;
 }
 async function passkey(device, action, item, enrollmentCode) {
-	const issued = await api(device, "/approvals/challenge", "POST", { action, item, enrollmentCode });
-	const options = issued.publicKey;
-	options.challenge = base64url(options.challenge);
-	for (const credential of options.allowCredentials ?? options.excludeCredentials ?? []) credential.id = base64url(credential.id);
-	if (options.user?.id) options.user.id = base64url(options.user.id);
-	const credential = action === "enroll"
-		? await navigator.credentials.create({ publicKey: options })
-		: await navigator.credentials.get({ publicKey: options });
-	return api(device, "/approvals/assert", "POST", { action, item, challengeId: issued.challengeId, response: json(credential) });
+	let issued = await api(device, "/approvals/challenge", "POST", { action, item, enrollmentCode });
+	while (true) {
+		const options = issued.publicKey;
+		options.challenge = base64url(options.challenge);
+		for (const credential of options.allowCredentials ?? options.excludeCredentials ?? []) credential.id = base64url(credential.id);
+		if (options.user?.id) options.user.id = base64url(options.user.id);
+		const credential = issued.kind === "registration"
+			? await navigator.credentials.create({ publicKey: options })
+			: await navigator.credentials.get({ publicKey: options });
+		const result = await api(device, "/approvals/assert", "POST", { action, item, kind: issued.kind, challengeId: issued.challengeId, response: json(credential) });
+		if (result.approved) return result;
+		issued = result;
+	}
 }
 function approvals() {
 	const panel = element("section", undefined, "approvals");
