@@ -183,7 +183,9 @@ export function reconcilePrs(
 			known.github = {
 				observedAt: now,
 				state: observed.state,
-				mergedAt: observed.mergedAt,
+				...(observed.mergedAt !== undefined
+					? { mergedAt: observed.mergedAt }
+					: {}),
 				...(observed.commitAuthors
 					? { commitAuthors: [...observed.commitAuthors] }
 					: {}),

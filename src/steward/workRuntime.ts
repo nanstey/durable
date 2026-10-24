@@ -165,6 +165,7 @@ export class WorkRuntime {
 							? "work-item-queued-capacity"
 							: "work-item-reconcile-failed",
 					item: id,
+					error: error instanceof Error ? error.message : String(error),
 				});
 			}
 			return (await this.store.load()).work.items[id].outcome;
