@@ -33,6 +33,7 @@
 		"hygiene": "bash scripts/hygiene-scan.sh"
 	},
 	"dependencies": {
+		"@clack/prompts": "0.11.0",
 		"@earendil-works/chord": "1.4.0",
 		"@earendil-works/pi-ai": "1.4.0",
 		"@earendil-works/pi-coding-agent": "1.4.0",
