@@ -69,7 +69,7 @@ The answers file is plain YAML or JSON and accepts only non-secret choices:
 
 ```yaml
 profile: work
-github: pending # or bind, after pi-secret has stored the token
+github: skip # or device, bind, or token-env:GH_TOKEN_FROM_VAULT
 providers: [openrouter]
 # Anthropic OAuth requires this explicit acknowledgement:
 # anthropicOAuth: true
@@ -77,7 +77,7 @@ providers: [openrouter]
 
 Unknown keys and credential-like values are rejected before a file is written. The private onboarding state records only the plan hash, profile name and completed stages; it never contains provider credentials, tokens, or answers-file contents. Rerun the same command to resume. `--dry-run` never writes, opens Pi, invokes `pi-secret`, calls GitHub, or probes a provider.
 
-GitHub tokens are entered only through `pi-secret -p <profile> set GH_TOKEN`. Use a fine-grained selected-repository token with the least privileges needed; do not grant Administration or workflow-write. Then use `durable profile bind-github <profile>` to verify the non-secret login. On systems where `gh` supports a device-flow command, operators may use that handoff; otherwise complete the manual `pi-secret` step. Do not paste a token into onboarding input.
+GitHub setup is part of onboarding. It lists existing profiles first (the same source as `durable profile list`), recommends the first or `work`, and refuses a new name that collides. Choose browser sign-in, hidden token paste, or skip. Browser sign-in uses an isolated temporary `GH_CONFIG_DIR`, then removes it; it requests GitHub's `repo` OAuth scope, which is broad access to private repositories. Prefer a fine-grained selected-repository token with only the repository permissions needed; do not grant Administration or workflow-write. The wizard writes `GH_TOKEN` only to `secrets/<profile>.env` with mode 0600, then verifies it and reports `GitHub: bound as <login>`. It never places the credential in output, logs, answers, state, or dry-run diffs. Noninteractive files may use `github: device`, `skip`, `bind`, or `token-env:VARIABLE`; literal tokens are rejected.
 
 For each model provider, select the named Pi profile and run `/login`; onboarding records no credential. Anthropic subscription OAuth is offered only after the explicit acknowledgement above because authentication shaping and provider terms may change. If a handoff is incomplete, onboarding reports it as **pending operator** and gives the exact resume command.
 

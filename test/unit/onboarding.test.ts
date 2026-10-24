@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,7 +25,7 @@ test("onboard resumes a pending profile without duplicate manifests or secret st
 	const paths = fixture();
 	writeFileSync(
 		paths.answers,
-		"profile: work\ngithub: pending\nproviders: [openrouter]\n",
+		"profile: work\ngithub: skip\nproviders: [openrouter]\n",
 	);
 	const first = await onboard({
 		nonInteractive: true,
@@ -92,7 +98,7 @@ test("Anthropic OAuth requires an explicit acknowledgement and failed probes giv
 	);
 	writeFileSync(
 		paths.answers,
-		"profile: work\ngithub: pending\nproviders: [openrouter]\n",
+		"profile: work\ngithub: skip\nproviders: [openrouter]\n",
 	);
 	const result = await onboard({
 		nonInteractive: true,
@@ -110,9 +116,9 @@ test("Anthropic OAuth requires an explicit acknowledgement and failed probes giv
 test("every interrupted profile step resumes without duplicate manifests", async () => {
 	const paths = fixture();
 	for (const answers of [
-		"profile: profile-only\ngithub: pending\n",
+		"profile: profile-only\ngithub: skip\n",
 		"profile: github-pending\ngithub: bind\n",
-		"profile: provider-pending\ngithub: pending\nproviders: [openrouter]\n",
+		"profile: provider-pending\ngithub: skip\nproviders: [openrouter]\n",
 	]) {
 		writeFileSync(paths.answers, answers);
 		const first = await onboard({
@@ -132,6 +138,65 @@ test("every interrupted profile step resumes without duplicate manifests", async
 	}
 	for (const profile of ["profile-only", "github-pending", "provider-pending"])
 		assert.ok(existsSync(join(paths.home, "profile-meta", `${profile}.json`)));
+});
+
+test("GitHub device flow is isolated, writes private profile secrets, and binds identity", async () => {
+	const paths = fixture();
+	writeFileSync(paths.answers, "profile: work\ngithub: device\n");
+	const calls: Array<{ args: string[]; config?: string }> = [];
+	const result = await onboard({
+		nonInteractive: true,
+		answers: paths.answers,
+		root: paths.home,
+		stateFile: paths.state,
+		github: {
+			deviceRun: (args, env) => {
+				calls.push({ args, config: env.GH_CONFIG_DIR });
+				return args[1] === "token" ? "github_pat_fake_token_123456" : "";
+			},
+			run: (_args, token) => {
+				assert.equal(token, "github_pat_fake_token_123456");
+				return "octocat";
+			},
+		},
+	});
+	const secret = join(paths.home, "secrets", "work.env");
+	assert.equal(statSync(secret).mode & 0o777, 0o600);
+	assert.match(readFileSync(secret, "utf8"), /GH_TOKEN/);
+	assert.match(result.output, /GitHub: bound as octocat/);
+	assert.equal(calls.length, 2);
+	assert.equal(calls[0].config, calls[1].config);
+	assert.ok(!existsSync(calls[0].config ?? ""));
+	assert.doesNotMatch(
+		readFileSync(paths.state, "utf8"),
+		/github_pat_fake_token/,
+	);
+	assert.doesNotMatch(result.output, /github_pat_fake_token/);
+});
+
+test("token-env never accepts literals and skip does not create a secret", async () => {
+	assert.throws(
+		() =>
+			validateAnswers({ profile: "work", github: "ghp_literal_secret_123456" }),
+		/credentials|github/,
+	);
+	const paths = fixture();
+	writeFileSync(
+		paths.answers,
+		"profile: work\ngithub: token-env:GH_FOR_TEST\n",
+	);
+	const result = await onboard({
+		nonInteractive: true,
+		answers: paths.answers,
+		root: paths.home,
+		stateFile: paths.state,
+		github: {
+			env: { GH_FOR_TEST: "ghp_fake_token_123456" },
+			run: () => "octocat",
+		},
+	});
+	assert.match(result.output, /bound as octocat/);
+	assert.doesNotMatch(result.output, /ghp_fake_token/);
 });
 
 test("demo never opens credential handoffs and uses temporary profile state", async () => {

@@ -1,5 +1,5 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { loadManifest } from "../config/manifest.ts";
 import { durableHome } from "../config/paths.ts";
 import { assertProfileName } from "../config/schema.ts";
@@ -35,6 +35,21 @@ function privateDirectory(path: string): void {
 }
 function gitValue(value: string): string {
 	return JSON.stringify(value);
+}
+
+/** Store a profile secret using pi-secret's private dotenv-file contract. */
+export function writeSecret(path: string, name: string, value: string): void {
+	const entries = readSecrets(path);
+	entries[name] = value;
+	privateDirectory(dirname(path));
+	writeFileSync(
+		path,
+		`${Object.entries(entries)
+			.map(([key, entry]) => `${key}=${JSON.stringify(entry)}`)
+			.join("\n")}\n`,
+		{ mode: 0o600 },
+	);
+	chmodSync(path, 0o600);
 }
 export function buildAgentEnv(
 	profile: ResolvedProfile,

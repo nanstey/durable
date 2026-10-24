@@ -6,7 +6,7 @@ import type { OnboardAnswers } from "./answers.ts";
 export type OnboardingPlan = {
 	stage: "profile";
 	profile: string;
-	github: "pending" | "bind";
+	github: "device" | "skip" | "bind" | `token-env:${string}`;
 	providers: string[];
 	anthropicOAuth: boolean;
 	hash: string;
@@ -16,7 +16,7 @@ export function createPlan(answers: OnboardAnswers): OnboardingPlan {
 	const plan = {
 		stage: "profile" as const,
 		profile: answers.profile,
-		github: answers.github ?? "pending",
+		github: answers.github ?? "skip",
 		providers: [...new Set(answers.providers ?? [])].sort(),
 		anthropicOAuth: answers.anthropicOAuth === true,
 	};

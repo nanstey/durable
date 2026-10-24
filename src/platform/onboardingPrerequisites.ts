@@ -58,17 +58,3 @@ export function formatPrerequisites(checks: Prerequisite[]): string {
 		)
 		.join("\n");
 }
-
-/** Device flow is only mentioned when this installed gh explicitly documents it. */
-export function supportsDeviceFlow(): boolean {
-	try {
-		const result = execaSync("gh", ["auth", "login", "--help"], {
-			reject: false,
-			stdin: "ignore",
-			timeout: 2_000,
-		});
-		return result.exitCode === 0 && /device(?:[- ]flow)?/i.test(result.stdout);
-	} catch {
-		return false;
-	}
-}
