@@ -12,17 +12,21 @@ export type GithubDeviceRunner = (
 ) => string;
 
 const deviceRunner: GithubDeviceRunner = (args, env) => {
+	// The login step must talk to the operator: gh prints the one-time code and
+	// waits for Enter. Only the token read-back is captured.
+	const interactive = args[1] === "login";
 	const result = execaSync("gh", args, {
 		reject: false,
 		extendEnv: false,
 		env,
 		encoding: "utf8",
-		timeout: 120000,
+		timeout: interactive ? 600000 : 30000,
 		maxBuffer: 1048576,
+		...(interactive ? { stdio: "inherit" as const } : {}),
 	});
 	if (result.exitCode === undefined) throw Error("gh missing");
 	if (result.exitCode !== 0) throw Error("device flow cancelled or failed");
-	return result.stdout.trim();
+	return String(result.stdout ?? "").trim();
 };
 
 /**
@@ -49,6 +53,8 @@ export function githubDeviceToken(
 				"github.com",
 				"--scopes",
 				"repo",
+				"--git-protocol",
+				"https",
 			],
 			env,
 		);
