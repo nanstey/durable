@@ -14,6 +14,7 @@ import {
 } from "../config/organizations.ts";
 import type { WorkerDispatcher, Workspace } from "../dispatch/types.ts";
 import { collectMetrics } from "../metrics/collect.ts";
+import { groupOutcomes } from "../improve/group.ts";
 import { audit, readAudit } from "../steward/audit.ts";
 import { resumeApproved } from "../steward/killswitch.ts";
 import {
@@ -355,6 +356,30 @@ export function createApi(opts: {
 				repo: c.req.query("repo"),
 			}),
 		);
+	});
+	app.get("/v1/improvements", async (c) => {
+		const now = Date.now();
+		const since = now - 30 * 24 * 60 * 60 * 1000;
+		const work = await harness.workItems();
+		const metrics = collectMetrics(work, readAudit(opts.agent, since), {
+			agent: opts.agent,
+			organization: opts.organization?.id ?? "default",
+			since,
+			until: now,
+			repo: c.req.query("repo"),
+		});
+		const enabled = new Map(
+			(opts.definition.scope?.repos ?? []).map((repo) => [
+				repo.slug,
+				repo.pipeline?.improve ?? { enabled: false },
+			]),
+		);
+		return c.json({
+			patterns: groupOutcomes(work, metrics).map((pattern) => ({
+				...pattern,
+				optIn: enabled.get(pattern.repo) ?? { enabled: false },
+			})),
+		});
 	});
 	app.get("/v1/gate/report", async (c) => {
 		const reports = Object.values((await harness.workItems()).items).flatMap(

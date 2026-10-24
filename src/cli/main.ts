@@ -122,6 +122,17 @@ subCommands.metrics = defineCommand({
 		);
 	},
 });
+subCommands.improve = defineCommand({
+	meta: { name: "improve" },
+	args: { ...remoteArgs, repo: { type: "string" } },
+	async run({ args }) {
+		const query = args.repo ? `?repo=${encodeURIComponent(args.repo)}` : "";
+		print(
+			await clientFor(args.agent).request(`/v1/improvements${query}`),
+			args.json,
+		);
+	},
+});
 subCommands.gate = defineCommand({
 	meta: { name: "gate" },
 	subCommands: {

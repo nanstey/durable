@@ -89,6 +89,10 @@ const pipeline = object({
 		specApproval: { type: "boolean" },
 		complexityThreshold: { enum: ["medium", "large"] },
 	}),
+	improve: object({
+		enabled: { type: "boolean", default: false },
+		repeatThreshold: positive,
+	}),
 });
 export const organizationSchema = object(
 	{
