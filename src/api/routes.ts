@@ -13,6 +13,7 @@ import {
 	type OrganizationBundle,
 } from "../config/organizations.ts";
 import type { WorkerDispatcher, Workspace } from "../dispatch/types.ts";
+import { collectMetrics } from "../metrics/collect.ts";
 import { audit, readAudit } from "../steward/audit.ts";
 import { resumeApproved } from "../steward/killswitch.ts";
 import {
@@ -316,6 +317,45 @@ export function createApi(opts: {
 		return c.json({ queued: true }, 202);
 	});
 	app.get("/v1/items", async (c) => c.json(await harness.workItems()));
+	app.get("/v1/metrics", async (c) => {
+		const now = Date.now();
+		const maximumRange = 90 * 24 * 60 * 60 * 1000;
+		const parseTime = (value: string | undefined, fallback: number) => {
+			if (!value) return fallback;
+			const parsed = /^\d+$/.test(value) ? Number(value) : Date.parse(value);
+			if (!Number.isFinite(parsed))
+				throw new ApiError(
+					"invalid",
+					"since and until must be dates or epoch milliseconds",
+				);
+			return parsed;
+		};
+		const until = parseTime(c.req.query("until"), now);
+		const since = parseTime(
+			c.req.query("since"),
+			until - 30 * 24 * 60 * 60 * 1000,
+		);
+		if (since > until || until - since > maximumRange)
+			throw new ApiError(
+				"invalid",
+				"metrics range must be ordered and at most 90 days",
+			);
+		const organization = opts.organization?.id ?? "default";
+		if (
+			c.req.query("organization") &&
+			c.req.query("organization") !== organization
+		)
+			throw new ApiError("not_found", "organization not found", 404);
+		return c.json(
+			collectMetrics(await harness.workItems(), readAudit(opts.agent, since), {
+				agent: opts.agent,
+				organization,
+				since,
+				until,
+				repo: c.req.query("repo"),
+			}),
+		);
+	});
 	app.get("/v1/gate/report", async (c) => {
 		const reports = Object.values((await harness.workItems()).items).flatMap(
 			(item) => {

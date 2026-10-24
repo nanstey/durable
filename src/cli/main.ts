@@ -96,6 +96,32 @@ readCommand("queue", "/v1/queue");
 readCommand("inbox", "/v1/inbox");
 readCommand("audit", "/v1/audit");
 readCommand("status", "/v1/device");
+subCommands.metrics = defineCommand({
+	meta: { name: "metrics" },
+	args: {
+		...remoteArgs,
+		repo: { type: "string" },
+		since: { type: "string" },
+		until: { type: "string" },
+		organization: { type: "string" },
+	},
+	async run({ args }) {
+		const query = new URLSearchParams();
+		for (const [name, value] of Object.entries({
+			repo: args.repo,
+			since: args.since,
+			until: args.until,
+			organization: args.organization,
+		}))
+			if (value) query.set(name, value);
+		print(
+			await clientFor(args.agent).request(
+				`/v1/metrics${query.size ? `?${query}` : ""}`,
+			),
+			args.json,
+		);
+	},
+});
 subCommands.gate = defineCommand({
 	meta: { name: "gate" },
 	subCommands: {

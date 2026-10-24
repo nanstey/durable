@@ -144,6 +144,7 @@ export class WorkRuntime {
 		queueItem?: QueueItem,
 	) {
 		const o = this.options;
+		item.workerLogin ??= o.login;
 		for (const pr of item.prs)
 			reconcilePrs(
 				item,

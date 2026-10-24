@@ -56,6 +56,10 @@ function fleet() {
 		panel.append(element("h3", `${device.id}: ${device.status}`));
 		panel.append(element("p", `Last check: ${new Date(device.checkedAt).toLocaleTimeString()}`));
 		if (detail.budget) panel.append(textBlock({ budget: detail.budget, paused: detail.paused }));
+		if (detail.metrics) {
+			panel.append(element("h4", "Metrics (last 30 days)"));
+			panel.append(textBlock(detail.metrics));
+		}
 		if (Array.isArray(detail.inbox) && detail.inbox.some((entry) => !entry.acked))
 			panel.append(element("p", `Inbox: ${detail.inbox.filter((entry) => !entry.acked).length} unread`, "badge"));
 		panel.append(tree(null, device.id, state.nodes.filter((node) => node.device === device.id)));
@@ -71,7 +75,7 @@ function detailPanel() {
 	}
 	const detail = state.details.get(selected.device) ?? {};
 	panel.append(element("h2", `Agent ${selected.device}`));
-	for (const [label, value] of [["Scout queue", detail.queue], ["Inbox", detail.inbox], ["Audit", detail.audit]]) {
+	for (const [label, value] of [["Scout queue", detail.queue], ["Inbox", detail.inbox], ["Audit", detail.audit], ["Metrics", detail.metrics]]) {
 		const section = element("section");
 		section.append(element("h3", label));
 		for (const entry of Array.isArray(value) ? value : value?.items ?? []) {
@@ -209,11 +213,11 @@ async function load(reconnect = true) {
 	state.details = new Map();
 	for (const device of boot.devices.filter((entry) => entry.status === "online")) {
 		try {
-			const [treeData, budget, queue, items, inbox, audit, info] = await Promise.all([
-				api(device.id, "/conversations?tree=true"), api(device.id, "/budget"), api(device.id, "/queue"), api(device.id, "/items"), api(device.id, "/inbox"), api(device.id, "/audit"), api(device.id, "/device"),
+			const [treeData, budget, queue, items, inbox, audit, info, metrics] = await Promise.all([
+				api(device.id, "/conversations?tree=true"), api(device.id, "/budget"), api(device.id, "/queue"), api(device.id, "/items"), api(device.id, "/inbox"), api(device.id, "/audit"), api(device.id, "/device"), api(device.id, "/metrics"),
 			]);
 			state.nodes.push(...treeData.nodes.map((node) => ({ ...node, device: device.id })));
-			state.details.set(device.id, { budget, queue, items: Object.values(items.items ?? {}), inbox, audit, scopeSummary: info.scopeSummary });
+			state.details.set(device.id, { budget, queue, items: Object.values(items.items ?? {}), inbox, audit, metrics, scopeSummary: info.scopeSummary });
 			if (selected?.device === device.id) selected.node = state.nodes.find((node) => node.device === device.id && node.id === selected.node.id) ?? selected.node;
 		} catch { /* device status remains visible */ }
 	}

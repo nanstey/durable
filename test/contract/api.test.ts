@@ -190,6 +190,35 @@ test("unknown node cannot read another transcript", async () => {
 			404,
 		);
 });
+test("metrics route is read-scoped and bounds ranges", async () => {
+	const allowed = await api.request("/v1/metrics?since=1000&until=2000", {
+		headers: { authorization: `Bearer ${tokens.read}` },
+	});
+	assert.equal(allowed.status, 200);
+	assert.deepEqual(await allowed.json(), {
+		agent: "agent",
+		organization: "default",
+		since: 1000,
+		until: 2000,
+		projects: {},
+	});
+	assert.equal(
+		(
+			await api.request("/v1/metrics", {
+				headers: { authorization: `Bearer ${tokens.chat}` },
+			})
+		).status,
+		403,
+	);
+	assert.equal(
+		(
+			await api.request("/v1/metrics?since=1&until=999999999999", {
+				headers: { authorization: `Bearer ${tokens.read}` },
+			})
+		).status,
+		400,
+	);
+});
 test("device identity contains names and granted scopes, never credentials", async () => {
 	const response = await api.request("/v1/device", {
 		headers: { authorization: `Bearer ${tokens.read}` },
