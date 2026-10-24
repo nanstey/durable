@@ -51,6 +51,34 @@ durable notify status --agent <id> --json
 `OnFailure=` hook, so it can notify after the agent process is dead. Missing
 local desktop tooling is recorded in the audit log and skipped.
 
+## Onboard a profile
+
+`durable onboard` starts the resumable profile stage. It creates or selects a named profile manifest only; organization and agent stages are reserved for later releases.
+
+```sh
+durable onboard                         # accessible numbered choice; `work` is recommended
+durable onboard --yes                   # accept the recommended named profile
+durable onboard --non-interactive --answers onboarding.yaml
+durable onboard --dry-run               # show manifest and private-state changes only
+durable onboard --demo                  # temporary fake-only profile; no credential handoff
+```
+
+The answers file is plain YAML or JSON and accepts only non-secret choices:
+
+```yaml
+profile: work
+github: pending # or bind, after pi-secret has stored the token
+providers: [openrouter]
+# Anthropic OAuth requires this explicit acknowledgement:
+# anthropicOAuth: true
+```
+
+Unknown keys and credential-like values are rejected before a file is written. The private onboarding state records only the plan hash, profile name and completed stages; it never contains provider credentials, tokens, or answers-file contents. Rerun the same command to resume. `--dry-run` never writes, opens Pi, invokes `pi-secret`, calls GitHub, or probes a provider.
+
+GitHub tokens are entered only through `pi-secret -p <profile> set GH_TOKEN`. Use a fine-grained selected-repository token with the least privileges needed; do not grant Administration or workflow-write. Then use `durable profile bind-github <profile>` to verify the non-secret login. On systems where `gh` supports a device-flow command, operators may use that handoff; otherwise complete the manual `pi-secret` step. Do not paste a token into onboarding input.
+
+For each model provider, select the named Pi profile and run `/login`; onboarding records no credential. Anthropic subscription OAuth is offered only after the explicit acknowledgement above because authentication shaping and provider terms may change. If a handoff is incomplete, onboarding reports it as **pending operator** and gives the exact resume command.
+
 ## Configure a profile
 
 1. Use Pi's profile extension to select a **named** profile and `/login` to its

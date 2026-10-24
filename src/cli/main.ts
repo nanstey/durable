@@ -37,6 +37,7 @@ import { assignedPort, run } from "../steward/main.ts";
 import { attachTui } from "../tui/main.ts";
 import { doctorCommand, formatDoctor } from "./doctor.ts";
 import { notifyCommand } from "./notify.ts";
+import { onboard } from "../onboarding/index.ts";
 import { profileCommand } from "./profile.ts";
 import { queueCommand } from "./queue.ts";
 
@@ -806,6 +807,29 @@ for (const action of ["init", "bind-github", "show", "list", "check"])
 subCommands.profile = defineCommand({
 	meta: { name: "profile" },
 	subCommands: profileCommands,
+});
+subCommands.onboard = defineCommand({
+	meta: {
+		name: "onboard",
+		description: "Start or resume the non-secret profile onboarding stage",
+	},
+	args: {
+		yes: { type: "boolean", default: false },
+		"non-interactive": { type: "boolean", default: false },
+		answers: { type: "string" },
+		"dry-run": { type: "boolean", default: false },
+		demo: { type: "boolean", default: false },
+	},
+	async run({ args }) {
+		const result = await onboard({
+			yes: args.yes,
+			nonInteractive: args["non-interactive"],
+			answers: args.answers,
+			dryRun: args["dry-run"],
+			demo: args.demo,
+		});
+		console.log(result.output);
+	},
 });
 subCommands.console = defineCommand({
 	meta: { name: "console" },
