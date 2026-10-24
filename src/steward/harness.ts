@@ -149,6 +149,12 @@ export type HarnessConfig = {
 	notifyDue?: () => Promise<void>;
 	/** Test/probe extensions are never loaded from configuration or untrusted chat. */
 	extensions?: Extension[];
+	/** Explicit local fixture state, used only by the credential-free demo. */
+	initial?: {
+		queue?: Queue;
+		work?: WorkState;
+		inbox?: InboxEvent[];
+	};
 };
 
 async function abortNativeTask(
@@ -1103,6 +1109,15 @@ export async function openHarness(options: HarnessConfig) {
 			graph.dispose();
 		}
 	}
+	if (options.initial)
+		await harness.commit(async (tx) => {
+			if (options.initial?.queue)
+				Object.assign(await tx.doc(QueueDoc), options.initial.queue);
+			if (options.initial?.work)
+				Object.assign(await tx.doc(WorkDoc), options.initial.work);
+			if (options.initial?.inbox)
+				(await tx.doc(InboxDocument)).events.push(...options.initial.inbox);
+		}, context);
 	return {
 		native: harness,
 		root,
