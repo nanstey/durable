@@ -5,6 +5,7 @@ import lockfile from "proper-lockfile";
 import { startApi } from "../api/server.ts";
 import { localToken } from "../api/tokens.ts";
 import { ApprovalNonces } from "../approval/nonce.ts";
+import { ApprovalWebAuthn } from "../approval/webauthn.ts";
 import { loadAgent, loadMachine } from "../config/load.ts";
 import { materializeOrganization } from "../config/organizations.ts";
 import { loadManifest } from "../config/manifest.ts";
@@ -259,7 +260,17 @@ export async function run(
 				? { id: "viewer", path: viewerPath, branch: "" }
 				: undefined,
 			nonces: new ApprovalNonces(agent),
-			deliverNonce: (item, code) => notifier.approvalNonce(item, code),
+			webauthn:
+				machine.approval?.rpId && machine.approval.origin
+					? new ApprovalWebAuthn(agent, {
+							rpId: machine.approval.rpId,
+							origin: machine.approval.origin,
+						})
+					: undefined,
+			deliverNonce:
+				machine.platform?.os === "android"
+					? undefined
+					: (item, code) => notifier.approvalNonce(item, code),
 			bind: definition.network?.bind ?? machine.network?.bind,
 			tailnetAddress: machine.network?.tailnetAddress,
 			peerCheckMode: machine.network?.peerCheck,

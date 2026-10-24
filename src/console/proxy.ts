@@ -7,6 +7,7 @@ const readRoutes = [
 	/^\/v1\/(?:events|sessions)(?:\/[^/?]+)?(?:\/(?:transcript|events))?$/,
 	/^\/v1\/organizations\/[^/?]+\/bundle$/,
 ];
+const approvalRoutes = [/^\/v1\/approvals\/(?:challenge|assert)$/];
 const writeRoutes = [
 	/^\/v1\/items\/[^/?]+\/hold(?:\/verify)?$/,
 	/^\/v1\/conversations\/[^/?]+\/open$/,
@@ -21,7 +22,9 @@ const writeRoutes = [
 
 export function allowedDaemonRoute(method: string, path: string) {
 	return (
-		method === "GET" || method === "HEAD" ? readRoutes : writeRoutes
+		method === "GET" || method === "HEAD"
+			? readRoutes
+			: [...writeRoutes, ...approvalRoutes]
 	).some((route) => route.test(path));
 }
 
@@ -40,7 +43,10 @@ export async function proxyDaemon(
 	const source = new URL(request.url);
 	const destination = new URL(path + source.search, device.url);
 	const headers = new Headers();
-	headers.set("authorization", `Bearer ${device.token}`);
+	// Approval assertions are a separate credential class. The daemon rejects bearer
+	// credentials on these endpoints, so the console only relays the browser payload.
+	if (!approvalRoutes.some((route) => route.test(path)))
+		headers.set("authorization", `Bearer ${device.token}`);
 	for (const name of ["content-type", "idempotency-key"]) {
 		const value = request.headers.get(name);
 		if (value) headers.set(name, value);

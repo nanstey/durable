@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { bodyLimit } from "hono/body-limit";
 import type { ApprovalNonces } from "../approval/nonce.ts";
+import type { ApprovalAction, ApprovalWebAuthn } from "../approval/webauthn.ts";
 import { verifyNonce } from "../gate/approval.ts";
 import type { AgentDef } from "../config/schema.ts";
 import {
@@ -13,6 +14,7 @@ import {
 } from "../config/organizations.ts";
 import type { WorkerDispatcher, Workspace } from "../dispatch/types.ts";
 import { audit, readAudit } from "../steward/audit.ts";
+import { resumeApproved } from "../steward/killswitch.ts";
 import {
 	isStartableConversationKind,
 	startableConversationKinds,
@@ -38,6 +40,7 @@ export function createApi(opts: {
 	workers?: WorkerRegistry;
 	processes?: ProcessManager;
 	nonces?: ApprovalNonces;
+	webauthn?: ApprovalWebAuthn;
 	deliverNonce?: (item: string, code: string) => Promise<boolean>;
 	dispatcher?: WorkerDispatcher;
 	viewerWorkspace?: Workspace;
@@ -431,18 +434,135 @@ export function createApi(opts: {
 		});
 		return c.json({ approved: true });
 	});
-	app.post("/v1/approvals/challenge", () => {
-		throw new ApiError(
-			"not-enrolled",
-			"passkey approvals are not enrolled",
-			501,
+	async function passkeyBinding(action: ApprovalAction, item: string) {
+		if (action === "enroll") return { item: opts.agent, binding: "enroll" };
+		if (action === "resume") return { item: opts.agent, binding: "resume" };
+		if (action === "approve") {
+			const work = (await harness.workItems()).items[item];
+			if (!work?.gate || work.gate.state !== "waiting-approval")
+				throw new ApiError("invalid", "item has no active approval task", 400);
+			return { item: work.id, binding: work.gate.sha };
+		}
+		if (action === "release") {
+			const hold = opts.processes?.snapshot().holds[item];
+			if (!hold || hold.state !== "held")
+				throw new ApiError("invalid", "item has no releasable hold", 400);
+			return { item, binding: hold.holdEpoch };
+		}
+		const repo = opts.definition.scope?.repos?.find(
+			(candidate) => candidate.slug === item,
 		);
+		if (!repo) throw new ApiError("not_found", "repository not found", 404);
+		// A policy verifier must bind to a source fingerprint. Sources are resolved by the steward,
+		// and non-fixture sources currently report their immutable fingerprint through the gate.
+		return {
+			item: repo.slug,
+			binding: `policy:${repo.policySource?.kind ?? "none"}`,
+		};
+	}
+	app.post("/v1/approvals/challenge", async (c) => {
+		if (!opts.webauthn)
+			throw new ApiError("not-enrolled", "passkeys are not configured", 501);
+		const value = (await c.req.json()) as {
+			action?: unknown;
+			item?: unknown;
+			enrollmentCode?: unknown;
+		};
+		if (
+			!(
+				["approve", "resume", "enroll", "verify-policy", "release"] as string[]
+			).includes(String(value.action)) ||
+			typeof value.item !== "string"
+		)
+			throw new ApiError("invalid", "action and item are required", 400);
+		const action = value.action as ApprovalAction;
+		const target = await passkeyBinding(action, value.item);
+		const issued = await opts.webauthn.options(
+			action,
+			target.item,
+			target.binding,
+			typeof value.enrollmentCode === "string"
+				? value.enrollmentCode
+				: undefined,
+		);
+		return c.json({
+			challengeId: issued.id,
+			publicKey: issued.options,
+			action,
+			item: target.item,
+			binding: target.binding,
+		});
 	});
-	app.post("/v1/approvals/assert", () => {
+	app.post("/v1/approvals/assert", async (c) => {
+		if (!opts.webauthn)
+			throw new ApiError("not-enrolled", "passkeys are not configured", 501);
+		const value = (await c.req.json()) as {
+			action?: unknown;
+			item?: unknown;
+			challengeId?: unknown;
+			response?: never;
+		};
+		if (
+			!(
+				["approve", "resume", "enroll", "verify-policy", "release"] as string[]
+			).includes(String(value.action)) ||
+			typeof value.item !== "string" ||
+			typeof value.challengeId !== "string" ||
+			!value.response
+		)
+			throw new ApiError(
+				"invalid",
+				"action, item, challengeId and response are required",
+				400,
+			);
+		const action = value.action as ApprovalAction;
+		const target = await passkeyBinding(action, value.item);
+		try {
+			if (action === "enroll")
+				await opts.webauthn.verifyEnrollment(
+					value.challengeId,
+					value.response as never,
+				);
+			else
+				await opts.webauthn.verifyAssertion(
+					value.challengeId,
+					action,
+					target.item,
+					target.binding,
+					value.response as never,
+				);
+		} catch (error) {
+			audit(opts.agent, {
+				event: "passkey-refused",
+				action,
+				item: target.item,
+			});
+			throw error;
+		}
+		if (action === "approve")
+			await harness.workRuntime?.approveGate(
+				target.item,
+				String(target.binding),
+			);
+		if (action === "release")
+			await harness.releaseItem(target.item, Number(target.binding));
+		if (action === "resume") resumeApproved(opts.agent, "passkey");
+		audit(opts.agent, {
+			event: action === "enroll" ? "passkey-enrolled" : "passkey-approved",
+			action,
+			item: target.item,
+			binding: target.binding,
+		});
+		return c.json({ approved: true });
+	});
+	app.post("/v1/resume", () => {
+		throw new ApiError("forbidden", "resume requires a passkey assertion", 403);
+	});
+	app.post("/v1/policy/:repo/verify", () => {
 		throw new ApiError(
-			"not-enrolled",
-			"passkey approvals are not enrolled",
-			501,
+			"forbidden",
+			"policy verification requires a passkey assertion",
+			403,
 		);
 	});
 	app.post("/v1/workers/stop", async (c) => {
