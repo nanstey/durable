@@ -66,10 +66,11 @@ console.log(result.output);
         "GH_PROMPT_DISABLED": "1",  # production login must remove this
     }
 
-    def run(label, steps, fail=False):
+    def run(label, steps, fail=False, cli=False):
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 180, 0, 0))
-        child = subprocess.Popen([node, "--experimental-strip-types", str(runner)],
+        command = [node, "--experimental-strip-types", str(repo / "bin/durable"), "onboard"] if cli else [node, "--experimental-strip-types", str(runner)]
+        child = subprocess.Popen(command,
                                  stdin=slave, stdout=slave, stderr=slave,
                                  env={**env, "FAIL_GITHUB": "1" if fail else "0"},
                                  start_new_session=True)
@@ -138,3 +139,6 @@ console.log(result.output);
     ], fail=True)
     assert "GitHub: failed\n  Fix:" in failed
     assert "Run durable onboard to finish GitHub authentication" in failed
+    run("Actual durable onboard CLI; configured profile finish", [
+        ("Start a profile", enter), ("Profile already configured", down + down + enter),
+    ], cli=True)
