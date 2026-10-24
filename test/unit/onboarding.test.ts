@@ -74,9 +74,64 @@ test("dry run renders every write and does not create profile or state", async (
 		stateFile: paths.state,
 	});
 	assert.match(result.output, /profile-meta\/work\.json/);
-	assert.match(result.output, /onboarding state/);
+	assert.match(result.output, /state\.json/);
 	assert.ok(!existsSync(join(paths.home, "profile-meta", "work.json")));
 	assert.ok(!existsSync(paths.state));
+});
+
+test("Anthropic OAuth requires an explicit acknowledgement and failed probes give a repair", async () => {
+	const paths = fixture();
+	assert.throws(
+		() =>
+			validateAnswers({
+				profile: "work",
+				providers: ["anthropic"],
+				anthropicOAuth: false,
+			}),
+		/Anthropic OAuth/,
+	);
+	writeFileSync(
+		paths.answers,
+		"profile: work\ngithub: pending\nproviders: [openrouter]\n",
+	);
+	const result = await onboard({
+		nonInteractive: true,
+		answers: paths.answers,
+		root: paths.home,
+		stateFile: paths.state,
+	});
+	assert.match(
+		result.output,
+		/Provider openrouter: select profile work in Pi and run \/login/,
+	);
+	assert.doesNotMatch(result.output, /ghp_|sk-|bearer /i);
+});
+
+test("every interrupted profile step resumes without duplicate manifests", async () => {
+	const paths = fixture();
+	for (const answers of [
+		"profile: profile-only\ngithub: pending\n",
+		"profile: github-pending\ngithub: bind\n",
+		"profile: provider-pending\ngithub: pending\nproviders: [openrouter]\n",
+	]) {
+		writeFileSync(paths.answers, answers);
+		const first = await onboard({
+			nonInteractive: true,
+			answers: paths.answers,
+			root: paths.home,
+			stateFile: paths.state,
+		});
+		const second = await onboard({
+			nonInteractive: true,
+			answers: paths.answers,
+			root: paths.home,
+			stateFile: paths.state,
+		});
+		assert.match(first.output, /pending operator/);
+		assert.match(second.output, /pending operator/);
+	}
+	for (const profile of ["profile-only", "github-pending", "provider-pending"])
+		assert.ok(existsSync(join(paths.home, "profile-meta", `${profile}.json`)));
 });
 
 test("demo never opens credential handoffs and uses temporary profile state", async () => {
@@ -90,5 +145,9 @@ test("demo never opens credential handoffs and uses temporary profile state", as
 		result.output,
 		/No Pi login, pi-secret, device flow, or GitHub client/,
 	);
-	assert.ok(existsSync(join(paths.home, "profile-meta", "demo.json")));
+	const manifest = readFileSync(
+		join(paths.home, "profile-meta", "demo.json"),
+		"utf8",
+	);
+	assert.match(manifest, /"faux"/);
 });

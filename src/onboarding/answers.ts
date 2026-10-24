@@ -10,7 +10,7 @@ export type OnboardAnswers = {
 };
 
 const allowed = new Set(["profile", "github", "providers", "anthropicOAuth"]);
-const secretName = /(?:token|secret|password|credential|api[_-]?key|auth)/i;
+const secretName = /^(?:token|secret|password|credential|api[_-]?key|auth)$/i;
 const secretValue =
 	/(?:gh[pousr]_[A-Za-z0-9_]{12,}|sk-[A-Za-z0-9]{12,}|bearer\s+)/i;
 
