@@ -40,7 +40,7 @@ const deviceRunner: GithubDeviceRunner = (args, env) => {
 		extendEnv: false,
 		env,
 		encoding: "utf8",
-		timeout: interactive ? 600000 : 30000,
+		timeout: interactive ? 120000 : 30000,
 		maxBuffer: 1048576,
 		...(interactive ? { stdio: "inherit" as const } : {}),
 	});
@@ -71,6 +71,7 @@ export function githubDeviceToken(
 			GIT_CONFIG_SYSTEM: "/dev/null",
 			GH_HOST: "github.com",
 		};
+		delete env.GH_PROMPT_DISABLED;
 		// gh can finish authentication and still exit non-zero on a later step
 		// (git protocol setup, no browser opener). The token read-back below is
 		// the real success test, so a login failure alone is not fatal.
@@ -80,6 +81,7 @@ export function githubDeviceToken(
 					"auth",
 					"login",
 					"--web",
+					"--skip-ssh-key",
 					"--hostname",
 					"github.com",
 					"--scopes",

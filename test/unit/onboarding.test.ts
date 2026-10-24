@@ -133,8 +133,8 @@ test("every interrupted profile step resumes without duplicate manifests", async
 			root: paths.home,
 			stateFile: paths.state,
 		});
-		assert.match(first.output, /Next: durable onboard/);
-		assert.match(second.output, /Next: durable onboard/);
+		assert.match(first.output, /Run durable onboard to finish/);
+		assert.match(second.output, /Run durable onboard to finish/);
 	}
 	for (const profile of ["profile-only", "github-pending", "provider-pending"])
 		assert.ok(existsSync(join(paths.home, "profile-meta", `${profile}.json`)));
@@ -230,6 +230,77 @@ test("provider login is injected, probed, and never leaks credentials", async ()
 		readFileSync(paths.state, "utf8"),
 		/sk_fake_provider_secret/,
 	);
+});
+
+test("completed answers re-verify identity and providers instead of trusting saved progress", async () => {
+	const paths = fixture();
+	writeFileSync(
+		paths.answers,
+		"profile: work\ngithub: token-env:TEST_TOKEN\nproviders: [openrouter]\n",
+	);
+	let probes = 0;
+	const options = {
+		nonInteractive: true,
+		answers: paths.answers,
+		root: paths.home,
+		stateFile: paths.state,
+		github: {
+			env: { TEST_TOKEN: "github_pat_fake_test" },
+			run: () => {
+				probes++;
+				return "octocat";
+			},
+		},
+		providers: {
+			login: async (profile: { authFile: string }) => {
+				writeFileSync(
+					profile.authFile,
+					'{"openrouter":{"type":"api_key","key":"fake-test"}}',
+				);
+			},
+		},
+	};
+	await onboard(options);
+	const repeated = await onboard(options);
+	assert.equal(probes, 2);
+	assert.match(repeated.output, /GitHub: bound as octocat/);
+	assert.match(repeated.output, /Provider openrouter: ready/);
+	const failed = await onboard({
+		...options,
+		github: {
+			...options.github,
+			run: () => {
+				throw Error("failed");
+			},
+		},
+	});
+	assert.match(failed.output, /GitHub: failed\n  Fix:/);
+	assert.deepEqual(failed.state?.completedStages, []);
+});
+
+test("device cancellation and unset token variables always include a repair", async () => {
+	const paths = fixture();
+	for (const github of ["device", "token-env:MISSING_TEST_TOKEN"]) {
+		writeFileSync(paths.answers, `profile: work\ngithub: ${github}\n`);
+		const result = await onboard({
+			answers: paths.answers,
+			root: paths.home,
+			stateFile: paths.state,
+			github: {
+				env: {},
+				deviceRun: () => {
+					throw Error("device flow cancelled");
+				},
+			},
+		});
+		assert.match(result.output, /GitHub: failed\n  Fix:/);
+		assert.match(
+			result.output,
+			github === "device"
+				? /device flow cancelled/
+				: /environment variable is not set/,
+		);
+	}
 });
 
 test("demo never opens credential handoffs and uses temporary profile state", async () => {

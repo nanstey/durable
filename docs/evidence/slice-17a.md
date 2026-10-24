@@ -14,8 +14,92 @@
 
 ## Automated
 
+- `test/unit/onboarding-interactive.test.ts` exercises immediate GitHub/provider execution order, per-provider defaults, consecutive numbering, hidden paste, failure repairs, Anthropic refusal, cancellation, short rerun menus, replacement, credential deletion, and interactive dry-run isolation with injected fakes.
+- `python3 scripts/onboarding-pty.py` drives the actual Clack UI in a Python PTY (four runs, including the real `bin/durable onboard` CLI). It uses a temporary HOME, Pi directory, Durable state and fake `gh`/`pi` on PATH. The injected provider adapter invokes fake Pi and writes fake-only credentials; this checks wizard sequencing and hidden input, not live OAuth or provider network validity. No real GitHub or Pi credential store is accessed. Each child has a 30-second deadline and is killed on timeout.
 - `test/unit/onboarding.test.ts` covers non-interactive validation, credential rejection before writes, dry-run no-write output, provider probe repair, Anthropic refusal, every incomplete-step rerun, idempotent manifests, and fake-only demo isolation.
-- `pnpm check` passes. Biome reports pre-existing repository warnings, which are non-fatal.
+- `node --experimental-strip-types --test test/unit/onboarding*.test.ts`: 17 tests pass. Full-suite execution is left to both push and PR CI per contributor rules.
+- `pnpm check` and `pnpm hygiene` pass. Biome reports repository warnings, which are non-fatal.
+- Complexity measurement reduced `onboard` from CCN 19 to below the review threshold by separating input preparation. `setupProvider` remains review-band CCN 13 (28 lines): its guarded login/probe and sanitized failure handling stay together.
+- Source review traced hidden GitHub paste, device token read-back, provider exceptions, state, and summary output. Provider exceptions are never echoed because SDK errors may contain credentials. This review does not validate live provider OAuth or remote token validity.
+
+## PTY transcript
+
+Captured with `python3 scripts/onboarding-pty.py`. ANSI redraws and intermediate cursor frames are omitted by the harness; the following are submitted prompt headings and application output. The API-key input was masked; the harness asserts that neither hidden input nor fake stored credentials occur in captured output.
+
+```text
+### Fresh profile; immediate GitHub and three provider sign-ins
+◇  Start a profile (recommended: work)
+◇  GitHub authentication
+FAKE GitHub: open https://example.invalid/device code TEST-CODE
+GitHub: bound as octocat
+◇  Sign in to a model provider now?
+FAKE Pi: openai-codex sign-in completed (no network)
+Provider openai-codex: ready
+◇  Sign in to a model provider now?
+◇  Acknowledge Anthropic OAuth shaping and provider terms risk? (required)
+FAKE Pi: anthropic sign-in completed (no network)
+Provider anthropic: ready
+◇  Sign in to a model provider now?
+FAKE Pi: openrouter sign-in completed (no network)
+Provider openrouter: ready
+◇  Sign in to a model provider now?
+Profile work: created
+GitHub: bound as octocat
+Provider openai-codex: ready
+Provider anthropic: ready
+Provider openrouter: ready
+Profile ready. Organization and agent stages are not built yet.
+Manual setup (docs/operator.md): fill in profile-meta/<profile>.json git identity; write the agent definition and machine.yaml assignments.
+durable profile check work
+Next: durable doctor <agent>
+Then: loginctl enable-linger (Linux); durable enable <agent>
+
+### Rerun; finish without authentication questions
+◇  Start a profile (recommended: work)
+work: GitHub bound as octocat, providers ready: openai-codex, anthropic, openrouter
+◇  Profile already configured
+GitHub: bound as octocat
+Profile work: selected
+GitHub: bound as octocat
+Provider openai-codex: ready
+Provider anthropic: ready
+Provider openrouter: ready
+Profile ready. Organization and agent stages are not built yet.
+Manual setup (docs/operator.md): fill in profile-meta/<profile>.json git identity; write the agent definition and machine.yaml assignments.
+durable profile check work
+Next: durable doctor <agent>
+Then: loginctl enable-linger (Linux); durable enable <agent>
+
+### Rerun; re-verify with failed GitHub probe
+◇  Start a profile (recommended: work)
+work: GitHub bound as octocat, providers ready: openai-codex, anthropic, openrouter
+◇  Profile already configured
+GitHub: failed
+  Fix: GitHub probe failed; check the token has access, then run durable profile bind-github work
+Profile work: selected
+GitHub: failed
+  Fix: GitHub probe failed; check the token has access, then run durable profile bind-github work
+Provider openai-codex: ready
+Provider anthropic: ready
+Provider openrouter: ready
+Run durable onboard to finish GitHub authentication.
+
+### Actual durable onboard CLI; configured profile finish
+◇  Start a profile (recommended: work)
+work: GitHub bound as octocat, providers ready: openai-codex, anthropic, openrouter
+◇  Profile already configured
+GitHub: bound as octocat
+Profile work: selected
+GitHub: bound as octocat
+Provider openai-codex: ready
+Provider anthropic: ready
+Provider openrouter: ready
+Profile ready. Organization and agent stages are not built yet.
+Manual setup (docs/operator.md): fill in profile-meta/<profile>.json git identity; write the agent definition and machine.yaml assignments.
+durable profile check work
+Next: durable doctor <agent>
+Then: loginctl enable-linger (Linux); durable enable <agent>
+```
 
 ## Credential boundary
 

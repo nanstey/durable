@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { profileCommand } from "../cli/profile.ts";
+import { loadManifest } from "../config/manifest.ts";
 import { writeSecret } from "../identity/env.ts";
 import {
 	githubDeviceToken,
@@ -11,17 +12,19 @@ import { createModelsFor } from "../identity/modelAuth.ts";
 import { resolveProfile } from "../identity/profiles.ts";
 import { loginProvider, type ProviderLogin } from "./providers.ts";
 import type { OnboardingPlan } from "./plan.ts";
-import { loadState, saveState, type OnboardingState } from "./state.ts";
+import { saveState, type OnboardingState } from "./state.ts";
 
 export type ProviderStatus =
 	| { provider: string; state: "ready" }
 	| { provider: string; state: "failed"; fix: string };
-
-export type ApplyResult = {
-	state: OnboardingState;
-	pending: string[];
+export type GithubStatus = {
 	githubLogin?: string;
 	githubSkipped?: boolean;
+	githubFix?: string;
+};
+export type ApplyResult = GithubStatus & {
+	state: OnboardingState;
+	pending: string[];
 	providers: ProviderStatus[];
 	profileCreated: boolean;
 };
@@ -31,149 +34,154 @@ export type GithubSetup = {
 	env?: NodeJS.ProcessEnv;
 };
 export type ProviderSetup = { login?: ProviderLogin };
-
+export type ApplyOptions = {
+	root?: string;
+	stateFile?: string;
+	demo?: boolean;
+	github?: GithubSetup;
+	providers?: ProviderSetup;
+};
 const tokenPattern = /^(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+$/i;
 
-function githubRepair(profile: string, cause?: unknown): string {
+function githubRepair(profile: string, cause: unknown): string {
 	const message = cause instanceof Error ? cause.message : "";
 	if (/scope|resource not accessible|forbidden/i.test(message))
-		return `GitHub token lacks required scope; use a fine-grained selected-repository token with the least privileges needed (no Administration or workflow-write), then resume durable onboard`;
+		return "GitHub token lacks required scope; use a fine-grained selected-repository token with the least privileges needed (no Administration or workflow-write), then resume durable onboard";
 	if (/device flow/i.test(message))
 		return "GitHub device flow cancelled; retry browser sign-in, paste a token, or skip for now";
-	if (/gh is required/i.test(message)) return message;
+	if (/gh is required/i.test(message))
+		return "gh is required for browser sign-in; install GitHub CLI and retry";
+	if (/environment variable/i.test(message))
+		return "GitHub token environment variable is not set; set the named variable and retry";
 	return `GitHub probe failed; check the token has access, then run durable profile bind-github ${profile}`;
 }
 
-function tokenFromEnvironment(
-	choice: `token-env:${string}`,
-	env: NodeJS.ProcessEnv,
-): string {
-	const variable = choice.slice("token-env:".length);
-	const token = env[variable];
-	if (!token)
-		throw Error(`GitHub token environment variable ${variable} is not set`);
-	return token;
-}
-
-function bindGithub(
-	profile: string,
-	root: string | undefined,
-	run: GithubRunner | undefined,
-): string {
-	return profileCommand("bind-github", profile, { root, run });
-}
-
-/** Applies profile metadata and stores GitHub credentials only in profile secrets. */
-export async function applyPlan(
+export async function setupGithub(
 	plan: OnboardingPlan,
-	options: {
-		root?: string;
-		stateFile?: string;
-		demo?: boolean;
-		github?: GithubSetup;
-		providers?: ProviderSetup;
-	} = {},
-): Promise<ApplyResult> {
-	const state = loadState(options.stateFile);
-	if (
-		state?.completedStages.includes("profile") &&
-		state.planHash === plan.hash
-	)
-		return {
-			state,
-			pending: [],
-			providers: plan.providers.map((provider) => ({
-				provider,
-				state: "ready",
-			})),
-			profileCreated: false,
-		};
-	const profile = resolveProfile(plan.profile, options.root);
-	const existed = existsSync(profile.manifestFile);
-	if (!existed) profileCommand("init", plan.profile, { root: options.root });
-	if (plan.providers.length)
-		profileCommand("configure-providers", plan.profile, {
-			root: options.root,
-			providers: plan.providers,
-		});
-	if (options.demo) {
-		const complete: OnboardingState = {
-			version: 1,
-			planHash: plan.hash,
-			profile: plan.profile,
-			completedStages: ["profile"],
-		};
-		saveState(complete, options.stateFile);
-		return {
-			state: complete,
-			pending: [],
-			providers: [],
-			profileCreated: !existed,
-		};
-	}
-
-	const pending: string[] = [];
-	const providers: ProviderStatus[] = [];
-	let githubLogin: string | undefined;
-	let githubSkipped = false;
+	options: ApplyOptions,
+): Promise<GithubStatus> {
+	if (plan.github === "skip") return { githubSkipped: true };
 	try {
 		let token: string | undefined;
 		if (plan.github === "device")
 			token = githubDeviceToken(options.github?.deviceRun);
-		else if (plan.github.startsWith("token-env:"))
-			token = tokenFromEnvironment(
-				plan.github as `token-env:${string}`,
-				options.github?.env ?? process.env,
-			);
+		else if (plan.github.startsWith("token-env:")) {
+			token = (options.github?.env ?? process.env)[
+				plan.github.slice("token-env:".length)
+			];
+			if (!token) throw Error("token environment variable missing");
+		}
 		if (token) {
-			if (!tokenPattern.test(token))
-				throw Error(
-					"GitHub token is invalid; paste a fine-grained token or retry browser sign-in",
-				);
-			writeSecret(profile.secretsFile, "GH_TOKEN", token);
+			if (!tokenPattern.test(token)) throw Error("invalid GitHub token");
+			writeSecret(
+				resolveProfile(plan.profile, options.root).secretsFile,
+				"GH_TOKEN",
+				token,
+			);
 		}
-		if (plan.github === "skip") githubSkipped = true;
-		else {
-			githubLogin = bindGithub(plan.profile, options.root, options.github?.run);
-		}
+		return {
+			githubLogin: profileCommand("bind-github", plan.profile, {
+				root: options.root,
+				run: options.github?.run,
+			}).replace("GitHub login: ", ""),
+		};
 	} catch (error) {
-		pending.push(githubRepair(plan.profile, error));
+		return { githubFix: githubRepair(plan.profile, error) };
 	}
-	for (const provider of plan.providers) {
-		try {
-			await createModelsFor(profile, [provider]);
-		} catch {
-			try {
-				if (!options.providers?.login && !process.stdin.isTTY)
-					throw Error("interactive provider login requires a terminal");
-				mkdirSync(dirname(profile.authFile), { recursive: true, mode: 0o700 });
-				await (options.providers?.login ?? loginProvider)(profile, provider);
-				chmodSync(profile.authFile, 0o600);
-				await createModelsFor(profile, [provider]);
-				providers.push({ provider, state: "ready" });
-			} catch (error) {
-				const detail = error instanceof Error ? error.message : "login failed";
-				const fix = `Provider ${provider}: ${detail}; retry durable onboard`;
-				providers.push({ provider, state: "failed", fix });
-				pending.push(fix);
-			}
-			continue;
-		}
-		providers.push({ provider, state: "ready" });
+}
+
+export async function probeProvider(
+	profile: string,
+	provider: string,
+	root?: string,
+): Promise<boolean> {
+	try {
+		await createModelsFor(resolveProfile(profile, root), [provider], "plain", {
+			allowAnthropicOAuth: true,
+		});
+		return true;
+	} catch {
+		return false;
 	}
-	const next: OnboardingState = {
+}
+
+export async function setupProvider(
+	plan: OnboardingPlan,
+	provider: string,
+	options: ApplyOptions,
+	force = false,
+): Promise<ProviderStatus> {
+	if (!force && (await probeProvider(plan.profile, provider, options.root)))
+		return { provider, state: "ready" };
+	const profile = resolveProfile(plan.profile, options.root);
+	try {
+		if (provider === "anthropic" && !plan.anthropicOAuth)
+			throw Error("acknowledgement required");
+		if (!options.providers?.login && !process.stdin.isTTY)
+			throw Error("terminal required");
+		mkdirSync(dirname(profile.authFile), { recursive: true, mode: 0o700 });
+		await (options.providers?.login ?? loginProvider)(profile, provider);
+		chmodSync(profile.authFile, 0o600);
+		if (!(await probeProvider(plan.profile, provider, options.root)))
+			throw Error("probe failed");
+		return { provider, state: "ready" };
+	} catch {
+		// Provider/subprocess errors can contain credentials. Emit only our own repair.
+		const fix =
+			!options.providers?.login && !process.stdin.isTTY
+				? `Provider ${provider}: interactive provider login requires a terminal; retry durable onboard in a terminal`
+				: `Provider ${provider}: sign-in or credential probe failed; retry durable onboard and sign in again${provider === "anthropic" ? " with the OAuth risk acknowledgement" : ""}`;
+		return { provider, state: "failed", fix };
+	}
+}
+
+export function finishProfile(
+	plan: OnboardingPlan,
+	options: ApplyOptions,
+	github: GithubStatus,
+	providers: ProviderStatus[],
+	profileCreated: boolean,
+): ApplyResult {
+	const pending = [
+		...(github.githubFix ? [github.githubFix] : []),
+		...providers.flatMap((status) =>
+			status.state === "failed" ? [status.fix] : [],
+		),
+	];
+	const complete =
+		options.demo ||
+		(!pending.length &&
+			Boolean(github.githubLogin) &&
+			providers.some((status) => status.state === "ready"));
+	const state: OnboardingState = {
 		version: 1,
 		planHash: plan.hash,
 		profile: plan.profile,
-		completedStages: pending.length ? [] : ["profile"],
+		completedStages: complete ? ["profile"] : [],
 	};
-	saveState(next, options.stateFile);
-	return {
-		state: next,
-		pending,
-		githubLogin,
-		githubSkipped,
-		providers,
-		profileCreated: !existed,
-	};
+	saveState(state, options.stateFile);
+	return { ...github, state, pending, providers, profileCreated };
+}
+
+/** Apply and re-verify the actual credentials, never infer readiness from saved progress. */
+export async function applyPlan(
+	plan: OnboardingPlan,
+	options: ApplyOptions = {},
+): Promise<ApplyResult> {
+	const profile = resolveProfile(plan.profile, options.root);
+	const existed = existsSync(profile.manifestFile);
+	if (!existed) profileCommand("init", plan.profile, { root: options.root });
+	if (plan.providers.length) {
+		const existing = loadManifest(profile.manifestFile).providers;
+		profileCommand("configure-providers", plan.profile, {
+			root: options.root,
+			providers: [...existing, ...plan.providers],
+		});
+	}
+	if (options.demo) return finishProfile(plan, options, {}, [], !existed);
+	const github = await setupGithub(plan, options);
+	const providers: ProviderStatus[] = [];
+	for (const provider of plan.providers)
+		providers.push(await setupProvider(plan, provider, options));
+	return finishProfile(plan, options, github, providers, !existed);
 }

@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { durableHome } from "../config/paths.ts";
 
@@ -11,20 +11,6 @@ export type OnboardingState = {
 
 export const onboardingStatePath = () =>
 	join(durableHome(), "onboarding", "state.json");
-
-export function loadState(
-	path = onboardingStatePath(),
-): OnboardingState | undefined {
-	try {
-		const value = JSON.parse(readFileSync(path, "utf8")) as OnboardingState;
-		if (value.version !== 1 || !Array.isArray(value.completedStages))
-			throw Error("invalid onboarding state");
-		return value;
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-		throw error;
-	}
-}
 
 export function saveState(
 	state: OnboardingState,
