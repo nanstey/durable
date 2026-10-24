@@ -20,6 +20,7 @@ export type AutoMergePolicy = {
 	requireCrossFamilyReview?: boolean;
 	requireHumanApproval?: boolean;
 	coolingOffMinutes?: number;
+	dailyCap?: number;
 };
 export type MergeDefinition = {
 	mode?: MergeMode;
@@ -70,10 +71,16 @@ export function validateAutoMergePolicy(value: unknown): AutoMergePolicy {
 		"maxChangedLines",
 		"maxFiles",
 		"coolingOffMinutes",
+		"dailyCap",
 	] as const) {
 		const limit = policy[key];
-		if (limit !== undefined && (!Number.isFinite(limit) || limit < 0))
-			throw Error(`policy.${key} must be a non-negative number`);
+		if (
+			limit !== undefined &&
+			(!Number.isFinite(limit) || limit < (key === "dailyCap" ? 1 : 0))
+		)
+			throw Error(
+				`policy.${key} must be a ${key === "dailyCap" ? "positive" : "non-negative"} number`,
+			);
 	}
 	return policy;
 }

@@ -37,6 +37,7 @@ const merge = {
 			requiredChecks: { anyOf: [strings, { const: "github-required" }] },
 			requireCrossFamilyReview: { type: "boolean" },
 			coolingOffMinutes: { type: "integer", minimum: 0 },
+			dailyCap: { type: "integer", minimum: 1 },
 			requireHumanApproval: { type: "boolean" },
 		}),
 	}),

@@ -3,7 +3,7 @@ import test from "node:test";
 import { decide } from "../../src/gate/decide.ts";
 import { collectFacts } from "../../src/gate/facts.ts";
 import { isHardPath } from "../../src/gate/hardPaths.ts";
-import { noPolicy } from "../../src/gate/policy.ts";
+import { noPolicy, validateAutoMergePolicy } from "../../src/gate/policy.ts";
 import { effectivePolicy } from "../../src/gate/tighten.ts";
 
 const facts = {
@@ -66,6 +66,15 @@ test("effective policy is tighten-only and unverified policies cannot enable aut
 		effectivePolicy({ state: "none", policy: { enabled: true } }, {}).enabled,
 		false,
 	);
+});
+
+test("daily merge cap is a validated, tighten-only policy limit", () => {
+	const result = effectivePolicy(
+		{ state: "verified", policy: { enabled: true, dailyCap: 3 } },
+		{ tighten: { dailyCap: 5 } },
+	);
+	assert.equal(result.dailyCap, 3);
+	assert.throws(() => validateAutoMergePolicy({ enabled: true, dailyCap: 0 }));
 });
 
 test("decide truth table", () => {

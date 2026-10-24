@@ -32,6 +32,8 @@ type Key = {
 	publicKey: string;
 	counter: number;
 	transports?: string[];
+	deviceType?: string;
+	backedUp?: boolean;
 };
 type Store = {
 	keys: Key[];
@@ -83,7 +85,15 @@ export class ApprovalWebAuthn {
 		return code;
 	}
 	list() {
-		return this.load().keys.map(({ id, counter }) => ({ id, counter }));
+		return this.load().keys.map(
+			({ id, counter, transports, deviceType, backedUp }) => ({
+				id,
+				counter,
+				transports,
+				deviceType,
+				backedUp,
+			}),
+		);
 	}
 	revoke(id: string) {
 		const state = this.load();
@@ -304,6 +314,8 @@ export class ApprovalWebAuthn {
 			publicKey: Buffer.from(credential.publicKey).toString("base64url"),
 			counter: credential.counter,
 			transports: response.response.transports,
+			deviceType: verified.registrationInfo.credentialDeviceType,
+			backedUp: verified.registrationInfo.credentialBackedUp,
 		});
 		if (!challenge.secondEnrollment) delete state.enrollment;
 		this.save(state);

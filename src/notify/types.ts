@@ -1,5 +1,6 @@
 export const eventNames = [
 	"approval-needed",
+	"passkey-approved",
 	"escalation",
 	"budget-stop",
 	"identity-failure",

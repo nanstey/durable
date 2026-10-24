@@ -271,6 +271,14 @@ export async function run(
 				machine.platform?.os === "android"
 					? undefined
 					: (item, code) => notifier.approvalNonce(item, code),
+			notifyPasskey: async (action, item) => {
+				await notifier.notify({
+					agent,
+					event: "passkey-approved",
+					target: item,
+					title: `Passkey ${action}`,
+				});
+			},
 			bind: definition.network?.bind ?? machine.network?.bind,
 			tailnetAddress: machine.network?.tailnetAddress,
 			peerCheckMode: machine.network?.peerCheck,

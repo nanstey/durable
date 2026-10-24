@@ -24,7 +24,7 @@ export function effectivePolicy(
 	const tighten = definition.tighten ?? {};
 	const warnings: string[] = [];
 	const minimum = (
-		key: "maxChangedLines" | "maxFiles" | "coolingOffMinutes",
+		key: "maxChangedLines" | "maxFiles" | "coolingOffMinutes" | "dailyCap",
 	) => {
 		const policyValue = base[key];
 		const definitionValue = tighten[key];
@@ -81,6 +81,7 @@ export function effectivePolicy(
 		maxChangedLines: minimum("maxChangedLines"),
 		maxFiles: minimum("maxFiles"),
 		coolingOffMinutes: minimum("coolingOffMinutes"),
+		dailyCap: minimum("dailyCap"),
 		maxRisk,
 		requireCrossFamilyReview:
 			base.requireCrossFamilyReview === true ||
