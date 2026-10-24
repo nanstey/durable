@@ -24,6 +24,7 @@
 	},
 	"scripts": {
 		"schema:generate": "node --experimental-strip-types scripts/generate-schemas.ts",
+		"demo": "node --experimental-strip-types bin/durable demo",
 		"test": "node --experimental-strip-types --test --test-timeout=90000 test/unit/*.test.ts test/contract/*.test.ts",
 		"lint": "biome lint .",
 		"format:check": "biome format .",

@@ -3,11 +3,13 @@
 Durable, proactive agents that find project work and push it to human review.
 Built on [`@earendil-works/pi-durable`](https://www.npmjs.com/package/@earendil-works/pi-durable).
 
-Status: profile-isolated steward, loopback API v1 and crash recovery with executed
-Linux containment tests. Autonomous dispatch and merge-policy enforcement are
-not implemented. A real-profile operator inspection remains a deployment gate.
+Status: shipped slices include profile-isolated steward, loopback API v1, crash
+recovery, queue/work orchestration, review and approval gates, organizations,
+connectors, metrics, and the loopback console. Pending operator work: configure
+real profiles, verify machine identity, and make the final human merge decision;
+Durable does not autonomously bypass GitHub policy.
 
-Start with [installation](docs/install.md), [profiles and doctor](docs/operator.md),
+Start with the credential-free [demo sandbox](docs/demo.md), [installation](docs/install.md), [profiles and doctor](docs/operator.md),
 and the [skills contract](docs/skills-contract.md). `durable profile` manages
 non-secret manifests; `durable doctor <id>` checks machine assignment and identity
 without starting a daemon. See [daemon operation](docs/daemon.md),

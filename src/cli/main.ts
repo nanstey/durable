@@ -7,6 +7,7 @@ import {
 	type Scope,
 } from "../api/tokens.ts";
 import { DurableClient } from "../client/client.ts";
+import { runDemo } from "../demo.ts";
 import { ApprovalWebAuthn } from "../approval/webauthn.ts";
 import { loadAgent, loadMachine } from "../config/load.ts";
 import {
@@ -54,7 +55,11 @@ function selected(value?: string) {
 }
 const subCommands: SubCommandsDef = {};
 const remoteArgs = {
-	agent: { type: "positional", description: "Agent assigned to this machine" },
+	agent: {
+		type: "string",
+		default: "",
+		description: "Agent assigned to this machine",
+	},
 	json: { type: "boolean", default: false },
 } as const;
 function clientFor(agent?: string) {
@@ -158,6 +163,15 @@ subCommands.gate = defineCommand({
 });
 subCommands.inbox = defineCommand({
 	meta: { name: "inbox" },
+	args: { ...remoteArgs, all: { type: "boolean", default: false } },
+	async run({ args }) {
+		print(
+			await clientFor(args.agent).request(
+				`/v1/inbox${args.all ? "?all=true" : ""}`,
+			),
+			args.json,
+		);
+	},
 	subCommands: {
 		ack: defineCommand({
 			meta: { name: "ack" },
@@ -314,7 +328,7 @@ subCommands.connectors = defineCommand({
 		list: defineCommand({
 			meta: { name: "list" },
 			args: {
-				agent: { type: "positional" },
+				agent: { type: "string", default: "" },
 				json: { type: "boolean", default: false },
 			},
 			run({ args }) {
@@ -333,7 +347,7 @@ subCommands.connectors = defineCommand({
 		show: defineCommand({
 			meta: { name: "show" },
 			args: {
-				agent: { type: "positional" },
+				agent: { type: "string", default: "" },
 				connector: { type: "positional", required: true },
 				json: { type: "boolean", default: false },
 			},
@@ -624,6 +638,16 @@ for (const action of ["enable", "disable", "start", "stop", "logs"] as const) {
 		},
 	});
 }
+subCommands.demo = defineCommand({
+	meta: { name: "demo" },
+	async run() {
+		const demo = await runDemo();
+		const stop = () => void demo.close().then(() => process.exit());
+		process.once("SIGINT", stop);
+		process.once("SIGTERM", stop);
+		await new Promise<void>(() => {});
+	},
+});
 subCommands.run = defineCommand({
 	meta: { name: "run" },
 	args: { agent: { type: "positional", required: true } },
