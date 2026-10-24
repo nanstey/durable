@@ -53,6 +53,7 @@ export type TaskDependencies = {
 	piDir?: string;
 	skillsRoot?: string;
 	checkout?: string;
+	branch?: string;
 	check?: () => Promise<void>;
 	persist?: (task: WorkItemTask) => Promise<void>;
 	now?: () => number;
@@ -137,7 +138,7 @@ async function dispatchItem(
 			workspace: {
 				id: `durable-${deps.agent}-${item.id}`,
 				repo: deps.checkout ?? item.repo,
-				branch: `durable/${deps.agent}/${item.id}`,
+				branch: deps.branch ?? `durable/${deps.agent}/${item.id}`,
 			},
 			model: deps.model,
 			limits: deps.definition.limits ?? {},

@@ -16,7 +16,7 @@
 | H2 credential serialization | Fixed | Console source assertion in `test/unit/console.test.ts`. |
 | H3 second-key authorization | Fixed | Existing key receives assertion ceremony before registration (`test/unit/approval.test.ts`). |
 | H4 synced counters | Fixed | Relies on SimpleWebAuthn clone detection; no stricter local counter comparison. |
-| H5 missing coverage | Partially fixed | Challenge-byte, enrollment, cap, nonce binding, and proxy tests exist; full hardware assertion fixtures remain an operator/CI follow-up. |
+| H5 missing coverage | Fixed | `test/support/authenticator.ts` generates real ES256 credentials, COSE keys, authenticator data and signatures. `test/unit/webauthn-fixtures.test.ts` exercises registration/code expiry and single use, second-key proof, revoke, valid and zero-counter assertions, wrong origin/RP ID, replayed counter, reused/expired challenge, stale SHA/policy fingerprint, wrong item, revoked key, release cross-item/action replay and older hold epoch. `test/contract/webauthn.test.ts` covers the unauthenticated second-key route, all bearer scopes/header forms on approval routes, successful enrollment/resume audits and payload redaction. Live device drills remain separate. |
 | M6 policy fingerprint | Fixed | `policyVerification()` supplies fingerprint and change data. |
 | M7/M15 storage races | Fixed for nonce store | `ApprovalNonces` uses `proper-lockfile` around issue/consume. |
 | M8 challenge abuse/enumeration | Fixed | Per-peer route limit, pending-challenge cap, and discoverable credentials avoid key-ID disclosure. |

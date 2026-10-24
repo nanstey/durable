@@ -140,7 +140,7 @@ export class GitOperations {
 					attemptId: job.id,
 					op,
 					repo,
-					branch: `durable/${job.agent}/${job.item}`,
+					branch: job.workspace.branch,
 					base: job.baseRef ?? "main",
 					commitSha,
 					expectedRemoteHead: await this.options.github.remoteHead(
@@ -403,9 +403,14 @@ export class HardenedWorkerGit implements WorkerGit {
 	}
 	async push(job: JobSpec, intent: OperationIntent) {
 		await this.prepare(job);
+		const base = `durable/${job.agent}/${job.item}`;
+		const claimBranch =
+			intent.branch.startsWith(`${base}-claim-`) &&
+			/^\d+$/.test(intent.branch.slice(`${base}-claim-`.length));
 		if (
 			!/^[0-9a-f]{40,64}$/.test(intent.commitSha) ||
-			intent.branch !== `durable/${job.agent}/${job.item}`
+			intent.branch !== job.workspace.branch ||
+			(intent.branch !== base && !claimBranch)
 		)
 			throw Error("invalid push intent");
 		// Token is supplied to this invocation only; never in config or argv.

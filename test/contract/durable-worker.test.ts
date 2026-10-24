@@ -146,6 +146,10 @@ test("selected native kind: claim -> fake workspace -> faux model fixed tools ->
 			viewable: "durable-attach",
 		});
 		await eventually(async () => (await rig.items())[0].prs.length === 1);
+		assert.equal(rig.deps.github.pulls[0].branch, handle.job.workspace.branch);
+		assert.ok(
+			handle.job.workspace.branch.endsWith(`-claim-${item.claim?.commentId}`),
+		);
 		const before = (await rig.harness.tree()).filter(
 			(node) => node.kind === "worker-durable",
 		);

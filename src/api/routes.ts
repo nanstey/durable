@@ -660,7 +660,8 @@ export function createApi(opts: {
 				action,
 				item: target.item,
 			});
-			throw error;
+			if (error instanceof ApiError) throw error;
+			throw new ApiError("forbidden", "passkey response refused", 403);
 		}
 		if (action === "approve")
 			await harness.workRuntime?.approveGate(

@@ -16,6 +16,7 @@ export function workerToolEnv(
 	const entry = fileURLToPath(
 		new URL("../../bin/durable-worker-tool.ts", import.meta.url),
 	);
+	let realGh: string | undefined;
 	for (const tool of ["gh", "git"]) {
 		const executable = (env.PATH ?? "")
 			.split(":")
@@ -30,6 +31,7 @@ export function workerToolEnv(
 				}
 			});
 		if (!executable) throw Error(`worker tool missing: ${tool}`);
+		if (tool === "gh") realGh = executable;
 		const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 		writeFileSync(
 			join(directory, tool),
@@ -43,6 +45,7 @@ export function workerToolEnv(
 		DURABLE_AGENT: agent,
 		DURABLE_PROFILE: profile,
 		DURABLE_LOGIN: login,
+		DURABLE_REAL_GH: realGh,
 		DURABLE_HOME: durableHome(),
 		DURABLE_FENCE_FILE: join(agentDir(agent), "procs.json"),
 	};

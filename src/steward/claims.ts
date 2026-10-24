@@ -9,6 +9,8 @@ export type ClaimComment = {
 
 /** Injectable GitHub surface. Production code can adapt gh or Octokit; tests never write GitHub. */
 export interface ClaimGithub {
+	/** Fresh GitHub HTTP Date, never the workstation wall clock. */
+	serverNow?(repo: string): Promise<number>;
 	addLabel(repo: string, issue: number, label: string): Promise<void>;
 	removeLabel(repo: string, issue: number, label: string): Promise<void>;
 	createComment(
@@ -90,7 +92,6 @@ function policyWithDefaults(
 	};
 }
 
-// fallow-ignore-next-line unused-export
 export function claimMarker(
 	agent: string,
 	lease: string,
@@ -98,7 +99,6 @@ export function claimMarker(
 ): string {
 	return `<!-- durable-claim agent=${agent} lease=${lease}${owner ? ` owner=${owner}` : ""} -->`;
 }
-// fallow-ignore-next-line unused-export
 export function parseClaim(
 	body: string,
 ): { agent: string; lease: string; owner?: string } | undefined {
@@ -112,7 +112,7 @@ export function parseClaim(
 		: undefined;
 }
 
-/** Re-read GitHub before every action; grace absorbs bounded clock skew and replication delay. */
+/** Re-read GitHub before every action; production expiry uses GitHub's clock. */
 export async function readClaim(
 	github: ClaimGithub,
 	target: ClaimTarget,
@@ -120,6 +120,7 @@ export async function readClaim(
 	policy?: Partial<ClaimLeasePolicy>,
 ): Promise<ClaimResult> {
 	const options = policyWithDefaults(policy);
+	now = (await github.serverNow?.(target.repo)) ?? now;
 	const winner = (await github.listComments(target.repo, target.issue))
 		.map((comment) => ({ comment, marker: parseClaim(comment.body) }))
 		.filter(
@@ -152,7 +153,12 @@ export async function claim(
 	policy?: Partial<ClaimLeasePolicy>,
 ): Promise<ClaimResult> {
 	const options = policyWithDefaults(policy);
-	const requestedLease = Date.parse(target.lease);
+	const serverNow = await github.serverNow?.(target.repo);
+	now = serverNow ?? now;
+	const requestedLease =
+		serverNow === undefined
+			? Date.parse(target.lease)
+			: now + options.durationMs;
 	const lease = new Date(
 		Math.min(
 			Number.isFinite(requestedLease)

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { execa } from "execa";
 import { workerFenced } from "../pi-extension/durable-worker-guard.ts";
 import { blockedWorkerCommand } from "../src/guard/commands.ts";
+import { checkWorkerClaim } from "../src/identity/claimFence.ts";
 import { audit, setAuditIdentity } from "../src/steward/audit.ts";
 import { prFooter, prMarker } from "../src/steward/github.ts";
 import { disabled } from "../src/steward/killswitch.ts";
@@ -44,7 +45,7 @@ if (tool === "git" && operation === "commit") {
 	args.push("--trailer", `Durable-Agent: ${agent}`);
 }
 if (tool === "git" && operation === "push") {
-	const branch = `durable/${agent}/${item}`;
+	const branch = process.env.DURABLE_BRANCH ?? `durable/${agent}/${item}`;
 	const allowedFlags = new Set([
 		"-u",
 		"--set-upstream",
@@ -85,7 +86,7 @@ if (tool === "gh" && args[0] === "pr" && args[1] === "create") {
 	args.push(
 		"--draft",
 		"--head",
-		`durable/${agent}/${item}`,
+		process.env.DURABLE_BRANCH ?? `durable/${agent}/${item}`,
 		"--label",
 		`durable/agent:${agent}`,
 		"--body",
@@ -109,6 +110,7 @@ const read =
 						"--input",
 					].includes(arg),
 				));
+if (!read) await checkWorkerClaim(process.env);
 if (!read)
 	audit(agent, {
 		event: "github-write-intent",
