@@ -53,7 +53,7 @@ local desktop tooling is recorded in the audit log and skipped.
 
 ## Onboard a profile
 
-`durable onboard` starts the resumable profile stage. It creates or selects a named profile manifest only; organization and agent stages are reserved for later releases.
+`durable onboard` starts the resumable profile stage. It creates or selects a named profile manifest only.
 
 ```sh
 durable onboard                         # accessible numbered choice; `work` is recommended
@@ -63,7 +63,7 @@ durable onboard --dry-run               # show manifest and private-state change
 durable onboard --demo                  # temporary fake-only profile; no credential handoff
 ```
 
-Before applying, onboarding reports Node, Git, `gh`, systemd-user, and Pi readiness. Missing checks do not cause it to read credentials or guess an identity; complete the indicated repair and rerun. Android/Termux does not require systemd-user and uses the same pure-JavaScript answers and dry-run path.
+The final summary is a compact checklist. It prints a prerequisite repair only when a prerequisite fails; complete that repair and rerun. Android/Termux does not require systemd-user and uses the same pure-JavaScript answers and dry-run path.
 
 The answers file is plain YAML or JSON and accepts only non-secret choices:
 
@@ -79,7 +79,7 @@ Unknown keys and credential-like values are rejected before a file is written. T
 
 GitHub setup is part of onboarding. It lists existing profiles first (the same source as `durable profile list`), recommends the first or `work`, and refuses a new name that collides. Choose browser sign-in, hidden token paste, or skip. Browser sign-in uses an isolated temporary `GH_CONFIG_DIR`, then removes it; it requests GitHub's `repo` OAuth scope, which is broad access to private repositories. Prefer a fine-grained selected-repository token with only the repository permissions needed; do not grant Administration or workflow-write. The wizard writes `GH_TOKEN` only to `secrets/<profile>.env` with mode 0600, then verifies it and reports `GitHub: bound as <login>`. It never places the credential in output, logs, answers, state, or dry-run diffs. Noninteractive files may use `github: device`, `skip`, `bind`, or `token-env:VARIABLE`; literal tokens are rejected.
 
-For each model provider, select the named Pi profile and run `/login`; onboarding records no credential. Anthropic subscription OAuth is offered only after the explicit acknowledgement above because authentication shaping and provider terms may change. If a handoff is incomplete, onboarding reports it as **pending operator** and gives the exact resume command.
+For each selected model provider, onboarding runs Pi's supported login flow immediately and writes credentials only to the named profile's Pi auth store (`auth-profiles/<name>.json`, mode 0600). OAuth URLs and device codes are shown in the terminal; API keys use a hidden prompt. The wizard then performs a bounded auth probe and reports `Provider <name>: ready` or a repair. It never writes provider credentials to answers, state, diffs, logs, or output. Anthropic subscription OAuth remains behind the explicit acknowledgement because authentication shaping and provider terms may change.
 
 ## Configure a profile
 

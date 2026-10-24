@@ -43,8 +43,8 @@ test("onboard resumes a pending profile without duplicate manifests or secret st
 		stateFile: paths.state,
 	});
 	assert.equal(readFileSync(manifest, "utf8"), before);
-	assert.match(first.output, /pending operator/);
-	assert.match(second.output, /pending operator/);
+	assert.match(first.output, /Provider openrouter: failed/);
+	assert.match(second.output, /Provider openrouter: failed/);
 	const state = readFileSync(paths.state, "utf8");
 	assert.doesNotMatch(state, /token|secret|credential|openrouter/i);
 });
@@ -108,7 +108,7 @@ test("Anthropic OAuth requires an explicit acknowledgement and failed probes giv
 	});
 	assert.match(
 		result.output,
-		/Provider openrouter: select profile work in Pi and run \/login/,
+		/Provider openrouter: interactive provider login requires a terminal/,
 	);
 	assert.doesNotMatch(result.output, /ghp_|sk-|bearer /i);
 });
@@ -133,8 +133,8 @@ test("every interrupted profile step resumes without duplicate manifests", async
 			root: paths.home,
 			stateFile: paths.state,
 		});
-		assert.match(first.output, /pending operator/);
-		assert.match(second.output, /pending operator/);
+		assert.match(first.output, /Next: durable onboard/);
+		assert.match(second.output, /Next: durable onboard/);
 	}
 	for (const profile of ["profile-only", "github-pending", "provider-pending"])
 		assert.ok(existsSync(join(paths.home, "profile-meta", `${profile}.json`)));
@@ -197,6 +197,39 @@ test("token-env never accepts literals and skip does not create a secret", async
 	});
 	assert.match(result.output, /bound as octocat/);
 	assert.doesNotMatch(result.output, /ghp_fake_token/);
+});
+
+test("provider login is injected, probed, and never leaks credentials", async () => {
+	const paths = fixture();
+	writeFileSync(
+		paths.answers,
+		"profile: work\ngithub: skip\nproviders: [openrouter]\n",
+	);
+	let loginCalls = 0;
+	const result = await onboard({
+		nonInteractive: true,
+		answers: paths.answers,
+		root: paths.home,
+		stateFile: paths.state,
+		providers: {
+			login: async (profile, provider) => {
+				loginCalls++;
+				assert.equal(provider, "openrouter");
+				writeFileSync(
+					profile.authFile,
+					'{"openrouter":{"type":"api_key","key":"sk_fake_provider_secret_123456"}}',
+					{ mode: 0o600 },
+				);
+			},
+		},
+	});
+	assert.equal(loginCalls, 1);
+	assert.match(result.output, /Provider openrouter: ready/);
+	assert.doesNotMatch(result.output, /sk_fake_provider_secret/);
+	assert.doesNotMatch(
+		readFileSync(paths.state, "utf8"),
+		/sk_fake_provider_secret/,
+	);
 });
 
 test("demo never opens credential handoffs and uses temporary profile state", async () => {

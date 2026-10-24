@@ -50,11 +50,3 @@ export function checkPrerequisites(piRoot?: string): Prerequisite[] {
 		},
 	];
 }
-
-export function formatPrerequisites(checks: Prerequisite[]): string {
-	return checks
-		.map(
-			(check) => `${check.ok ? "PASS" : "WARN"} ${check.name}: ${check.detail}`,
-		)
-		.join("\n");
-}

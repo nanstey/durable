@@ -1,4 +1,1 @@
-export {
-	checkPrerequisites,
-	formatPrerequisites,
-} from "../platform/onboardingPrerequisites.ts";
+export { checkPrerequisites } from "../platform/onboardingPrerequisites.ts";
