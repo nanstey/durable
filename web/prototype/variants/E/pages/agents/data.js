@@ -1,0 +1,8 @@
+export const agents=[
+  {id:'atlas',org:'acme-platform',device:'atlas-mac',status:'online',model:'Claude Sonnet',tools:'GitHub · shell · Linear',cwd:'~/src/durable',budget:'$12 / day',spend:'$4.82',queue:3,capabilities:['Code','Review','Triage'],activity:[12,18,14,24,19,30,27],audit:'Policy reviewed 12m ago'},
+  {id:'beacon',org:'acme-platform',device:'build-east',status:'online',model:'GPT-4.1',tools:'GitHub · shell',cwd:'~/src/payments',budget:'$18 / day',spend:'$7.10',queue:2,capabilities:['Deploy','Code'],activity:[8,11,17,15,24,20,28],audit:'Run checkpoint 4m ago'},
+  {id:'moss',org:'side-projects',device:'mossbook',status:'paused',model:'Claude Sonnet',tools:'GitHub · browser',cwd:'~/src/garden',budget:'$6 / day',spend:'$1.64',queue:0,capabilities:['Code','Research'],activity:[15,17,14,4,2,0,0],audit:'Paused by N. Rivera'},
+  {id:'forge',org:'oss-maintenance',device:'forge-linux',status:'offline',reason:'Device unreachable · last heartbeat 47m ago',model:'Claude Haiku',tools:'GitHub · shell',cwd:'~/src/oss',budget:'$8 / day',spend:'$2.21',queue:4,capabilities:['Triage','Review'],activity:[28,24,21,18,9,1,0],audit:'Daemon disconnected 47m ago'}
+];
+export const conversations={atlas:['Release train checklist','Add jittered retry policy','Audit console keyboard paths'],beacon:['Reconcile settlement ledger','Repair webhook signature fixture'],moss:['Make sync conflicts explainable'],forge:['Fix parser diagnostic spans','Triage contributor reports','Untangle dependency bump','Review API examples']};
+export const audits=['Policy reviewed — protected branch approval retained','Tool scope changed — browser access granted','Budget threshold acknowledged — 60% remaining'];

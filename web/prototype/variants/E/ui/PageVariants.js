@@ -1,0 +1,3 @@
+import { html } from "../../../html.js";
+import { useState } from "/prototype/vendor/preact-hooks.js";
+export default function PageVariants({variants}) { const initial=new URLSearchParams(location.search).get('pv')||variants[0]?.key; const [key,setKey]=useState(initial); const active=variants.find(v=>v.key===key)||variants[0]; const choose=k=>{setKey(k);const u=new URL(location);u.searchParams.set('pv',k);history.replaceState({},'',u)}; return html`<div class="e-page-variants"><div class="e-segmented">${variants.map(v=>html`<button class=${v.key===active.key?'on':''} onClick=${()=>choose(v.key)}>${v.name}</button>`)}</div>${active.render()}</div>`; }

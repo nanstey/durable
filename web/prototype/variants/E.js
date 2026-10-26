@@ -1,0 +1,7 @@
+import { html } from "../html.js";
+import { useEffect,useState } from "/prototype/vendor/preact-hooks.js";
+import Shell from "./E/shell/index.js";
+import Conversations from "./E/conversations/index.js";
+import { conversations,data } from "./E/data.js";
+import { pages } from "./E/pages/registry.js";
+export default function ADE(){const[page,setPage]=useState('conversations'),[theme,setTheme]=useState('dark'),[Page,setPageComponent]=useState(null);const nav=id=>setPage(id);useEffect(()=>{if(page==='conversations'){setPageComponent(null);return}pages[page]().then(m=>setPageComponent(()=>m.default))},[page]);useEffect(()=>{const keys=e=>{if(e.target.closest('input,textarea'))return;if(e.key==='/'){e.preventDefault();document.querySelector('.e-search')?.focus()}if(e.key==='Escape'){document.querySelector('.e-search')?.blur();window.dispatchEvent(new Event('e-close-popovers'))}if(e.key==='j'||e.key==='k'){const rows=[...document.querySelectorAll('.e-row')];const i=rows.indexOf(document.activeElement);rows[Math.max(0,Math.min(rows.length-1,i+(e.key==='j'?1:-1)))]?.focus()}if(e.key==='Enter'&&document.activeElement?.classList.contains('e-row'))document.activeElement.click()};addEventListener('keydown',keys);return()=>removeEventListener('keydown',keys)},[]);const props={nav,conversations,selectConversation:()=>{},data};return html`<${Shell} page=${page} setPage=${setPage} theme=${theme} setTheme=${setTheme}>${page==='conversations'?html`<${Conversations} ...${props}/>`:Page&&html`<${Page} ...${props}/>`}</${Shell}>`;}
