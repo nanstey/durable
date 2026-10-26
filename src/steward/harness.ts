@@ -154,6 +154,7 @@ export type HarnessConfig = {
 		queue?: Queue;
 		work?: WorkState;
 		inbox?: InboxEvent[];
+		conversations?: Array<{ kind: NodeKind; item?: string }>;
 	};
 };
 
@@ -1117,6 +1118,21 @@ export async function openHarness(options: HarnessConfig) {
 				Object.assign(await tx.doc(WorkDoc), options.initial.work);
 			if (options.initial?.inbox)
 				(await tx.doc(InboxDocument)).events.push(...options.initial.inbox);
+			for (const seed of options.initial?.conversations ?? []) {
+				const anchor = await tx.createTask(Anchor, null, {
+					conversationId: root.id,
+					ownership: { kind: "conversation" },
+					background: true,
+				});
+				const conversation = await tx.createConversation({
+					ownership: { kind: "task", taskId: anchor },
+				});
+				const metadata = (await tx.doc(StateDoc)).conversations[
+					String(conversation.id)
+				];
+				metadata.kind = seed.kind;
+				metadata.item = seed.item;
+			}
 		}, context);
 	return {
 		native: harness,

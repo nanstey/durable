@@ -14,7 +14,7 @@ test("demo boots a seeded agent visible through durable status", async () => {
 			agent: string;
 			profile: string;
 		}>("/v1/device");
-		assert.equal(status.agent, "demo");
+		assert.equal(status.agent, demo.agent);
 		assert.equal(status.profile, "demo");
 	} finally {
 		await demo.close();
